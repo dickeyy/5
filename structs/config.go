@@ -1,9 +1,16 @@
 package structs
 
 type Config struct {
-	API APIConfig
+	Environment string
+	API         APIConfig
+	Discord     DiscordConfig
 }
 
 type APIConfig struct {
 	Port string
+}
+
+type DiscordConfig struct {
+	Token string
+	AppID string
 }

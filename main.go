@@ -5,6 +5,8 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/quackdiscord/bot/api"
+	"github.com/quackdiscord/bot/discord"
+	"github.com/quackdiscord/bot/lib"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -15,8 +17,11 @@ func init() {
 	if err := godotenv.Load(".env"); err != nil {
 		log.Warn().Msg("Error loading .env file")
 	}
+
+	lib.LoadConfig()
 }
 
 func main() {
+	discord.Connect()
 	api.Start()
 }
