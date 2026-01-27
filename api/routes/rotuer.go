@@ -1,11 +1,7 @@
 package routes
 
-import "github.com/go-chi/chi/v5"
+import "github.com/gin-gonic/gin"
 
-func PublicRouter() chi.Router {
-	r := chi.NewRouter()
-
-	r.Get("/status", status)
-
-	return r
+func SetupRoutes(r *gin.Engine) {
+	r.GET("/status", status)
 }

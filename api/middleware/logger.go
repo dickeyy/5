@@ -1,36 +1,32 @@
 package middleware
 
 import (
-	"net/http"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
 )
 
-type responseWriter struct {
-	http.ResponseWriter
-	status int
-}
+func Logger(c *gin.Context) {
+	start := time.Now()
+	path := c.Request.URL.Path
+	raw := c.Request.URL.RawQuery
 
-func (rw *responseWriter) WriteHeader(code int) {
-	rw.status = code
-	rw.ResponseWriter.WriteHeader(code)
-}
+	c.Next()
 
-func Logger(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
+	if raw != "" {
+		path = path + "?" + raw
+	}
 
-		wrapped := &responseWriter{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(wrapped, r)
+	event := log.Info()
+	if len(c.Errors) > 0 {
+		event = log.Error().Err(c.Errors.Last())
+	}
 
-		duration := time.Since(start)
-
-		log.Info().
-			Str("method", r.Method).
-			Str("path", r.URL.Path).
-			Int("status", wrapped.status).
-			Dur("duration", duration).
-			Msg("Request completed")
-	})
+	event.
+		Str("method", c.Request.Method).
+		Str("path", path).
+		Int("status", c.Writer.Status()).
+		Dur("latency", time.Since(start)).
+		Msg("Request completed")
 }

@@ -3,39 +3,31 @@ package routes
 import (
 	"net/http"
 
-	"github.com/quackdiscord/bot/api/respond"
+	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/discord"
 )
 
-type statusResponse struct {
-	Discord statusResponseDiscord `json:"discord"`
-}
-
-type statusResponseDiscord struct {
-	Status string                    `json:"status"`
-	User   statusResponseDiscordUser `json:"user"`
-}
-
-type statusResponseDiscordUser struct {
-	ID        string `json:"id"`
-	Username  string `json:"username"`
-	AvatarURL string `json:"avatar_url"`
-}
-
-func status(w http.ResponseWriter, r *http.Request) {
+func status(c *gin.Context) {
 	discordStatus := "disconnected"
 	if discord.Session.State.User != nil {
 		discordStatus = "connected"
 	}
 
-	respond.JSON(w, http.StatusOK, statusResponse{
-		Discord: statusResponseDiscord{
-			Status: discordStatus,
-			User: statusResponseDiscordUser{
-				ID:        discord.Session.State.User.ID,
-				Username:  discord.Session.State.User.Username,
-				AvatarURL: discord.Session.State.User.AvatarURL(""),
-			},
+	user := discord.Session.State.User
+	var userData any = nil
+	if user != nil {
+		discordStatus = "connected"
+		userData = gin.H{
+			"id":         user.ID,
+			"username":   user.Username,
+			"avatar_url": user.AvatarURL(""),
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"discord": gin.H{
+			"status": discordStatus,
+			"user":   userData,
 		},
 	})
 }
