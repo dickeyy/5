@@ -11,6 +11,10 @@ type DiscordCommand struct {
 	Handler func(s *discordgo.Session, i *discordgo.InteractionCreate) *discordgo.InteractionResponse
 }
 
+type DiscordEvent struct {
+	Handler any
+}
+
 // internal struct for guilds (includes settings, etc.)
 type Guild struct {
 	ID          string        `json:"id"`

@@ -3,6 +3,7 @@ package lib
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 	"github.com/quackdiscord/bot/structs"
@@ -30,6 +31,10 @@ func LoadConfig() {
 			DBDSN:    getCriticalEnv("DATABASE_DSN"),
 			RedisURL: getCriticalEnv("REDIS_URL"),
 		},
+		EventQueue: structs.EventQueueConfig{
+			Size:    getEnvWithDefaultInt("EVENT_QUEUE_SIZE", 1000),
+			Workers: getEnvWithDefaultInt("EVENT_QUEUE_WORKERS", 3),
+		},
 	}
 }
 
@@ -38,6 +43,18 @@ func LoadConfig() {
 func getEnvWithDefault(key, defaultValue string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value
+	}
+	return defaultValue
+}
+
+func getEnvWithDefaultInt(key string, defaultValue int) int {
+	if value, exists := os.LookupEnv(key); exists {
+		intValue, err := strconv.Atoi(value)
+		if err != nil {
+			log.Warn().Str("key", key).Msg("Invalid environment variable")
+			return defaultValue
+		}
+		return intValue
 	}
 	return defaultValue
 }

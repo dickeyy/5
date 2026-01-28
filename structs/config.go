@@ -5,6 +5,7 @@ type Config struct {
 	API         APIConfig
 	Discord     DiscordConfig
 	Storage     StorageConfig
+	EventQueue  EventQueueConfig
 }
 
 type APIConfig struct {
@@ -19,4 +20,9 @@ type DiscordConfig struct {
 type StorageConfig struct {
 	DBDSN    string
 	RedisURL string
+}
+
+type EventQueueConfig struct {
+	Size    int
+	Workers int
 }

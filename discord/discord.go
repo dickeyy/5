@@ -9,8 +9,12 @@ import (
 
 // TODO: add a command hash cache to efficiently re-register commands when needed
 
+type events = map[string]*structs.DiscordEvent
+type commands = map[string]*structs.DiscordCommand
+
 var Session *discordgo.Session
-var Commands map[string]*structs.DiscordCommand
+var Commands = make(commands, 0)
+var Events = make(events, 0)
 
 // Connect inits the session and opens the connection
 func Connect() {
@@ -36,5 +40,14 @@ func Connect() {
 		log.Fatal().Err(err).Msg("failed to open discord session")
 	}
 
+	registerEvents()
 	// register commands here later
+}
+
+func registerEvents() {
+	for name, event := range Events {
+		Session.AddHandler(event.Handler)
+		log.Info().Msgf("Registered event: %s", name)
+	}
+	log.Info().Msgf("Registered %d events", len(Events))
 }

@@ -20,6 +20,9 @@ func main() {
 	services.DB.Connect()
 	services.Redis.Connect()
 
+	services.EQ.Init()
+	services.EQ.Start()
+
 	discord.Connect()
 	api.Start()
 }
