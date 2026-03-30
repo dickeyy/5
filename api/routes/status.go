@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/discord"
 	"github.com/quackdiscord/bot/services"
+	"github.com/quackdiscord/bot/storage"
 )
 
 type discordStatus struct {
@@ -26,7 +27,7 @@ type dbStatus struct {
 	Latency   int64 `json:"latency,omitempty"`
 }
 
-func status(c *gin.Context) {
+func status(c *gin.Context, s *storage.Store) {
 	c.JSON(http.StatusOK, gin.H{
 		"discord":  getDiscordStatus(),
 		"redis":    getRedisStatus(),

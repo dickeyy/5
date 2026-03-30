@@ -4,6 +4,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/discord"
 	"github.com/quackdiscord/bot/services"
+	"github.com/quackdiscord/bot/storage"
 	"github.com/quackdiscord/bot/structs"
 )
 
@@ -23,7 +24,7 @@ func msgCreate(_ *discordgo.Session, data *discordgo.MessageCreate) {
 }
 
 // msgCreateHandler is the actual handler that processes the message create event
-func msgCreateHandler(data any) {
+func msgCreateHandler(s *storage.Store, data any) {
 	// msg := data.(*discordgo.MessageCreate)
 	// do something here
 }

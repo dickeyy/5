@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/quackdiscord/bot/lib"
+	"github.com/quackdiscord/bot/storage"
 	"github.com/quackdiscord/bot/structs"
 	"github.com/rs/zerolog/log"
 )
@@ -18,8 +19,11 @@ type EventQueue struct {
 
 var EQ *EventQueue
 
+var s *storage.Store
+
 // initializes the event queue
-func (q *EventQueue) Init() {
+func (q *EventQueue) Init(st *storage.Store) {
+	s = st
 	EQ = &EventQueue{
 		Queue:   make(chan structs.QueueEvent, lib.Config.EventQueue.Size),
 		workers: lib.Config.EventQueue.Workers,
@@ -95,7 +99,7 @@ func (q *EventQueue) Process(event structs.QueueEvent) {
 		}
 	}()
 
-	event.Handler(event.Data)
+	event.Handler(s, event.Data)
 }
 
 // Stop gracefully shuts down the event queue

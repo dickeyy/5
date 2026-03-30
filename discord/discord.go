@@ -3,6 +3,7 @@ package discord
 import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/lib"
+	"github.com/quackdiscord/bot/storage"
 	"github.com/quackdiscord/bot/structs"
 	"github.com/rs/zerolog/log"
 )
@@ -16,8 +17,11 @@ var Session *discordgo.Session
 var Commands = make(commands, 0)
 var Events = make(events, 0)
 
+var s *storage.Store
+
 // Connect inits the session and opens the connection
-func Connect() {
+func Connect(st *storage.Store) {
+	s = st
 	log.Info().Msg("Connecting to Discord")
 
 	token := lib.Config.Discord.Token

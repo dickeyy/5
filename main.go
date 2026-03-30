@@ -7,6 +7,7 @@ import (
 	"github.com/quackdiscord/bot/discord"
 	"github.com/quackdiscord/bot/lib"
 	"github.com/quackdiscord/bot/services"
+	"github.com/quackdiscord/bot/storage"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -19,10 +20,11 @@ func init() {
 func main() {
 	services.DB.Connect()
 	services.Redis.Connect()
+	s := storage.New(services.DB.DB, services.Redis.Client)
 
-	services.EQ.Init()
+	services.EQ.Init(s)
 	services.EQ.Start()
 
-	discord.Connect()
-	api.Start()
+	discord.Connect(s)
+	api.Start(s)
 }
