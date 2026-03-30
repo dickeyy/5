@@ -21,6 +21,9 @@ func main() {
 	services.DB.Connect()
 	services.Redis.Connect()
 	s := storage.New(services.DB.DB, services.Redis.Client)
+	if err := s.Migrate(); err != nil {
+		log.Fatal().Err(err).Msg("Failed to apply database migrations")
+	}
 
 	services.EQ.Init(s)
 	services.EQ.Start()

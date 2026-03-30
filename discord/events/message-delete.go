@@ -4,7 +4,6 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/discord"
 	"github.com/quackdiscord/bot/services"
-	"github.com/quackdiscord/bot/storage"
 	"github.com/quackdiscord/bot/structs"
 )
 
@@ -22,7 +21,8 @@ func msgDelete(_ *discordgo.Session, data *discordgo.MessageDelete) {
 	})
 }
 
-func msgDeleteHandler(s *storage.Store, data any) {
+func msgDeleteHandler(s structs.DataStore, data any) {
 	// msg := data.(*discordgo.MessageDelete)
 	// do something here
+	_ = s
 }
