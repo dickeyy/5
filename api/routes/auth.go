@@ -11,8 +11,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/api/middleware"
+	"github.com/quackdiscord/bot/app"
 	"github.com/quackdiscord/bot/lib"
-	"github.com/quackdiscord/bot/storage"
 	"github.com/quackdiscord/bot/structs"
 	"github.com/rs/zerolog/log"
 )
@@ -39,22 +39,22 @@ type discordUserResponse struct {
 	Avatar     string `json:"avatar"`
 }
 
-func setupAuthRoutes(r *gin.Engine, s *storage.Store) {
+func setupAuthRoutes(r *gin.Engine, services *app.Services) {
 	auth := r.Group("/auth")
 	{
-		auth.GET("/discord/login", func(c *gin.Context) { discordLogin(c, s) })
-		auth.GET("/discord/callback", func(c *gin.Context) { discordCallback(c, s) })
+		auth.GET("/discord/login", func(c *gin.Context) { discordLogin(c, services) })
+		auth.GET("/discord/callback", func(c *gin.Context) { discordCallback(c, services) })
 
 		protected := auth.Group("")
-		protected.Use(middleware.RequireAuth(s))
+		protected.Use(middleware.RequireAuth(services.Store))
 		protected.GET("/me", authMe)
-		protected.POST("/logout", func(c *gin.Context) { authLogout(c, s) })
+		protected.POST("/logout", func(c *gin.Context) { authLogout(c, services) })
 	}
 }
 
 // starts oauth flow
 // default is redirect but mode=json returns url payload
-func discordLogin(c *gin.Context, s *storage.Store) {
+func discordLogin(c *gin.Context, services *app.Services) {
 	if err := validateDiscordOAuthConfig(); err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 		return
@@ -82,7 +82,7 @@ func discordLogin(c *gin.Context, s *storage.Store) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
-	if err := s.SaveOAuthState(ctx, stateID, statePayload, stateTTL); err != nil {
+	if err := services.Store.SaveOAuthState(ctx, stateID, statePayload, stateTTL); err != nil {
 		log.Error().Err(err).Msg("failed to save oauth state")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist oauth state"})
 		return
@@ -98,7 +98,7 @@ func discordLogin(c *gin.Context, s *storage.Store) {
 }
 
 // handles oauth callback from discord
-func discordCallback(c *gin.Context, s *storage.Store) {
+func discordCallback(c *gin.Context, services *app.Services) {
 	if err := validateDiscordOAuthConfig(); err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 		return
@@ -119,7 +119,7 @@ func discordCallback(c *gin.Context, s *storage.Store) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
-	statePayload, err := s.ConsumeOAuthState(ctx, state)
+	statePayload, err := services.Store.ConsumeOAuthState(ctx, state)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to consume oauth state")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate oauth state"})
@@ -168,7 +168,7 @@ func discordCallback(c *gin.Context, s *storage.Store) {
 		LastSeenAt:       now,
 	}
 
-	if err := s.SaveSession(ctx, session, sessionTTL); err != nil {
+	if err := services.Store.SaveSession(ctx, session, sessionTTL); err != nil {
 		log.Error().Err(err).Msg("failed to save auth session")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save auth session"})
 		return
@@ -218,12 +218,12 @@ func authMe(c *gin.Context) {
 	})
 }
 
-func authLogout(c *gin.Context, s *storage.Store) {
+func authLogout(c *gin.Context, services *app.Services) {
 	session := middleware.GetAuthSession(c)
 	if session != nil {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
-		if err := s.DeleteSession(ctx, session.ID); err != nil {
+		if err := services.Store.DeleteSession(ctx, session.ID); err != nil {
 			log.Error().Err(err).Msg("failed to delete auth session")
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete auth session"})
 			return

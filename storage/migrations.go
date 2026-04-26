@@ -30,7 +30,7 @@ func (s *Store) Migrate() error {
 		return errors.New("database not connected")
 	}
 
-	if err := s.db.Set("gorm:table_options", mysqlTableOptions).AutoMigrate(&schemaMigration{}); err != nil {
+	if err := withMySQLTableOptions(s.db).AutoMigrate(&schemaMigration{}); err != nil {
 		return fmt.Errorf("migrate schema migrations table: %w", err)
 	}
 
@@ -43,7 +43,7 @@ func (s *Store) Migrate() error {
 					return errors.New("no schema models registered")
 				}
 
-				return tx.Set("gorm:table_options", mysqlTableOptions).AutoMigrate(models...)
+				return withMySQLTableOptions(tx).AutoMigrate(models...)
 			},
 		},
 	}
@@ -80,4 +80,12 @@ func (s *Store) Migrate() error {
 	}
 
 	return nil
+}
+
+func withMySQLTableOptions(db *gorm.DB) *gorm.DB {
+	if db.Dialector.Name() != "mysql" {
+		return db
+	}
+
+	return db.Set("gorm:table_options", mysqlTableOptions)
 }

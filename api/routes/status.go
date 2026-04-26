@@ -6,9 +6,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/quackdiscord/bot/app"
 	"github.com/quackdiscord/bot/discord"
-	"github.com/quackdiscord/bot/services"
-	"github.com/quackdiscord/bot/storage"
 )
 
 type discordStatus struct {
@@ -27,15 +26,19 @@ type dbStatus struct {
 	Latency   int64 `json:"latency,omitempty"`
 }
 
-func status(c *gin.Context, s *storage.Store) {
+func status(c *gin.Context, services *app.Services) {
 	c.JSON(http.StatusOK, gin.H{
 		"discord":  getDiscordStatus(),
-		"redis":    getRedisStatus(),
-		"database": getDBStatus(),
+		"redis":    getRedisStatus(services),
+		"database": getDBStatus(services),
 	})
 }
 
 func getDiscordStatus() discordStatus {
+	if discord.Session == nil || discord.Session.State == nil {
+		return discordStatus{Connected: false}
+	}
+
 	user := discord.Session.State.User
 	if user != nil {
 		return discordStatus{
@@ -49,9 +52,13 @@ func getDiscordStatus() discordStatus {
 	}
 }
 
-func getRedisStatus() redisStatus {
+func getRedisStatus(services *app.Services) redisStatus {
+	if services == nil || services.Store == nil || services.Store.Redis() == nil {
+		return redisStatus{Connected: false}
+	}
+
 	start := time.Now()
-	_, err := services.Redis.Ping(context.Background()).Result()
+	_, err := services.Store.Redis().Ping(context.Background()).Result()
 	if err != nil {
 		return redisStatus{
 			Connected: false,
@@ -64,9 +71,20 @@ func getRedisStatus() redisStatus {
 	}
 }
 
-func getDBStatus() dbStatus {
+func getDBStatus(services *app.Services) dbStatus {
+	if services == nil || services.Store == nil || services.Store.DB() == nil {
+		return dbStatus{Connected: false}
+	}
+
 	start := time.Now()
-	err := services.DB.Ping()
+	sqlDB, err := services.Store.DB().DB()
+	if err != nil {
+		return dbStatus{
+			Connected: false,
+		}
+	}
+
+	err = sqlDB.Ping()
 	if err != nil {
 		return dbStatus{
 			Connected: false,
