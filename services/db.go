@@ -2,10 +2,12 @@ package services
 
 import (
 	"errors"
+	"fmt"
 
+	mysqlconfig "github.com/go-sql-driver/mysql"
 	"github.com/quackdiscord/bot/lib"
 	"github.com/rs/zerolog/log"
-	"gorm.io/driver/mysql"
+	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
 
@@ -16,7 +18,12 @@ type dbService struct {
 var DB = &dbService{}
 
 func (s *dbService) Connect() {
-	db, err := gorm.Open(mysql.Open(lib.Config.Storage.DBDSN), &gorm.Config{})
+	dsn, err := normalizeMySQLDSN(lib.Config.Storage.DBDSN)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to parse database DSN")
+	}
+
+	db, err := gorm.Open(gormmysql.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to connect to database")
 	}
@@ -43,4 +50,15 @@ func (s *dbService) Ping() error {
 		return err
 	}
 	return sqlDB.Ping()
+}
+
+func normalizeMySQLDSN(dsn string) (string, error) {
+	cfg, err := mysqlconfig.ParseDSN(dsn)
+	if err != nil {
+		return "", fmt.Errorf("parse mysql dsn: %w", err)
+	}
+
+	cfg.ParseTime = true
+
+	return cfg.FormatDSN(), nil
 }

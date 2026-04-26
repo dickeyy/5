@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/api/middleware"
@@ -17,9 +18,31 @@ func Start(s *storage.Store) {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
+	allowedOrigins := map[string]struct{}{
+		"http://localhost:3001": {},
+		"http://127.0.0.1:3000": {},
+	}
+
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(middleware.Logger)
+	r.Use(func(c *gin.Context) {
+		origin := c.GetHeader("Origin")
+		if _, ok := allowedOrigins[origin]; ok {
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Access-Control-Allow-Credentials", "true")
+			c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			c.Header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+			c.Header("Vary", "Origin")
+		}
+
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+
+		c.Next()
+	})
 
 	routes.SetupRoutes(r, app.New(s))
 
