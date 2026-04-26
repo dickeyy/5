@@ -24,8 +24,18 @@ func LoadConfig() {
 			Port: getEnvWithDefault("API_PORT", "8080"),
 		},
 		Discord: structs.DiscordConfig{
-			Token: getEnvWithEnvironmentOverride("DISCORD_TOKEN", env, true),
-			AppID: getEnvWithEnvironmentOverride("DISCORD_APP_ID", env, true),
+			Token:            getEnvWithEnvironmentOverride("DISCORD_TOKEN", env, true),
+			AppID:            getEnvWithEnvironmentOverride("DISCORD_APP_ID", env, true),
+			ClientSecret:     getEnvWithEnvironmentOverride("DISCORD_CLIENT_SECRET", env, false),
+			OAuthRedirectURI: getEnvWithDefault("DISCORD_OAUTH_REDIRECT_URI", ""),
+			OAuthScopes:      getEnvWithDefault("DISCORD_OAUTH_SCOPES", "identify guilds"),
+		},
+		Auth: structs.AuthConfig{
+			SessionCookieName: getEnvWithDefault("AUTH_SESSION_COOKIE_NAME", "quack_session"),
+			SessionTTLHours:   getEnvWithDefaultInt("AUTH_SESSION_TTL_HOURS", 168),
+			StateTTLMinutes:   getEnvWithDefaultInt("AUTH_STATE_TTL_MINUTES", 10),
+			PostLoginRedirect: getEnvWithDefault("AUTH_POST_LOGIN_REDIRECT", "/"),
+			CookieSecure:      getEnvWithDefaultBool("AUTH_COOKIE_SECURE", env != "dev"),
 		},
 		Storage: structs.StorageConfig{
 			DBDSN:    getCriticalEnv("DATABASE_DSN"),
@@ -55,6 +65,18 @@ func getEnvWithDefaultInt(key string, defaultValue int) int {
 			return defaultValue
 		}
 		return intValue
+	}
+	return defaultValue
+}
+
+func getEnvWithDefaultBool(key string, defaultValue bool) bool {
+	if value, exists := os.LookupEnv(key); exists {
+		boolValue, err := strconv.ParseBool(value)
+		if err != nil {
+			log.Warn().Str("key", key).Msg("Invalid boolean environment variable")
+			return defaultValue
+		}
+		return boolValue
 	}
 	return defaultValue
 }

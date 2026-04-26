@@ -7,4 +7,5 @@ import (
 
 func SetupRoutes(r *gin.Engine, s *storage.Store) {
 	r.GET("/status", func(c *gin.Context) { status(c, s) })
+	setupAuthRoutes(r, s)
 }

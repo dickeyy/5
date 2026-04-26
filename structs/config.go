@@ -4,6 +4,7 @@ type Config struct {
 	Environment string
 	API         APIConfig
 	Discord     DiscordConfig
+	Auth        AuthConfig
 	Storage     StorageConfig
 	EventQueue  EventQueueConfig
 }
@@ -13,8 +14,19 @@ type APIConfig struct {
 }
 
 type DiscordConfig struct {
-	Token string
-	AppID string
+	Token            string
+	AppID            string
+	ClientSecret     string
+	OAuthRedirectURI string
+	OAuthScopes      string
+}
+
+type AuthConfig struct {
+	SessionCookieName string
+	SessionTTLHours   int
+	StateTTLMinutes   int
+	PostLoginRedirect string
+	CookieSecure      bool
 }
 
 type StorageConfig struct {
