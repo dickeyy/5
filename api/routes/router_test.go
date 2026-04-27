@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/app"
 	"github.com/quackdiscord/bot/internal/testutil"
+	"github.com/quackdiscord/bot/storage"
 	"github.com/quackdiscord/bot/structs"
 )
 
@@ -131,6 +132,82 @@ func TestGuildMeRouteUnauthenticated(t *testing.T) {
 	}
 }
 
+func TestListUserGuildsRouteAuthenticated(t *testing.T) {
+	testutil.SetTestConfig(t)
+	gin.SetMode(gin.TestMode)
+
+	store := testutil.NewSQLiteRedisStore(t)
+	if err := store.Migrate(); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	services := app.NewWithDiscordClient(store, routeFakeDiscordClient{
+		userGuilds: []app.DiscordUserGuild{
+			{ID: "guild-1", Name: "Guild One", Owner: true},
+			{ID: "guild-2", Name: "Guild Two", Permissions: uint64(discordgo.PermissionManageGuild)},
+			{ID: "guild-3", Name: "Guild Three", Permissions: uint64(discordgo.PermissionSendMessages)},
+		},
+		botGuilds: []app.DiscordBotGuild{{ID: "guild-2", Name: "Guild Two"}},
+	})
+
+	session := routeTestSession("user-1")
+	if err := store.SaveSession(context.Background(), session, time.Hour); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+
+	router := gin.New()
+	SetupRoutes(router, services)
+
+	request := httptest.NewRequest(http.MethodGet, "/guilds", nil)
+	request.Header.Set("Authorization", "Bearer "+session.ID)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusOK, response.Code, response.Body.String())
+	}
+
+	var body struct {
+		Guilds []struct {
+			DiscordGuildID string `json:"discord_guild_id"`
+			Name           string `json:"name"`
+			CanManageGuild bool   `json:"can_manage_guild"`
+			QuackInGuild   bool   `json:"quack_in_guild"`
+		} `json:"guilds"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode guild list response: %v", err)
+	}
+
+	if len(body.Guilds) != 2 {
+		t.Fatalf("expected only manageable guilds, got %+v", body.Guilds)
+	}
+	if body.Guilds[0].DiscordGuildID != "guild-1" || !body.Guilds[0].CanManageGuild || body.Guilds[0].QuackInGuild {
+		t.Fatalf("unexpected first guild: %+v", body.Guilds[0])
+	}
+	if body.Guilds[1].DiscordGuildID != "guild-2" || !body.Guilds[1].QuackInGuild {
+		t.Fatalf("unexpected second guild: %+v", body.Guilds[1])
+	}
+}
+
+func TestListUserGuildsRouteUnauthenticated(t *testing.T) {
+	testutil.SetTestConfig(t)
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	SetupRoutes(router, app.New(nil))
+
+	request := httptest.NewRequest(http.MethodGet, "/guilds", nil)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, response.Code)
+	}
+}
+
 func TestTemplateRoutesReadAndWritePermissions(t *testing.T) {
 	router, sessionID := newTemplateRouteHarness(t, uint64(discordgo.PermissionModerateMembers))
 
@@ -213,13 +290,118 @@ func TestTemplateRoutesCreateUpdateDelete(t *testing.T) {
 	}
 }
 
+func TestCaseRouteRequiresAuth(t *testing.T) {
+	testutil.SetTestConfig(t)
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	SetupRoutes(router, app.New(nil))
+
+	request := httptest.NewRequest(http.MethodPost, "/guilds/guild-1/cases", bytes.NewBufferString(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, response.Code)
+	}
+}
+
+func TestCaseRouteCreate(t *testing.T) {
+	router, sessionID, templateID := newCaseRouteHarness(t, uint64(discordgo.PermissionModerateMembers))
+
+	request := httptest.NewRequest(http.MethodPost, "/guilds/guild-1/cases", bytes.NewBufferString(caseRoutePayload(templateID, "target-1")))
+	request.Header.Set("Authorization", "Bearer "+sessionID)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusCreated, response.Code, response.Body.String())
+	}
+
+	var body struct {
+		Case struct {
+			ID                     string `json:"id"`
+			CaseNumber             uint64 `json:"case_number"`
+			TargetDiscordUserID    string `json:"target_discord_user_id"`
+			ModeratorDiscordUserID string `json:"moderator_discord_user_id"`
+			Actions                []struct {
+				ID       string `json:"id"`
+				Position int    `json:"position"`
+				Status   string `json:"status"`
+			} `json:"actions"`
+		} `json:"case"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode case response: %v", err)
+	}
+	if body.Case.ID == "" || body.Case.CaseNumber != 1 || body.Case.TargetDiscordUserID != "target-1" {
+		t.Fatalf("unexpected case response: %+v", body.Case)
+	}
+	if len(body.Case.Actions) != 1 || body.Case.Actions[0].Status != string(structs.ActionExecutionPending) {
+		t.Fatalf("unexpected actions: %+v", body.Case.Actions)
+	}
+}
+
+func TestCaseRouteErrors(t *testing.T) {
+	router, sessionID, templateID := newCaseRouteHarness(t, uint64(discordgo.PermissionModerateMembers))
+
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		{name: "invalid payload", body: `{`, wantStatus: http.StatusBadRequest},
+		{name: "missing template", body: caseRoutePayload("missing-template", "target-1"), wantStatus: http.StatusNotFound},
+		{name: "validation", body: caseRoutePayload(templateID, ""), wantStatus: http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/guilds/guild-1/cases", bytes.NewBufferString(tt.body))
+			request.Header.Set("Authorization", "Bearer "+sessionID)
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+
+			router.ServeHTTP(response, request)
+
+			if response.Code != tt.wantStatus {
+				t.Fatalf("expected status %d, got %d body=%s", tt.wantStatus, response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestCaseRoutePermissionDenied(t *testing.T) {
+	router, sessionID, templateID := newCaseRouteHarness(t, 0)
+
+	request := httptest.NewRequest(http.MethodPost, "/guilds/guild-1/cases", bytes.NewBufferString(caseRoutePayload(templateID, "target-1")))
+	request.Header.Set("Authorization", "Bearer "+sessionID)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusForbidden, response.Code, response.Body.String())
+	}
+}
+
 type routeFakeDiscordClient struct {
 	userGuilds []app.DiscordUserGuild
+	botGuilds  []app.DiscordBotGuild
 	botGuild   *app.DiscordBotGuild
 }
 
 func (f routeFakeDiscordClient) UserGuilds(ctx context.Context, accessToken string) ([]app.DiscordUserGuild, error) {
 	return f.userGuilds, nil
+}
+
+func (f routeFakeDiscordClient) BotGuilds(ctx context.Context) ([]app.DiscordBotGuild, error) {
+	return f.botGuilds, nil
 }
 
 func (f routeFakeDiscordClient) BotGuild(ctx context.Context, discordGuildID string) (*app.DiscordBotGuild, error) {
@@ -270,6 +452,65 @@ func newTemplateRouteHarness(t *testing.T, permissionBits uint64) (*gin.Engine, 
 	return router, session.ID
 }
 
+func newCaseRouteHarness(t *testing.T, permissionBits uint64) (*gin.Engine, string, string) {
+	t.Helper()
+
+	testutil.SetTestConfig(t)
+	gin.SetMode(gin.TestMode)
+
+	store := testutil.NewSQLiteRedisStore(t)
+	if err := store.Migrate(); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	guild, err := store.UpsertGuild(context.Background(), storage.UpsertGuildParams{
+		DiscordGuildID:     "guild-1",
+		Name:               "Guild",
+		OwnerDiscordUserID: "owner-1",
+	})
+	if err != nil {
+		t.Fatalf("upsert guild: %v", err)
+	}
+	template, err := store.CreateCaseTemplate(context.Background(), storage.CreateCaseTemplateParams{
+		Template: structs.CaseTemplate{
+			GuildID:                guild.ID,
+			Slug:                   "spam",
+			Name:                   "Spam",
+			Description:            "Spam template",
+			ReasonTemplate:         "No spam",
+			DefaultSeverity:        structs.CaseSeverityMedium,
+			DefaultWeight:          1,
+			Enabled:                true,
+			CreatedByDiscordUserID: "admin-1",
+			UpdatedByDiscordUserID: "admin-1",
+		},
+		Actions: []structs.CaseTemplateAction{
+			{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create template: %v", err)
+	}
+
+	services := app.NewWithDiscordClient(store, routeFakeDiscordClient{
+		userGuilds: []app.DiscordUserGuild{{
+			ID:          "guild-1",
+			Permissions: permissionBits,
+		}},
+		botGuild: &app.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "owner-1"},
+	})
+
+	session := routeTestSession("user-1")
+	if err := store.SaveSession(context.Background(), session, time.Hour); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+
+	router := gin.New()
+	SetupRoutes(router, services)
+
+	return router, session.ID, template.Template.ID
+}
+
 func templateRoutePayload(slug string) string {
 	return `{
 		"slug": "` + slug + `",
@@ -287,5 +528,13 @@ func templateRoutePayload(slug string) string {
 			}
 		],
 		"escalation_rules": []
+	}`
+}
+
+func caseRoutePayload(templateID, targetDiscordUserID string) string {
+	return `{
+		"template_id": "` + templateID + `",
+		"target_discord_user_id": "` + targetDiscordUserID + `",
+		"metadata": {"source": "test"}
 	}`
 }

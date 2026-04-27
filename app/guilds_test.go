@@ -15,6 +15,7 @@ import (
 
 type fakeDiscordClient struct {
 	userGuilds []app.DiscordUserGuild
+	botGuilds  []app.DiscordBotGuild
 	botGuild   *app.DiscordBotGuild
 	botErr     error
 }
@@ -23,11 +24,48 @@ func (f fakeDiscordClient) UserGuilds(ctx context.Context, accessToken string) (
 	return f.userGuilds, nil
 }
 
+func (f fakeDiscordClient) BotGuilds(ctx context.Context) ([]app.DiscordBotGuild, error) {
+	return f.botGuilds, nil
+}
+
 func (f fakeDiscordClient) BotGuild(ctx context.Context, discordGuildID string) (*app.DiscordBotGuild, error) {
 	if f.botErr != nil {
 		return nil, f.botErr
 	}
 	return f.botGuild, nil
+}
+
+func TestListUserManageableGuilds(t *testing.T) {
+	service := app.NewGuildService(nil, fakeDiscordClient{
+		userGuilds: []app.DiscordUserGuild{
+			{ID: "owned", Name: "Owned", Owner: true, Permissions: 0},
+			{ID: "admin", Name: "Admin", Permissions: uint64(discordgo.PermissionAdministrator)},
+			{ID: "manage", Name: "Manage", Permissions: uint64(discordgo.PermissionManageGuild)},
+			{ID: "member", Name: "Member", Permissions: uint64(discordgo.PermissionSendMessages)},
+		},
+		botGuilds: []app.DiscordBotGuild{
+			{ID: "owned", Name: "Owned"},
+			{ID: "manage", Name: "Manage"},
+		},
+	})
+
+	guilds, err := service.ListUserManageableGuilds(context.Background(), testSession("user-1"))
+	if err != nil {
+		t.Fatalf("list manageable guilds: %v", err)
+	}
+
+	if len(guilds) != 3 {
+		t.Fatalf("expected 3 manageable guilds, got %+v", guilds)
+	}
+	if !guilds[0].IsOwner || !guilds[0].QuackInGuild {
+		t.Fatalf("expected owned guild with quack present, got %+v", guilds[0])
+	}
+	if !guilds[1].IsAdministrator || guilds[1].QuackInGuild {
+		t.Fatalf("expected admin guild without quack present, got %+v", guilds[1])
+	}
+	if !guilds[2].CanManageGuild || !guilds[2].QuackInGuild {
+		t.Fatalf("expected manage guild with quack present, got %+v", guilds[2])
+	}
 }
 
 func TestResolveStaffContextOwnerBypassAllowsAllActions(t *testing.T) {

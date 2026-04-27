@@ -21,7 +21,7 @@ var EQ *EventQueue
 
 var s *storage.Store
 
-// initializes the event queue
+// Initializes the event queue
 func (q *EventQueue) Init(st *storage.Store) {
 	s = st
 	EQ = &EventQueue{

@@ -16,6 +16,7 @@ func SetupRoutes(r *gin.Engine, services *app.Services) {
 func setupGuildRoutes(r *gin.Engine, services *app.Services) {
 	guilds := r.Group("/guilds")
 	guilds.Use(middleware.RequireAuth(services.Store))
+	guilds.GET("", func(c *gin.Context) { listUserGuilds(c, services) })
 	guilds.GET("/:discordGuildID/me", middleware.RequireGuildContext(services, ""), guildMe)
 	guilds.GET("/:discordGuildID/templates", middleware.RequireGuildContext(services, structs.PermissionActionCaseTemplateRead), func(c *gin.Context) {
 		listTemplates(c, services)
@@ -31,5 +32,8 @@ func setupGuildRoutes(r *gin.Engine, services *app.Services) {
 	})
 	guilds.DELETE("/:discordGuildID/templates/:templateID", middleware.RequireGuildContext(services, structs.PermissionActionCaseTemplateDelete), func(c *gin.Context) {
 		archiveTemplate(c, services)
+	})
+	guilds.POST("/:discordGuildID/cases", middleware.RequireGuildContext(services, structs.PermissionActionCaseCreate), func(c *gin.Context) {
+		createCase(c, services)
 	})
 }

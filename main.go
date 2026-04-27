@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"os"
 
 	"github.com/quackdiscord/bot/api"
+	"github.com/quackdiscord/bot/app"
 	"github.com/quackdiscord/bot/discord"
 	"github.com/quackdiscord/bot/lib"
 	"github.com/quackdiscord/bot/services"
@@ -29,5 +31,8 @@ func main() {
 	services.EQ.Start()
 
 	discord.Connect(s)
+	if err := app.EnqueuePendingCaseActions(context.Background(), s, 100); err != nil {
+		log.Error().Err(err).Msg("Failed to enqueue pending case actions")
+	}
 	api.Start(s)
 }

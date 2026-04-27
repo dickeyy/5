@@ -15,6 +15,7 @@ const discordUserGuildsURL = "https://discord.com/api/v10/users/@me/guilds"
 
 type DiscordClient interface {
 	UserGuilds(ctx context.Context, accessToken string) ([]DiscordUserGuild, error)
+	BotGuilds(ctx context.Context) ([]DiscordBotGuild, error)
 	BotGuild(ctx context.Context, discordGuildID string) (*DiscordBotGuild, error)
 }
 
@@ -103,6 +104,30 @@ func (c *DiscordAPIClient) BotGuild(ctx context.Context, discordGuildID string) 
 		Icon:    guild.Icon,
 		OwnerID: guild.OwnerID,
 	}, nil
+}
+
+func (c *DiscordAPIClient) BotGuilds(ctx context.Context) ([]DiscordBotGuild, error) {
+	if runtimeDiscord.Session == nil || runtimeDiscord.Session.State == nil {
+		return []DiscordBotGuild{}, nil
+	}
+
+	runtimeDiscord.Session.State.RLock()
+	defer runtimeDiscord.Session.State.RUnlock()
+
+	guilds := make([]DiscordBotGuild, 0, len(runtimeDiscord.Session.State.Guilds))
+	for _, guild := range runtimeDiscord.Session.State.Guilds {
+		if guild == nil {
+			continue
+		}
+		guilds = append(guilds, DiscordBotGuild{
+			ID:      guild.ID,
+			Name:    guild.Name,
+			Icon:    guild.Icon,
+			OwnerID: guild.OwnerID,
+		})
+	}
+
+	return guilds, nil
 }
 
 func discordGuildIconURL(guildID, iconHash string) string {

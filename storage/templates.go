@@ -45,8 +45,13 @@ func (s *Store) CreateCaseTemplate(ctx context.Context, params CreateCaseTemplat
 	template.Version = 1
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&template).Error; err != nil {
+		if err := tx.Select("*").Create(&template).Error; err != nil {
 			return fmt.Errorf("create case template: %w", err)
+		}
+		if !params.Template.Enabled {
+			if err := tx.Model(&structs.CaseTemplate{}).Where("id = ?", template.ID).Update("enabled", false).Error; err != nil {
+				return fmt.Errorf("set case template enabled state: %w", err)
+			}
 		}
 
 		if err := createTemplateActions(tx, template.ID, params.Actions, now); err != nil {
@@ -284,11 +289,17 @@ func createTemplateActions(tx *gorm.DB, templateID string, actions []structs.Cas
 	for i := range actions {
 		action := actions[i]
 		action.TemplateID = templateID
+		enabled := action.Enabled
 		if err := prepareULIDModel(&action.ULIDModel, now); err != nil {
 			return fmt.Errorf("prepare case template action model: %w", err)
 		}
-		if err := tx.Create(&action).Error; err != nil {
+		if err := tx.Select("*").Create(&action).Error; err != nil {
 			return fmt.Errorf("create case template action: %w", err)
+		}
+		if !enabled {
+			if err := tx.Model(&structs.CaseTemplateAction{}).Where("id = ?", action.ID).Update("enabled", false).Error; err != nil {
+				return fmt.Errorf("set case template action enabled state: %w", err)
+			}
 		}
 	}
 
@@ -300,11 +311,17 @@ func createTemplateEscalationRules(tx *gorm.DB, guildID, templateID string, rule
 		rule := rules[i]
 		rule.GuildID = guildID
 		rule.TemplateID = templateID
+		enabled := rule.Enabled
 		if err := prepareULIDModel(&rule.ULIDModel, now); err != nil {
 			return fmt.Errorf("prepare case template escalation rule model: %w", err)
 		}
-		if err := tx.Create(&rule).Error; err != nil {
+		if err := tx.Select("*").Create(&rule).Error; err != nil {
 			return fmt.Errorf("create case template escalation rule: %w", err)
+		}
+		if !enabled {
+			if err := tx.Model(&structs.CaseTemplateEscalationRule{}).Where("id = ?", rule.ID).Update("enabled", false).Error; err != nil {
+				return fmt.Errorf("set case template escalation rule enabled state: %w", err)
+			}
 		}
 	}
 

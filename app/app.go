@@ -9,6 +9,8 @@ type Services struct {
 	Store     *storage.Store
 	Guilds    *GuildService
 	Templates *TemplateService
+	Cases     *CaseService
+	Actions   *ActionService
 }
 
 func New(store *storage.Store) *Services {
@@ -19,5 +21,7 @@ func NewWithDiscordClient(store *storage.Store, discord DiscordClient) *Services
 	services := &Services{Store: store}
 	services.Guilds = NewGuildService(store, discord)
 	services.Templates = NewTemplateService(store)
+	services.Cases = NewCaseService(store)
+	services.Actions = NewActionService(store, NewDiscordActionClient())
 	return services
 }

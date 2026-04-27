@@ -33,8 +33,72 @@ type GuildStaffContext struct {
 	IsAdministrator bool
 }
 
+type UserGuildListItem struct {
+	DiscordGuildID  string `json:"discord_guild_id"`
+	Name            string `json:"name"`
+	IconURL         string `json:"icon_url"`
+	PermissionBits  string `json:"permission_bits"`
+	IsOwner         bool   `json:"is_owner"`
+	IsAdministrator bool   `json:"is_administrator"`
+	CanManageGuild  bool   `json:"can_manage_guild"`
+	QuackInGuild    bool   `json:"quack_in_guild"`
+	QuackGuildName  string `json:"quack_guild_name,omitempty"`
+}
+
 func NewGuildService(store *storage.Store, discord DiscordClient) *GuildService {
 	return &GuildService{store: store, discord: discord}
+}
+
+func (s *GuildService) ListUserManageableGuilds(ctx context.Context, session *structs.AuthSession) ([]UserGuildListItem, error) {
+	if s == nil || s.discord == nil {
+		return nil, errors.New("guild service is not configured")
+	}
+	if session == nil || session.AccessToken == "" {
+		return nil, errors.New("missing auth session")
+	}
+
+	userGuilds, err := s.discord.UserGuilds(ctx, session.AccessToken)
+	if err != nil {
+		return nil, err
+	}
+
+	botGuilds, err := s.discord.BotGuilds(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	botGuildsByID := make(map[string]DiscordBotGuild, len(botGuilds))
+	for _, guild := range botGuilds {
+		botGuildsByID[guild.ID] = guild
+	}
+
+	out := make([]UserGuildListItem, 0, len(userGuilds))
+	for _, guild := range userGuilds {
+		isAdmin := hasAllBits(guild.Permissions, uint64(discordgo.PermissionAdministrator))
+		canManageGuild := guild.Owner || isAdmin || hasAllBits(guild.Permissions, uint64(discordgo.PermissionManageGuild))
+		if !canManageGuild {
+			continue
+		}
+
+		item := UserGuildListItem{
+			DiscordGuildID:  guild.ID,
+			Name:            guild.Name,
+			IconURL:         discordGuildIconURL(guild.ID, guild.Icon),
+			PermissionBits:  PermissionBitsString(guild.Permissions),
+			IsOwner:         guild.Owner,
+			IsAdministrator: isAdmin,
+			CanManageGuild:  canManageGuild,
+		}
+
+		if botGuild, ok := botGuildsByID[guild.ID]; ok {
+			item.QuackInGuild = true
+			item.QuackGuildName = botGuild.Name
+		}
+
+		out = append(out, item)
+	}
+
+	return out, nil
 }
 
 func (s *GuildService) ResolveStaffContext(ctx context.Context, session *structs.AuthSession, discordGuildID string) (*GuildStaffContext, error) {
