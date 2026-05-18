@@ -8,8 +8,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// TODO: add a command hash cache to efficiently re-register commands when needed
-
 type events = map[string]*structs.DiscordEvent
 type commands = map[string]*structs.DiscordCommand
 

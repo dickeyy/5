@@ -175,6 +175,95 @@ func TestResolveStaffContextRejectsDisabledStaff(t *testing.T) {
 	}
 }
 
+func TestResolveDiscordStaffContextEvaluatesInteractionPermissions(t *testing.T) {
+	store := newMigratedStore(t)
+	service := app.NewGuildService(store, fakeDiscordClient{
+		botGuild: &app.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "owner-1"},
+	})
+
+	guildContext, err := service.ResolveDiscordStaffContext(context.Background(), app.DiscordStaffContextInput{
+		DiscordGuildID: "guild-1",
+		DiscordUserID:  "user-1",
+		DisplayName:    "Command User",
+		PermissionBits: uint64(discordgo.PermissionModerateMembers),
+	})
+	if err != nil {
+		t.Fatalf("resolve discord staff context: %v", err)
+	}
+
+	if guildContext.Staff.LastKnownDisplayName != "Command User" {
+		t.Fatalf("expected display name to be stored, got %q", guildContext.Staff.LastKnownDisplayName)
+	}
+	if !guildContext.Can(structs.PermissionActionCaseCreate) {
+		t.Fatalf("expected moderate members permission to allow case.create")
+	}
+	if guildContext.Can(structs.PermissionActionCaseTemplateWrite) {
+		t.Fatalf("expected moderate members permission not to allow template writes")
+	}
+}
+
+func TestResolveDiscordStaffContextOwnerBypassAllowsAllActions(t *testing.T) {
+	store := newMigratedStore(t)
+	service := app.NewGuildService(store, fakeDiscordClient{
+		botGuild: &app.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "owner-1"},
+	})
+
+	guildContext, err := service.ResolveDiscordStaffContext(context.Background(), app.DiscordStaffContextInput{
+		DiscordGuildID: "guild-1",
+		DiscordUserID:  "owner-1",
+		DisplayName:    "Owner",
+	})
+	if err != nil {
+		t.Fatalf("resolve discord staff context: %v", err)
+	}
+
+	for action, allowed := range guildContext.Permissions {
+		if !allowed {
+			t.Fatalf("expected owner to be allowed for %s", action)
+		}
+	}
+}
+
+func TestResolveDiscordStaffContextRejectsDisabledStaff(t *testing.T) {
+	ctx := context.Background()
+	store := newMigratedStore(t)
+	guild, err := store.UpsertGuild(ctx, storage.UpsertGuildParams{
+		DiscordGuildID:     "guild-1",
+		Name:               "Guild",
+		OwnerDiscordUserID: "owner-1",
+	})
+	if err != nil {
+		t.Fatalf("upsert guild: %v", err)
+	}
+	staff, err := store.UpsertStaffMember(ctx, storage.UpsertStaffMemberParams{
+		GuildID:                guild.ID,
+		DiscordUserID:          "user-1",
+		LastSeenPermissionBits: uint64(discordgo.PermissionModerateMembers),
+		LastKnownDisplayName:   "User",
+	})
+	if err != nil {
+		t.Fatalf("upsert staff: %v", err)
+	}
+	disabledAt := time.Now().UTC()
+	if err := store.DB().Model(&structs.StaffMember{}).Where("id = ?", staff.ID).Update("disabled_at", disabledAt).Error; err != nil {
+		t.Fatalf("disable staff: %v", err)
+	}
+
+	service := app.NewGuildService(store, fakeDiscordClient{
+		botGuild: &app.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "owner-1"},
+	})
+
+	_, err = service.ResolveDiscordStaffContext(ctx, app.DiscordStaffContextInput{
+		DiscordGuildID: "guild-1",
+		DiscordUserID:  "user-1",
+		DisplayName:    "User",
+		PermissionBits: uint64(discordgo.PermissionModerateMembers),
+	})
+	if !errors.Is(err, app.ErrStaffDisabled) {
+		t.Fatalf("expected ErrStaffDisabled, got %v", err)
+	}
+}
+
 func newMigratedStore(t *testing.T) *storage.Store {
 	t.Helper()
 

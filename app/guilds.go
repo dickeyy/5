@@ -45,6 +45,14 @@ type UserGuildListItem struct {
 	QuackGuildName  string `json:"quack_guild_name,omitempty"`
 }
 
+type DiscordStaffContextInput struct {
+	DiscordGuildID string
+	DiscordUserID  string
+	DisplayName    string
+	PermissionBits uint64
+	LastActiveAt   time.Time
+}
+
 func NewGuildService(store *storage.Store, discord DiscordClient) *GuildService {
 	return &GuildService{store: store, discord: discord}
 }
@@ -174,6 +182,88 @@ func (s *GuildService) ResolveStaffContext(ctx context.Context, session *structs
 		Staff:           staff,
 		PermissionBits:  userGuild.Permissions,
 		Permissions:     evaluatePermissions(policies, userGuild.Permissions, isOwner || isAdmin),
+		IsOwner:         isOwner,
+		IsAdministrator: isAdmin,
+	}, nil
+}
+
+func (s *GuildService) ResolveDiscordStaffContext(ctx context.Context, input DiscordStaffContextInput) (*GuildStaffContext, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("guild service is not configured")
+	}
+	if s.discord == nil {
+		return nil, errors.New("discord client is not configured")
+	}
+
+	discordGuildID := strings.TrimSpace(input.DiscordGuildID)
+	if discordGuildID == "" {
+		return nil, errors.New("missing discord guild id")
+	}
+	discordUserID := strings.TrimSpace(input.DiscordUserID)
+	if discordUserID == "" {
+		return nil, errors.New("missing discord user id")
+	}
+
+	botGuild, err := s.discord.BotGuild(ctx, discordGuildID)
+	if err != nil {
+		return nil, err
+	}
+	if botGuild == nil || botGuild.ID == "" {
+		return nil, ErrBotNotInGuild
+	}
+
+	guild, err := s.store.UpsertGuild(ctx, storage.UpsertGuildParams{
+		DiscordGuildID:     botGuild.ID,
+		Name:               botGuild.Name,
+		IconURL:            discordGuildIconURL(botGuild.ID, botGuild.Icon),
+		OwnerDiscordUserID: botGuild.OwnerID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	settings, err := s.store.EnsureGuildSettings(ctx, guild.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	policies, err := s.store.EnsureDefaultGuildPermissionPolicies(ctx, guild.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	displayName := strings.TrimSpace(input.DisplayName)
+	if displayName == "" {
+		displayName = discordUserID
+	}
+	lastActiveAt := input.LastActiveAt
+	if lastActiveAt.IsZero() {
+		lastActiveAt = time.Now().UTC()
+	}
+
+	staff, err := s.store.UpsertStaffMember(ctx, storage.UpsertStaffMemberParams{
+		GuildID:                guild.ID,
+		DiscordUserID:          discordUserID,
+		LastSeenPermissionBits: input.PermissionBits,
+		LastKnownDisplayName:   displayName,
+		LastActiveAt:           lastActiveAt,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if staff.DisabledAt != nil {
+		return nil, ErrStaffDisabled
+	}
+
+	isOwner := guild.OwnerDiscordUserID == discordUserID
+	isAdmin := hasAllBits(input.PermissionBits, uint64(discordgo.PermissionAdministrator))
+
+	return &GuildStaffContext{
+		Guild:           guild,
+		Settings:        settings,
+		Staff:           staff,
+		PermissionBits:  input.PermissionBits,
+		Permissions:     evaluatePermissions(policies, input.PermissionBits, isOwner || isAdmin),
 		IsOwner:         isOwner,
 		IsAdministrator: isAdmin,
 	}, nil

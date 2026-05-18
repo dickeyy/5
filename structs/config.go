@@ -19,6 +19,8 @@ type DiscordConfig struct {
 	ClientSecret     string
 	OAuthRedirectURI string
 	OAuthScopes      string
+	CommandGuildID   string
+	CommandPrune     bool
 }
 
 type AuthConfig struct {

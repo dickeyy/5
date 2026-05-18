@@ -18,8 +18,8 @@ const (
 	ContextUserIDKey  = "auth_user_id"
 )
 
-// this one is for protected routes
-// it accepts bearer token or the auth cookie
+// RequireAuth is a middleware function that requires a valid authentication session
+// Accepts bearer token or auth cookie
 func RequireAuth(s *storage.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sessionID := extractSessionID(c)
@@ -65,6 +65,7 @@ func RequireAuth(s *storage.Store) gin.HandlerFunc {
 	}
 }
 
+// GetAuthSession retrieves the auth session from Gin context
 func GetAuthSession(c *gin.Context) *structs.AuthSession {
 	v, ok := c.Get(ContextSessionKey)
 	if !ok {
@@ -79,6 +80,7 @@ func GetAuthSession(c *gin.Context) *structs.AuthSession {
 	return session
 }
 
+// extractSessionID extracts the session ID from the Auth header or cookie
 func extractSessionID(c *gin.Context) string {
 	auth := c.GetHeader("Authorization")
 	if auth != "" {

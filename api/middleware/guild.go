@@ -11,6 +11,7 @@ import (
 
 const ContextGuildKey = "guild_context"
 
+// RequireGuildContext is a middleware function that requires a valid guild context
 func RequireGuildContext(services *app.Services, requiredAction structs.PermissionAction) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		session := GetAuthSession(c)
@@ -40,6 +41,7 @@ func RequireGuildContext(services *app.Services, requiredAction structs.Permissi
 	}
 }
 
+// GetGuildContext retrieves the guild context from Gin context
 func GetGuildContext(c *gin.Context) *app.GuildStaffContext {
 	v, ok := c.Get(ContextGuildKey)
 	if !ok {

@@ -218,6 +218,7 @@ func authMe(c *gin.Context) {
 	})
 }
 
+// handles logout request
 func authLogout(c *gin.Context, services *app.Services) {
 	session := middleware.GetAuthSession(c)
 	if session != nil {
@@ -234,6 +235,7 @@ func authLogout(c *gin.Context, services *app.Services) {
 	c.Status(http.StatusNoContent)
 }
 
+// builds discord oauth authorization url
 func buildDiscordAuthURL(state string) string {
 	v := url.Values{}
 	v.Set("client_id", lib.Config.Discord.AppID)
@@ -245,6 +247,7 @@ func buildDiscordAuthURL(state string) string {
 	return discordAuthorizeURL + "?" + v.Encode()
 }
 
+// exchanges discord authorization code for access token
 func exchangeDiscordCode(ctx context.Context, code string) (*discordTokenResponse, error) {
 	body := url.Values{}
 	body.Set("client_id", lib.Config.Discord.AppID)
@@ -280,6 +283,7 @@ func exchangeDiscordCode(ctx context.Context, code string) (*discordTokenRespons
 	return &token, nil
 }
 
+// fetches discord user information
 func fetchDiscordUser(ctx context.Context, accessToken string) (*discordUserResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, discordMeURL, nil)
 	if err != nil {
@@ -305,6 +309,7 @@ func fetchDiscordUser(ctx context.Context, accessToken string) (*discordUserResp
 	return &user, nil
 }
 
+// sets auth cookie
 func setAuthCookie(c *gin.Context, sessionID string, maxAge int) {
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(
@@ -318,6 +323,7 @@ func setAuthCookie(c *gin.Context, sessionID string, maxAge int) {
 	)
 }
 
+// clears auth cookie
 func clearAuthCookie(c *gin.Context) {
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(
@@ -331,6 +337,7 @@ func clearAuthCookie(c *gin.Context) {
 	)
 }
 
+// builds discord avatar url
 func discordAvatarURL(userID, avatarHash string) string {
 	if userID == "" || avatarHash == "" {
 		return ""
@@ -344,6 +351,7 @@ func discordAvatarURL(userID, avatarHash string) string {
 	return fmt.Sprintf("https://cdn.discordapp.com/avatars/%s/%s.%s", userID, avatarHash, ext)
 }
 
+// sanitizes redirect target
 func sanitizeRedirectTarget(target, fallback string) string {
 	target = strings.TrimSpace(target)
 	fallback = strings.TrimSpace(fallback)
@@ -380,6 +388,7 @@ func sanitizeRedirectTarget(target, fallback string) string {
 	return fallback
 }
 
+// validates discord oauth configuration
 func validateDiscordOAuthConfig() error {
 	if strings.TrimSpace(lib.Config.Discord.AppID) == "" {
 		return fmt.Errorf("discord oauth is not configured missing DISCORD_APP_ID")

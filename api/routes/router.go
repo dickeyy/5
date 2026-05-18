@@ -16,6 +16,7 @@ func SetupRoutes(r *gin.Engine, services *app.Services) {
 func setupGuildRoutes(r *gin.Engine, services *app.Services) {
 	guilds := r.Group("/guilds")
 	guilds.Use(middleware.RequireAuth(services.Store))
+
 	guilds.GET("", func(c *gin.Context) { listUserGuilds(c, services) })
 	guilds.GET("/:discordGuildID/me", middleware.RequireGuildContext(services, ""), guildMe)
 	guilds.GET("/:discordGuildID/templates", middleware.RequireGuildContext(services, structs.PermissionActionCaseTemplateRead), func(c *gin.Context) {

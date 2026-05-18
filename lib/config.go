@@ -29,6 +29,8 @@ func LoadConfig() {
 			ClientSecret:     getEnvWithEnvironmentOverride("DISCORD_CLIENT_SECRET", env, false),
 			OAuthRedirectURI: getEnvWithDefault("DISCORD_OAUTH_REDIRECT_URI", ""),
 			OAuthScopes:      getEnvWithDefault("DISCORD_OAUTH_SCOPES", "identify guilds"),
+			CommandGuildID:   getEnvWithDefault("DISCORD_COMMAND_GUILD_ID", ""),
+			CommandPrune:     getEnvWithDefaultBool("DISCORD_COMMAND_PRUNE", false),
 		},
 		Auth: structs.AuthConfig{
 			SessionCookieName: getEnvWithDefault("AUTH_SESSION_COOKIE_NAME", "quack_session"),

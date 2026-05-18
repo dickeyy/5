@@ -7,6 +7,7 @@ import (
 	"github.com/quackdiscord/bot/api"
 	"github.com/quackdiscord/bot/app"
 	"github.com/quackdiscord/bot/discord"
+	"github.com/quackdiscord/bot/discord/commands"
 	"github.com/quackdiscord/bot/lib"
 	"github.com/quackdiscord/bot/services"
 	"github.com/quackdiscord/bot/storage"
@@ -31,6 +32,10 @@ func main() {
 	services.EQ.Start()
 
 	discord.Connect(s)
+	appServices := app.New(s)
+	if err := commands.Register(discord.Session, appServices); err != nil {
+		log.Error().Err(err).Msg("Failed to register Discord commands")
+	}
 	if err := app.EnqueuePendingCaseActions(context.Background(), s, 100); err != nil {
 		log.Error().Err(err).Msg("Failed to enqueue pending case actions")
 	}
