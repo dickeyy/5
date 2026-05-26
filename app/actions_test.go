@@ -60,7 +60,6 @@ func TestActionServiceProcessesSafeActions(t *testing.T) {
 	template := createAppTemplate(t, ctx, store, adminContext, actionTemplateInput("safe-actions", []app.TemplateActionInput{
 		{ActionType: structs.ActionRecordWarning, Config: json.RawMessage(`{}`), IdempotencyScope: "case"},
 		{ActionType: structs.ActionSendDM, Config: json.RawMessage(`{"message":"Please stop"}`), IdempotencyScope: "case"},
-		{ActionType: structs.ActionWriteModLog, Config: json.RawMessage(`{}`), IdempotencyScope: "case"},
 	}))
 	created, err := app.NewCaseService(store).Create(ctx, modContext, app.CaseInput{
 		TemplateID:          template.ID,
@@ -78,8 +77,8 @@ func TestActionServiceProcessesSafeActions(t *testing.T) {
 	if len(fakeDiscord.dms) != 1 || fakeDiscord.dms[0].TargetID != "target-1" || fakeDiscord.dms[0].Message != "Please stop" {
 		t.Fatalf("unexpected DMs: %+v", fakeDiscord.dms)
 	}
-	if len(fakeDiscord.logs) != 1 || fakeDiscord.logs[0].TargetID != "mod-log-1" {
-		t.Fatalf("unexpected mod logs: %+v", fakeDiscord.logs)
+	if len(fakeDiscord.logs) != 0 {
+		t.Fatalf("did not expect template-driven mod logs in phase 2, got %+v", fakeDiscord.logs)
 	}
 
 	actions, err := store.ListCaseActionExecutions(ctx, created.ID)
@@ -227,7 +226,6 @@ func setModLogChannel(t *testing.T, store *storage.Store, guildID, channelID str
 
 func actionTemplateInput(slug string, actions []app.TemplateActionInput) app.TemplateInput {
 	input := validTemplateInput(slug)
-	input.Actions = actions
-	input.EscalationRules = nil
+	input.Levels[0].Actions = actions
 	return input
 }

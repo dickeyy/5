@@ -46,6 +46,16 @@ func (s *Store) Migrate() error {
 				return withMySQLTableOptions(tx).AutoMigrate(models...)
 			},
 		},
+		{
+			Name: "0002_template_levels",
+			Apply: func(tx *gorm.DB) error {
+				return withMySQLTableOptions(tx).AutoMigrate(
+					&structs.CaseTemplate{},
+					&structs.CaseTemplateLevel{},
+					&structs.CaseTemplateLevelAction{},
+				)
+			},
+		},
 	}
 
 	for _, m := range migrations {

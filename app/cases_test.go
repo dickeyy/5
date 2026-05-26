@@ -144,7 +144,14 @@ func TestCaseServiceRejectsEmptyFinalReason(t *testing.T) {
 			CreatedByDiscordUserID: "admin-1",
 			UpdatedByDiscordUserID: "admin-1",
 		},
-		Actions: []structs.CaseTemplateAction{{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true}},
+		Levels: []storage.ExpandedCaseTemplateLevel{
+			{
+				Level: structs.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, Enabled: true},
+				Actions: []structs.CaseTemplateLevelAction{
+					{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
+				},
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("create template: %v", err)
@@ -173,25 +180,9 @@ func TestCaseServicePermissionFailures(t *testing.T) {
 	if !errors.Is(err, app.ErrCasePermissionDenied) {
 		t.Fatalf("expected case.create permission error, got %v", err)
 	}
-
-	templateRequiredInput := validTemplateInput("manage-template")
-	templateRequiredInput.RequiredPermissionBits = uint64(discordgo.PermissionManageGuild)
-	templateRequired := createAppTemplate(t, ctx, store, adminContext, templateRequiredInput)
-	_, err = service.Create(ctx, modContext, app.CaseInput{TemplateID: templateRequired.ID, TargetDiscordUserID: "target-1"})
-	if !errors.Is(err, app.ErrCasePermissionDenied) {
-		t.Fatalf("expected template permission error, got %v", err)
-	}
-
-	actionRequiredInput := validTemplateInput("manage-action")
-	actionRequiredInput.Actions[0].RequiredPermissionBits = uint64(discordgo.PermissionManageGuild)
-	actionRequired := createAppTemplate(t, ctx, store, adminContext, actionRequiredInput)
-	_, err = service.Create(ctx, modContext, app.CaseInput{TemplateID: actionRequired.ID, TargetDiscordUserID: "target-1"})
-	if !errors.Is(err, app.ErrCasePermissionDenied) {
-		t.Fatalf("expected action permission error, got %v", err)
-	}
 }
 
-func TestCaseServiceSnapshotIncludesMatchedEscalation(t *testing.T) {
+func TestCaseServiceSnapshotUsesDefaultLevelActionsDuringPhaseTwoCompatibility(t *testing.T) {
 	ctx := context.Background()
 	store := newMigratedStore(t)
 	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
@@ -199,13 +190,13 @@ func TestCaseServiceSnapshotIncludesMatchedEscalation(t *testing.T) {
 	service := app.NewCaseService(store)
 
 	input := validTemplateInput("spam")
-	input.EscalationRules[0].TriggerCaseCount = 1
 	template := createAppTemplate(t, ctx, store, adminContext, input)
-	if _, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"}); err != nil {
-		t.Fatalf("create first case: %v", err)
+	created, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
+	if err != nil {
+		t.Fatalf("create case: %v", err)
 	}
-	if _, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"}); err != nil {
-		t.Fatalf("create second case: %v", err)
+	if len(created.Actions) != 2 {
+		t.Fatalf("expected default level actions only, got %+v", created.Actions)
 	}
 
 	cases, err := store.ListCases(ctx, modContext.Guild.ID)
@@ -220,11 +211,11 @@ func TestCaseServiceSnapshotIncludesMatchedEscalation(t *testing.T) {
 			} `json:"matched_rules"`
 		} `json:"escalation"`
 	}
-	if err := json.Unmarshal([]byte(cases[1].TemplateSnapshotJSON), &snapshot); err != nil {
+	if err := json.Unmarshal([]byte(cases[0].TemplateSnapshotJSON), &snapshot); err != nil {
 		t.Fatalf("decode snapshot: %v", err)
 	}
-	if len(snapshot.Escalation.MatchedRules) != 1 || snapshot.Escalation.MatchedRules[0].CaseCount != 1 {
-		t.Fatalf("expected matched escalation in second snapshot, got %+v", snapshot.Escalation.MatchedRules)
+	if len(snapshot.Escalation.MatchedRules) != 0 {
+		t.Fatalf("expected escalation to remain deferred to phase 3, got %+v", snapshot.Escalation.MatchedRules)
 	}
 }
 

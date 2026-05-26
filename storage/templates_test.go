@@ -15,13 +15,20 @@ func TestCaseTemplateStorageCreateListGetExpanded(t *testing.T) {
 
 	created, err := store.CreateCaseTemplate(ctx, storage.CreateCaseTemplateParams{
 		Template: templateModel(guildID, "spam"),
-		Actions: []structs.CaseTemplateAction{
-			{Position: 2, ActionType: structs.ActionSendDM, ConfigJSON: `{"message":"stop"}`, IdempotencyScope: "case", Enabled: true},
-			{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
-		},
-		EscalationRules: []structs.CaseTemplateEscalationRule{
-			{Name: "Second", Scope: structs.EscalationScopeUser, Priority: 20, RuleConfigJSON: `{}`, Enabled: true, StopAfterMatch: true},
-			{Name: "First", Scope: structs.EscalationScopeUser, Priority: 10, RuleConfigJSON: `{}`, Enabled: true, StopAfterMatch: true},
+		Levels: []storage.ExpandedCaseTemplateLevel{
+			{
+				Level: structs.CaseTemplateLevel{Position: 2, Name: "Second", TriggerCaseCount: 3, Enabled: true},
+				Actions: []structs.CaseTemplateLevelAction{
+					{Position: 1, ActionType: structs.ActionTimeoutUser, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
+				},
+			},
+			{
+				Level: structs.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, Enabled: true},
+				Actions: []structs.CaseTemplateLevelAction{
+					{Position: 2, ActionType: structs.ActionSendDM, ConfigJSON: `{"message":"stop"}`, IdempotencyScope: "case", Enabled: true},
+					{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
+				},
+			},
 		},
 	})
 	if err != nil {
@@ -31,11 +38,11 @@ func TestCaseTemplateStorageCreateListGetExpanded(t *testing.T) {
 	if created.Template.ID == "" {
 		t.Fatalf("expected template id")
 	}
-	if len(created.Actions) != 2 || created.Actions[0].Position != 1 || created.Actions[1].Position != 2 {
-		t.Fatalf("expected actions ordered by position, got %+v", created.Actions)
+	if len(created.Levels) != 2 || created.Levels[0].Level.Position != 1 || created.Levels[1].Level.Position != 2 {
+		t.Fatalf("expected levels ordered by position, got %+v", created.Levels)
 	}
-	if len(created.EscalationRules) != 2 || created.EscalationRules[0].Priority != 10 {
-		t.Fatalf("expected rules ordered by priority, got %+v", created.EscalationRules)
+	if len(created.Levels[0].Actions) != 2 || created.Levels[0].Actions[0].Position != 1 || created.Levels[0].Actions[1].Position != 2 {
+		t.Fatalf("expected actions ordered by position, got %+v", created.Levels[0].Actions)
 	}
 
 	list, err := store.ListCaseTemplates(ctx, guildID)
@@ -53,7 +60,7 @@ func TestCaseTemplateStorageUpdateReplacesChildrenAndIncrementsVersion(t *testin
 
 	created, err := store.CreateCaseTemplate(ctx, storage.CreateCaseTemplateParams{
 		Template: templateModel(guildID, "spam"),
-		Actions:  []structs.CaseTemplateAction{{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true}},
+		Levels:   templateLevels(),
 	})
 	if err != nil {
 		t.Fatalf("create template: %v", err)
@@ -66,9 +73,14 @@ func TestCaseTemplateStorageUpdateReplacesChildrenAndIncrementsVersion(t *testin
 		GuildID:    guildID,
 		TemplateID: created.Template.ID,
 		Template:   update,
-		Actions: []structs.CaseTemplateAction{
-			{Position: 1, ActionType: structs.ActionWriteModLog, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
-			{Position: 2, ActionType: structs.ActionSendDM, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: false},
+		Levels: []storage.ExpandedCaseTemplateLevel{
+			{
+				Level: structs.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, Enabled: true},
+				Actions: []structs.CaseTemplateLevelAction{
+					{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
+					{Position: 2, ActionType: structs.ActionSendDM, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: false},
+				},
+			},
 		},
 	})
 	if err != nil {
@@ -77,8 +89,8 @@ func TestCaseTemplateStorageUpdateReplacesChildrenAndIncrementsVersion(t *testin
 	if updated.Template.Version != created.Template.Version+1 {
 		t.Fatalf("expected version increment, got %d then %d", created.Template.Version, updated.Template.Version)
 	}
-	if len(updated.Actions) != 2 || updated.Actions[0].ActionType != structs.ActionWriteModLog {
-		t.Fatalf("expected replaced actions, got %+v", updated.Actions)
+	if len(updated.Levels) != 1 || len(updated.Levels[0].Actions) != 2 || updated.Levels[0].Actions[0].ActionType != structs.ActionRecordWarning {
+		t.Fatalf("expected replaced levels and actions, got %+v", updated.Levels)
 	}
 }
 
@@ -88,7 +100,7 @@ func TestCaseTemplateStorageArchiveHidesFromListButDetailStillWorks(t *testing.T
 
 	created, err := store.CreateCaseTemplate(ctx, storage.CreateCaseTemplateParams{
 		Template: templateModel(guildID, "spam"),
-		Actions:  []structs.CaseTemplateAction{{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true}},
+		Levels:   templateLevels(),
 	})
 	if err != nil {
 		t.Fatalf("create template: %v", err)
@@ -125,7 +137,7 @@ func TestCaseTemplateStorageSlugUniquePerGuild(t *testing.T) {
 
 	_, err := store.CreateCaseTemplate(ctx, storage.CreateCaseTemplateParams{
 		Template: templateModel(guildID, "spam"),
-		Actions:  []structs.CaseTemplateAction{{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true}},
+		Levels:   templateLevels(),
 	})
 	if err != nil {
 		t.Fatalf("create template: %v", err)
@@ -133,10 +145,26 @@ func TestCaseTemplateStorageSlugUniquePerGuild(t *testing.T) {
 
 	_, err = store.CreateCaseTemplate(ctx, storage.CreateCaseTemplateParams{
 		Template: templateModel(guildID, "spam"),
-		Actions:  []structs.CaseTemplateAction{{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true}},
+		Levels:   templateLevels(),
 	})
 	if err == nil {
 		t.Fatalf("expected duplicate slug error")
+	}
+}
+
+func templateLevels() []storage.ExpandedCaseTemplateLevel {
+	return []storage.ExpandedCaseTemplateLevel{
+		{
+			Level: structs.CaseTemplateLevel{
+				Position:  1,
+				Name:      "Default",
+				IsDefault: true,
+				Enabled:   true,
+			},
+			Actions: []structs.CaseTemplateLevelAction{
+				{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
+			},
+		},
 	}
 }
 

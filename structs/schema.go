@@ -207,6 +207,7 @@ type CaseTemplate struct {
 	RequiredPermissionBits uint64         `gorm:"type:bigint unsigned;not null;default:0"`
 	DefaultSeverity        CaseSeverity   `gorm:"size:32;not null;default:'medium'"`
 	DefaultWeight          int            `gorm:"not null;default:1"`
+	Appealable             bool           `gorm:"not null;default:false"`
 	DMEnabled              bool           `gorm:"not null;default:false"`
 	DMTemplate             string         `gorm:"type:text"`
 	Enabled                bool           `gorm:"not null;default:true;index:idx_case_template_guild_enabled,priority:2"`
@@ -230,6 +231,31 @@ type CaseTemplateAction struct {
 	TimeoutMS              int        `gorm:"not null;default:0"`
 	IdempotencyScope       string     `gorm:"size:32;not null;default:'case'"`
 	Enabled                bool       `gorm:"not null;default:true"`
+}
+
+type CaseTemplateLevel struct {
+	ULIDModel
+	TemplateID       string `gorm:"type:char(26);not null;uniqueIndex:idx_template_level_position,priority:1;index"`
+	Position         int    `gorm:"not null;uniqueIndex:idx_template_level_position,priority:2"`
+	Name             string `gorm:"size:191;not null"`
+	IsDefault        bool   `gorm:"not null;default:false;index"`
+	TriggerCaseCount int    `gorm:"not null;default:0"`
+	WindowMinutes    int    `gorm:"not null;default:0"`
+	Enabled          bool   `gorm:"not null;default:true"`
+}
+
+type CaseTemplateLevelAction struct {
+	ULIDModel
+	LevelID          string     `gorm:"type:char(26);not null;uniqueIndex:idx_level_action_position,priority:1;index"`
+	Position         int        `gorm:"not null;uniqueIndex:idx_level_action_position,priority:2"`
+	ActionType       ActionType `gorm:"size:64;not null;index"`
+	ConfigJSON       string     `gorm:"type:json;not null"`
+	ContinueOnError  bool       `gorm:"not null;default:false"`
+	MaxRetries       uint8      `gorm:"not null;default:0"`
+	RetryBackoffMS   int        `gorm:"not null;default:0"`
+	TimeoutMS        int        `gorm:"not null;default:0"`
+	IdempotencyScope string     `gorm:"size:32;not null;default:'case'"`
+	Enabled          bool       `gorm:"not null;default:true"`
 }
 
 type CaseTemplateEscalationRule struct {
@@ -393,6 +419,8 @@ func SchemaModels() []any {
 		&StaffMember{},
 		&CaseTemplate{},
 		&CaseTemplateAction{},
+		&CaseTemplateLevel{},
+		&CaseTemplateLevelAction{},
 		&CaseTemplateEscalationRule{},
 		&Case{},
 		&CaseActionExecution{},

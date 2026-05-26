@@ -11,25 +11,27 @@ import (
 )
 
 type ExpandedCaseTemplate struct {
-	Template        structs.CaseTemplate
-	Actions         []structs.CaseTemplateAction
-	EscalationRules []structs.CaseTemplateEscalationRule
+	Template structs.CaseTemplate
+	Levels   []ExpandedCaseTemplateLevel
+}
+
+type ExpandedCaseTemplateLevel struct {
+	Level   structs.CaseTemplateLevel
+	Actions []structs.CaseTemplateLevelAction
 }
 
 type CreateCaseTemplateParams struct {
-	Template        structs.CaseTemplate
-	Actions         []structs.CaseTemplateAction
-	EscalationRules []structs.CaseTemplateEscalationRule
-	Audit           *structs.AuditLogEntry
+	Template structs.CaseTemplate
+	Levels   []ExpandedCaseTemplateLevel
+	Audit    *structs.AuditLogEntry
 }
 
 type UpdateCaseTemplateParams struct {
-	GuildID         string
-	TemplateID      string
-	Template        structs.CaseTemplate
-	Actions         []structs.CaseTemplateAction
-	EscalationRules []structs.CaseTemplateEscalationRule
-	Audit           *structs.AuditLogEntry
+	GuildID    string
+	TemplateID string
+	Template   structs.CaseTemplate
+	Levels     []ExpandedCaseTemplateLevel
+	Audit      *structs.AuditLogEntry
 }
 
 func (s *Store) CreateCaseTemplate(ctx context.Context, params CreateCaseTemplateParams) (*ExpandedCaseTemplate, error) {
@@ -54,10 +56,7 @@ func (s *Store) CreateCaseTemplate(ctx context.Context, params CreateCaseTemplat
 			}
 		}
 
-		if err := createTemplateActions(tx, template.ID, params.Actions, now); err != nil {
-			return err
-		}
-		if err := createTemplateEscalationRules(tx, template.GuildID, template.ID, params.EscalationRules, now); err != nil {
+		if err := createTemplateLevels(tx, template.ID, params.Levels, now); err != nil {
 			return err
 		}
 
@@ -148,9 +147,8 @@ func (s *Store) UpdateCaseTemplate(ctx context.Context, params UpdateCaseTemplat
 		template.Name = params.Template.Name
 		template.Description = params.Template.Description
 		template.ReasonTemplate = params.Template.ReasonTemplate
-		template.RequiredPermissionBits = params.Template.RequiredPermissionBits
 		template.DefaultSeverity = params.Template.DefaultSeverity
-		template.DefaultWeight = params.Template.DefaultWeight
+		template.Appealable = params.Template.Appealable
 		template.DMEnabled = params.Template.DMEnabled
 		template.DMTemplate = params.Template.DMTemplate
 		template.Enabled = params.Template.Enabled
@@ -162,17 +160,14 @@ func (s *Store) UpdateCaseTemplate(ctx context.Context, params UpdateCaseTemplat
 			return fmt.Errorf("update case template: %w", err)
 		}
 
-		if err := tx.Where("template_id = ?", template.ID).Delete(&structs.CaseTemplateAction{}).Error; err != nil {
-			return fmt.Errorf("replace case template actions: %w", err)
+		levelIDs := tx.Model(&structs.CaseTemplateLevel{}).Select("id").Where("template_id = ?", template.ID)
+		if err := tx.Where("level_id IN (?)", levelIDs).Delete(&structs.CaseTemplateLevelAction{}).Error; err != nil {
+			return fmt.Errorf("replace case template level actions: %w", err)
 		}
-		if err := tx.Where("template_id = ?", template.ID).Delete(&structs.CaseTemplateEscalationRule{}).Error; err != nil {
-			return fmt.Errorf("replace case template escalation rules: %w", err)
+		if err := tx.Where("template_id = ?", template.ID).Delete(&structs.CaseTemplateLevel{}).Error; err != nil {
+			return fmt.Errorf("replace case template levels: %w", err)
 		}
-
-		if err := createTemplateActions(tx, template.ID, params.Actions, now); err != nil {
-			return err
-		}
-		if err := createTemplateEscalationRules(tx, template.GuildID, template.ID, params.EscalationRules, now); err != nil {
+		if err := createTemplateLevels(tx, template.ID, params.Levels, now); err != nil {
 			return err
 		}
 
@@ -268,59 +263,60 @@ func getCaseTemplateExpanded(db *gorm.DB, guildID, templateID string) (*Expanded
 		return nil, fmt.Errorf("get case template: %w", err)
 	}
 
-	var actions []structs.CaseTemplateAction
-	if err := db.Where("template_id = ?", template.ID).Order("position ASC").Find(&actions).Error; err != nil {
-		return nil, fmt.Errorf("get case template actions: %w", err)
+	var levels []structs.CaseTemplateLevel
+	if err := db.Where("template_id = ?", template.ID).Order("position ASC").Find(&levels).Error; err != nil {
+		return nil, fmt.Errorf("get case template levels: %w", err)
 	}
 
-	var rules []structs.CaseTemplateEscalationRule
-	if err := db.Where("template_id = ?", template.ID).Order("priority ASC").Find(&rules).Error; err != nil {
-		return nil, fmt.Errorf("get case template escalation rules: %w", err)
+	expandedLevels := make([]ExpandedCaseTemplateLevel, 0, len(levels))
+	for _, level := range levels {
+		var actions []structs.CaseTemplateLevelAction
+		if err := db.Where("level_id = ?", level.ID).Order("position ASC").Find(&actions).Error; err != nil {
+			return nil, fmt.Errorf("get case template level actions: %w", err)
+		}
+		expandedLevels = append(expandedLevels, ExpandedCaseTemplateLevel{
+			Level:   level,
+			Actions: actions,
+		})
 	}
 
 	return &ExpandedCaseTemplate{
-		Template:        template,
-		Actions:         actions,
-		EscalationRules: rules,
+		Template: template,
+		Levels:   expandedLevels,
 	}, nil
 }
 
-func createTemplateActions(tx *gorm.DB, templateID string, actions []structs.CaseTemplateAction, now time.Time) error {
-	for i := range actions {
-		action := actions[i]
-		action.TemplateID = templateID
-		enabled := action.Enabled
-		if err := prepareULIDModel(&action.ULIDModel, now); err != nil {
-			return fmt.Errorf("prepare case template action model: %w", err)
+func createTemplateLevels(tx *gorm.DB, templateID string, levels []ExpandedCaseTemplateLevel, now time.Time) error {
+	for i := range levels {
+		level := levels[i].Level
+		level.TemplateID = templateID
+		levelEnabled := level.Enabled
+		if err := prepareULIDModel(&level.ULIDModel, now); err != nil {
+			return fmt.Errorf("prepare case template level model: %w", err)
 		}
-		if err := tx.Select("*").Create(&action).Error; err != nil {
-			return fmt.Errorf("create case template action: %w", err)
+		if err := tx.Select("*").Create(&level).Error; err != nil {
+			return fmt.Errorf("create case template level: %w", err)
 		}
-		if !enabled {
-			if err := tx.Model(&structs.CaseTemplateAction{}).Where("id = ?", action.ID).Update("enabled", false).Error; err != nil {
-				return fmt.Errorf("set case template action enabled state: %w", err)
+		if !levelEnabled {
+			if err := tx.Model(&structs.CaseTemplateLevel{}).Where("id = ?", level.ID).Update("enabled", false).Error; err != nil {
+				return fmt.Errorf("set case template level enabled state: %w", err)
 			}
 		}
-	}
 
-	return nil
-}
-
-func createTemplateEscalationRules(tx *gorm.DB, guildID, templateID string, rules []structs.CaseTemplateEscalationRule, now time.Time) error {
-	for i := range rules {
-		rule := rules[i]
-		rule.GuildID = guildID
-		rule.TemplateID = templateID
-		enabled := rule.Enabled
-		if err := prepareULIDModel(&rule.ULIDModel, now); err != nil {
-			return fmt.Errorf("prepare case template escalation rule model: %w", err)
-		}
-		if err := tx.Select("*").Create(&rule).Error; err != nil {
-			return fmt.Errorf("create case template escalation rule: %w", err)
-		}
-		if !enabled {
-			if err := tx.Model(&structs.CaseTemplateEscalationRule{}).Where("id = ?", rule.ID).Update("enabled", false).Error; err != nil {
-				return fmt.Errorf("set case template escalation rule enabled state: %w", err)
+		for j := range levels[i].Actions {
+			action := levels[i].Actions[j]
+			action.LevelID = level.ID
+			actionEnabled := action.Enabled
+			if err := prepareULIDModel(&action.ULIDModel, now); err != nil {
+				return fmt.Errorf("prepare case template level action model: %w", err)
+			}
+			if err := tx.Select("*").Create(&action).Error; err != nil {
+				return fmt.Errorf("create case template level action: %w", err)
+			}
+			if !actionEnabled {
+				if err := tx.Model(&structs.CaseTemplateLevelAction{}).Where("id = ?", action.ID).Update("enabled", false).Error; err != nil {
+					return fmt.Errorf("set case template level action enabled state: %w", err)
+				}
 			}
 		}
 	}

@@ -26,8 +26,11 @@ func TestTemplateServiceCreateNormalizesActionsAndAudits(t *testing.T) {
 	if created.ID == "" {
 		t.Fatalf("expected template id")
 	}
-	if len(created.Actions) != 2 || created.Actions[0].Position != 1 || created.Actions[1].Position != 2 {
-		t.Fatalf("expected normalized action positions, got %+v", created.Actions)
+	if len(created.Levels) != 2 || !created.Levels[0].IsDefault {
+		t.Fatalf("expected default and escalation levels, got %+v", created.Levels)
+	}
+	if len(created.Levels[0].Actions) != 2 || created.Levels[0].Actions[0].Position != 1 || created.Levels[0].Actions[1].Position != 2 {
+		t.Fatalf("expected normalized default action positions, got %+v", created.Levels[0].Actions)
 	}
 
 	audits, err := store.ListAuditLogEntries(ctx, guildContext.Guild.ID)
@@ -51,16 +54,34 @@ func TestTemplateServiceValidationFailures(t *testing.T) {
 	}{
 		{name: "invalid slug", edit: func(input *app.TemplateInput) { input.Slug = "Invalid Slug" }},
 		{name: "empty reason", edit: func(input *app.TemplateInput) { input.ReasonTemplate = "" }},
-		{name: "invalid severity", edit: func(input *app.TemplateInput) { input.DefaultSeverity = "urgent" }},
-		{name: "invalid action", edit: func(input *app.TemplateInput) { input.Actions[0].ActionType = "explode_user" }},
-		{name: "invalid config", edit: func(input *app.TemplateInput) { input.Actions[0].Config = json.RawMessage(`[]`) }},
-		{name: "negative retry", edit: func(input *app.TemplateInput) { input.Actions[0].MaxRetries = -1 }},
-		{name: "negative backoff", edit: func(input *app.TemplateInput) { input.Actions[0].RetryBackoffMS = -1 }},
-		{name: "negative timeout", edit: func(input *app.TemplateInput) { input.Actions[0].TimeoutMS = -1 }},
-		{name: "no enabled actions", edit: func(input *app.TemplateInput) {
+		{name: "invalid action", edit: func(input *app.TemplateInput) { input.Levels[0].Actions[0].ActionType = "explode_user" }},
+		{name: "invalid config", edit: func(input *app.TemplateInput) { input.Levels[0].Actions[0].Config = json.RawMessage(`[]`) }},
+		{name: "negative retry", edit: func(input *app.TemplateInput) { input.Levels[0].Actions[0].MaxRetries = -1 }},
+		{name: "negative backoff", edit: func(input *app.TemplateInput) { input.Levels[0].Actions[0].RetryBackoffMS = -1 }},
+		{name: "negative timeout", edit: func(input *app.TemplateInput) { input.Levels[0].Actions[0].TimeoutMS = -1 }},
+		{name: "no default level", edit: func(input *app.TemplateInput) { input.Levels[0].IsDefault = false }},
+		{name: "two default levels", edit: func(input *app.TemplateInput) { input.Levels[1].IsDefault = true }},
+		{name: "default level trigger", edit: func(input *app.TemplateInput) { input.Levels[0].TriggerCaseCount = 1 }},
+		{name: "escalation without trigger", edit: func(input *app.TemplateInput) { input.Levels[1].TriggerCaseCount = 0 }},
+		{name: "trigger weight", edit: func(input *app.TemplateInput) { input.Levels[1].TriggerWeightTotal = 1 }},
+		{name: "escalate template", edit: func(input *app.TemplateInput) {
+			target := "template-2"
+			input.Levels[1].EscalateToTemplateID = &target
+		}},
+		{name: "legacy template permission", edit: func(input *app.TemplateInput) { input.RequiredPermissionBits = uint64(discordgo.PermissionManageGuild) }},
+		{name: "legacy action permission", edit: func(input *app.TemplateInput) {
+			input.Levels[0].Actions[0].RequiredPermissionBits = uint64(discordgo.PermissionManageGuild)
+		}},
+		{name: "legacy default weight", edit: func(input *app.TemplateInput) { input.DefaultWeight = 2 }},
+		{name: "legacy flat actions", edit: func(input *app.TemplateInput) { input.Actions = input.Levels[0].Actions }},
+		{name: "legacy escalation rules", edit: func(input *app.TemplateInput) {
+			input.EscalationRules = []app.EscalationRuleInput{{Name: "old", TriggerCaseCount: 2}}
+		}},
+		{name: "write mod log action", edit: func(input *app.TemplateInput) { input.Levels[0].Actions[0].ActionType = structs.ActionWriteModLog }},
+		{name: "default with no enabled actions", edit: func(input *app.TemplateInput) {
 			disabled := false
-			input.Actions[0].Enabled = &disabled
-			input.Actions[1].Enabled = &disabled
+			input.Levels[0].Actions[0].Enabled = &disabled
+			input.Levels[0].Actions[1].Enabled = &disabled
 		}},
 	}
 
@@ -89,7 +110,7 @@ func TestTemplateServiceUpdateAndArchiveAudit(t *testing.T) {
 
 	update := validTemplateInput("spam-updated")
 	update.Name = "Spam Updated"
-	update.Actions = update.Actions[:1]
+	update.Levels[0].Actions = update.Levels[0].Actions[:1]
 	updated, err := service.Update(ctx, guildContext, created.ID, update)
 	if err != nil {
 		t.Fatalf("update template: %v", err)
@@ -97,8 +118,8 @@ func TestTemplateServiceUpdateAndArchiveAudit(t *testing.T) {
 	if updated.Version != created.Version+1 {
 		t.Fatalf("expected version increment, got %d then %d", created.Version, updated.Version)
 	}
-	if len(updated.Actions) != 1 {
-		t.Fatalf("expected update to replace actions")
+	if len(updated.Levels) != 2 || len(updated.Levels[0].Actions) != 1 {
+		t.Fatalf("expected update to replace levels and actions, got %+v", updated.Levels)
 	}
 
 	archived, err := service.Archive(ctx, guildContext, created.ID)
@@ -167,35 +188,44 @@ func templateGuildContext(t *testing.T, store *storage.Store, discordGuildID, us
 
 func validTemplateInput(slug string) app.TemplateInput {
 	return app.TemplateInput{
-		Slug:            slug,
-		Name:            "Spam",
-		Description:     "Spam template",
-		ReasonTemplate:  "No spam",
-		DefaultSeverity: structs.CaseSeverityMedium,
-		DefaultWeight:   1,
-		Actions: []app.TemplateActionInput{
+		Slug:           slug,
+		Name:           "Spam",
+		Description:    "Spam template",
+		ReasonTemplate: "No spam",
+		Appealable:     true,
+		Levels: []app.TemplateLevelInput{
 			{
-				ActionType:       structs.ActionSendDM,
-				Config:           json.RawMessage(`{"message":"Please stop"}`),
-				MaxRetries:       1,
-				RetryBackoffMS:   1000,
-				TimeoutMS:        5000,
-				IdempotencyScope: "case",
+				Name:      "Default",
+				Position:  1,
+				IsDefault: true,
+				Actions: []app.TemplateActionInput{
+					{
+						ActionType:       structs.ActionSendDM,
+						Config:           json.RawMessage(`{"message":"Please stop"}`),
+						MaxRetries:       1,
+						RetryBackoffMS:   1000,
+						TimeoutMS:        5000,
+						IdempotencyScope: "case",
+					},
+					{
+						ActionType:       structs.ActionRecordWarning,
+						Config:           json.RawMessage(`{}`),
+						IdempotencyScope: "case",
+					},
+				},
 			},
-			{
-				ActionType:       structs.ActionRecordWarning,
-				Config:           json.RawMessage(`{}`),
-				IdempotencyScope: "case",
-			},
-		},
-		EscalationRules: []app.EscalationRuleInput{
 			{
 				Name:             "Repeat spam",
-				Scope:            structs.EscalationScopeUser,
-				Priority:         10,
+				Position:         2,
 				TriggerCaseCount: 3,
 				WindowMinutes:    1440,
-				RuleConfig:       json.RawMessage(`{"note":"repeat"}`),
+				Actions: []app.TemplateActionInput{
+					{
+						ActionType:       structs.ActionTimeoutUser,
+						Config:           json.RawMessage(`{"duration_minutes":60}`),
+						IdempotencyScope: "case",
+					},
+				},
 			},
 		},
 	}

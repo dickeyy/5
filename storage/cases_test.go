@@ -22,8 +22,8 @@ func TestCreateCasePersistsCaseEventActionsAndAudit(t *testing.T) {
 			Body:               "Case created",
 		},
 		ActionExecutions: []structs.CaseActionExecution{
-			{TemplateActionID: &template.Actions[0].ID, Position: 1, ActionType: structs.ActionRecordWarning, ConfigSnapshotJSON: `{}`},
-			{TemplateActionID: &template.Actions[1].ID, Position: 2, ActionType: structs.ActionWriteModLog, ConfigSnapshotJSON: `{}`},
+			{TemplateActionID: &template.Levels[0].Actions[0].ID, Position: 1, ActionType: structs.ActionRecordWarning, ConfigSnapshotJSON: `{}`},
+			{TemplateActionID: &template.Levels[0].Actions[1].ID, Position: 2, ActionType: structs.ActionSendDM, ConfigSnapshotJSON: `{}`},
 		},
 		Audit: &structs.AuditLogEntry{
 			GuildID:            guildID,
@@ -280,10 +280,15 @@ func createCaseStorageTemplate(t *testing.T, store *storage.Store, guildID strin
 
 	created, err := store.CreateCaseTemplate(context.Background(), storage.CreateCaseTemplateParams{
 		Template: templateModel(guildID, "spam"),
-		Actions: []structs.CaseTemplateAction{
-			{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
-			{Position: 2, ActionType: structs.ActionWriteModLog, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
-			{Position: 3, ActionType: structs.ActionSendDM, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: false},
+		Levels: []storage.ExpandedCaseTemplateLevel{
+			{
+				Level: structs.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, Enabled: true},
+				Actions: []structs.CaseTemplateLevelAction{
+					{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
+					{Position: 2, ActionType: structs.ActionSendDM, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
+					{Position: 3, ActionType: structs.ActionKickUser, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: false},
+				},
+			},
 		},
 	})
 	if err != nil {

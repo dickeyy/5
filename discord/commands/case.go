@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -194,10 +193,6 @@ func handleTemplateAutocomplete(ctx context.Context, services *app.Services, int
 	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, 25)
 	for _, template := range templates {
 		if !template.Enabled {
-			continue
-		}
-		requiredBits, _ := strconv.ParseUint(template.RequiredPermissionBits, 10, 64)
-		if requiredBits != 0 && guildContext.PermissionBits&requiredBits != requiredBits && !guildContext.IsAdmin {
 			continue
 		}
 		search := strings.ToLower(template.Slug + " " + template.Name)

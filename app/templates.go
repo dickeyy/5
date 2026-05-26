@@ -28,19 +28,29 @@ type TemplateInput struct {
 	Name                   string                `json:"name"`
 	Description            string                `json:"description"`
 	ReasonTemplate         string                `json:"reason_template"`
-	RequiredPermissionBits uint64                `json:"required_permission_bits"`
-	DefaultSeverity        structs.CaseSeverity  `json:"default_severity"`
-	DefaultWeight          int                   `json:"default_weight"`
-	DMEnabled              bool                  `json:"dm_enabled"`
-	DMTemplate             string                `json:"dm_template"`
+	Appealable             bool                  `json:"appealable"`
 	Enabled                *bool                 `json:"enabled"`
+	Levels                 []TemplateLevelInput  `json:"levels"`
+	RequiredPermissionBits uint64                `json:"required_permission_bits"`
+	DefaultWeight          int                   `json:"default_weight"`
 	Actions                []TemplateActionInput `json:"actions"`
 	EscalationRules        []EscalationRuleInput `json:"escalation_rules"`
 }
 
+type TemplateLevelInput struct {
+	Name                 string                `json:"name"`
+	Position             int                   `json:"position"`
+	IsDefault            bool                  `json:"is_default"`
+	TriggerCaseCount     int                   `json:"trigger_case_count"`
+	WindowMinutes        int                   `json:"window_minutes"`
+	Enabled              *bool                 `json:"enabled"`
+	Actions              []TemplateActionInput `json:"actions"`
+	TriggerWeightTotal   int                   `json:"trigger_weight_total"`
+	EscalateToTemplateID *string               `json:"escalate_to_template_id"`
+}
+
 type TemplateActionInput struct {
 	ActionType             structs.ActionType `json:"action_type"`
-	RequiredPermissionBits uint64             `json:"required_permission_bits"`
 	Config                 json.RawMessage    `json:"config"`
 	ContinueOnError        bool               `json:"continue_on_error"`
 	MaxRetries             int                `json:"max_retries"`
@@ -48,6 +58,7 @@ type TemplateActionInput struct {
 	TimeoutMS              int                `json:"timeout_ms"`
 	IdempotencyScope       string             `json:"idempotency_scope"`
 	Enabled                *bool              `json:"enabled"`
+	RequiredPermissionBits uint64             `json:"required_permission_bits"`
 }
 
 type EscalationRuleInput struct {
@@ -64,52 +75,43 @@ type EscalationRuleInput struct {
 }
 
 type TemplateResponse struct {
-	ID                     string                   `json:"id"`
-	GuildID                string                   `json:"guild_id"`
-	Slug                   string                   `json:"slug"`
-	Name                   string                   `json:"name"`
-	Description            string                   `json:"description"`
-	ReasonTemplate         string                   `json:"reason_template"`
-	RequiredPermissionBits string                   `json:"required_permission_bits"`
-	DefaultSeverity        structs.CaseSeverity     `json:"default_severity"`
-	DefaultWeight          int                      `json:"default_weight"`
-	DMEnabled              bool                     `json:"dm_enabled"`
-	DMTemplate             string                   `json:"dm_template"`
-	Enabled                bool                     `json:"enabled"`
-	Version                uint                     `json:"version"`
-	CreatedByDiscordUserID string                   `json:"created_by_discord_user_id"`
-	UpdatedByDiscordUserID string                   `json:"updated_by_discord_user_id"`
-	ArchivedAt             any                      `json:"archived_at"`
-	Actions                []TemplateActionResponse `json:"actions"`
-	EscalationRules        []EscalationRuleResponse `json:"escalation_rules"`
+	ID                     string                  `json:"id"`
+	GuildID                string                  `json:"guild_id"`
+	Slug                   string                  `json:"slug"`
+	Name                   string                  `json:"name"`
+	Description            string                  `json:"description"`
+	ReasonTemplate         string                  `json:"reason_template"`
+	Appealable             bool                    `json:"appealable"`
+	Enabled                bool                    `json:"enabled"`
+	Version                uint                    `json:"version"`
+	CreatedByDiscordUserID string                  `json:"created_by_discord_user_id"`
+	UpdatedByDiscordUserID string                  `json:"updated_by_discord_user_id"`
+	ArchivedAt             any                     `json:"archived_at"`
+	Levels                 []TemplateLevelResponse `json:"levels"`
+}
+
+type TemplateLevelResponse struct {
+	ID               string                   `json:"id"`
+	Position         int                      `json:"position"`
+	Name             string                   `json:"name"`
+	IsDefault        bool                     `json:"is_default"`
+	TriggerCaseCount int                      `json:"trigger_case_count,omitempty"`
+	WindowMinutes    int                      `json:"window_minutes,omitempty"`
+	Enabled          bool                     `json:"enabled"`
+	Actions          []TemplateActionResponse `json:"actions"`
 }
 
 type TemplateActionResponse struct {
-	ID                     string             `json:"id"`
-	Position               int                `json:"position"`
-	ActionType             structs.ActionType `json:"action_type"`
-	RequiredPermissionBits string             `json:"required_permission_bits"`
-	Config                 any                `json:"config"`
-	ContinueOnError        bool               `json:"continue_on_error"`
-	MaxRetries             uint8              `json:"max_retries"`
-	RetryBackoffMS         int                `json:"retry_backoff_ms"`
-	TimeoutMS              int                `json:"timeout_ms"`
-	IdempotencyScope       string             `json:"idempotency_scope"`
-	Enabled                bool               `json:"enabled"`
-}
-
-type EscalationRuleResponse struct {
-	ID                   string                  `json:"id"`
-	Name                 string                  `json:"name"`
-	Scope                structs.EscalationScope `json:"scope"`
-	Priority             int                     `json:"priority"`
-	TriggerCaseCount     int                     `json:"trigger_case_count"`
-	TriggerWeightTotal   int                     `json:"trigger_weight_total"`
-	WindowMinutes        int                     `json:"window_minutes"`
-	EscalateToTemplateID *string                 `json:"escalate_to_template_id"`
-	RuleConfig           any                     `json:"rule_config"`
-	Enabled              bool                    `json:"enabled"`
-	StopAfterMatch       bool                    `json:"stop_after_match"`
+	ID               string             `json:"id"`
+	Position         int                `json:"position"`
+	ActionType       structs.ActionType `json:"action_type"`
+	Config           any                `json:"config"`
+	ContinueOnError  bool               `json:"continue_on_error"`
+	MaxRetries       uint8              `json:"max_retries"`
+	RetryBackoffMS   int                `json:"retry_backoff_ms"`
+	TimeoutMS        int                `json:"timeout_ms"`
+	IdempotencyScope string             `json:"idempotency_scope"`
+	Enabled          bool               `json:"enabled"`
 }
 
 func NewTemplateService(store *storage.Store) *TemplateService {
@@ -150,10 +152,9 @@ func (s *TemplateService) Create(ctx context.Context, guildContext *GuildStaffCo
 	}
 
 	expanded, err := s.store.CreateCaseTemplate(ctx, storage.CreateCaseTemplateParams{
-		Template:        normalized.template,
-		Actions:         normalized.actions,
-		EscalationRules: normalized.rules,
-		Audit:           s.auditEntry(guildContext, "case_template.create", "case_template", "", structs.AuditResultSuccess, ""),
+		Template: normalized.template,
+		Levels:   normalized.levels,
+		Audit:    s.auditEntry(guildContext, "case_template.create", "case_template", "", structs.AuditResultSuccess, ""),
 	})
 	if err != nil {
 		return nil, err
@@ -179,12 +180,11 @@ func (s *TemplateService) Update(ctx context.Context, guildContext *GuildStaffCo
 	}
 
 	expanded, err := s.store.UpdateCaseTemplate(ctx, storage.UpdateCaseTemplateParams{
-		GuildID:         guildContext.Guild.ID,
-		TemplateID:      templateID,
-		Template:        normalized.template,
-		Actions:         normalized.actions,
-		EscalationRules: normalized.rules,
-		Audit:           s.auditEntry(guildContext, "case_template.update", "case_template", templateID, structs.AuditResultSuccess, ""),
+		GuildID:    guildContext.Guild.ID,
+		TemplateID: templateID,
+		Template:   normalized.template,
+		Levels:     normalized.levels,
+		Audit:      s.auditEntry(guildContext, "case_template.update", "case_template", templateID, structs.AuditResultSuccess, ""),
 	})
 	if err != nil {
 		return nil, err
@@ -217,8 +217,7 @@ func (s *TemplateService) Archive(ctx context.Context, guildContext *GuildStaffC
 
 type normalizedTemplate struct {
 	template structs.CaseTemplate
-	actions  []structs.CaseTemplateAction
-	rules    []structs.CaseTemplateEscalationRule
+	levels   []storage.ExpandedCaseTemplateLevel
 }
 
 func (s *TemplateService) validate(ctx context.Context, guildContext *GuildStaffContext, templateID string, input TemplateInput) (*normalizedTemplate, error) {
@@ -247,38 +246,27 @@ func (s *TemplateService) validate(ctx context.Context, guildContext *GuildStaff
 		return nil, validationError("reason_template is required")
 	}
 
-	severity := input.DefaultSeverity
-	if severity == "" {
-		severity = structs.CaseSeverityMedium
+	if input.RequiredPermissionBits != 0 {
+		return nil, validationError("required_permission_bits is not part of foundation templates")
 	}
-	if !validCaseSeverity(severity) {
-		return nil, validationError("default_severity is invalid")
+	if input.DefaultWeight != 0 {
+		return nil, validationError("default_weight is not part of foundation templates")
+	}
+	if len(input.Actions) > 0 {
+		return nil, validationError("flat template actions are not supported; use levels[].actions")
+	}
+	if len(input.EscalationRules) > 0 {
+		return nil, validationError("escalation_rules are not supported; use levels")
 	}
 
-	weight := input.DefaultWeight
-	if weight == 0 {
-		weight = 1
-	}
-	if weight < 1 {
-		return nil, validationError("default_weight must be at least 1")
+	levels, err := normalizeLevels(input.Levels)
+	if err != nil {
+		return nil, err
 	}
 
 	enabled := true
 	if input.Enabled != nil {
 		enabled = *input.Enabled
-	}
-
-	actions, enabledActionCount, err := normalizeActions(input.Actions)
-	if err != nil {
-		return nil, err
-	}
-	if enabledActionCount == 0 {
-		return nil, validationError("at least one enabled action is required")
-	}
-
-	rules, err := normalizeEscalationRules(input.EscalationRules)
-	if err != nil {
-		return nil, err
 	}
 
 	template := structs.CaseTemplate{
@@ -287,23 +275,103 @@ func (s *TemplateService) validate(ctx context.Context, guildContext *GuildStaff
 		Name:                   name,
 		Description:            strings.TrimSpace(input.Description),
 		ReasonTemplate:         reasonTemplate,
-		RequiredPermissionBits: input.RequiredPermissionBits,
-		DefaultSeverity:        severity,
-		DefaultWeight:          weight,
-		DMEnabled:              input.DMEnabled,
-		DMTemplate:             strings.TrimSpace(input.DMTemplate),
+		DefaultSeverity:        structs.CaseSeverityMedium,
+		DefaultWeight:          1,
+		Appealable:             input.Appealable,
 		Enabled:                enabled,
 		CreatedByDiscordUserID: guildContext.Staff.DiscordUserID,
 		UpdatedByDiscordUserID: guildContext.Staff.DiscordUserID,
 	}
 
-	return &normalizedTemplate{template: template, actions: actions, rules: rules}, nil
+	return &normalizedTemplate{template: template, levels: levels}, nil
 }
 
-func normalizeActions(inputs []TemplateActionInput) ([]structs.CaseTemplateAction, int, error) {
-	actions := make([]structs.CaseTemplateAction, 0, len(inputs))
+func normalizeLevels(inputs []TemplateLevelInput) ([]storage.ExpandedCaseTemplateLevel, error) {
+	if len(inputs) == 0 {
+		return nil, validationError("at least one level is required")
+	}
+
+	levels := make([]storage.ExpandedCaseTemplateLevel, 0, len(inputs))
+	defaultCount := 0
+	defaultEnabledActionCount := 0
+
+	for i, input := range inputs {
+		name := strings.TrimSpace(input.Name)
+		if name == "" {
+			return nil, validationError("level name is required")
+		}
+		if input.TriggerWeightTotal != 0 {
+			return nil, validationError("trigger_weight_total is not part of foundation escalation")
+		}
+		if input.EscalateToTemplateID != nil && strings.TrimSpace(*input.EscalateToTemplateID) != "" {
+			return nil, validationError("escalate_to_template_id is not part of foundation escalation")
+		}
+		if input.TriggerCaseCount < 0 || input.WindowMinutes < 0 {
+			return nil, validationError("level trigger values must be non-negative")
+		}
+		if !input.IsDefault && input.TriggerCaseCount <= 0 {
+			return nil, validationError("escalation level trigger_case_count must be positive")
+		}
+		if input.IsDefault {
+			defaultCount++
+			if input.TriggerCaseCount != 0 || input.WindowMinutes != 0 {
+				return nil, validationError("default level cannot have escalation triggers")
+			}
+		}
+
+		enabled := true
+		if input.Enabled != nil {
+			enabled = *input.Enabled
+		}
+		actions, enabledActionCount, err := normalizeActions(input.Actions)
+		if err != nil {
+			return nil, err
+		}
+		if input.IsDefault {
+			defaultEnabledActionCount = enabledActionCount
+		}
+
+		position := input.Position
+		if position == 0 {
+			position = i + 1
+		}
+		if position < 0 {
+			return nil, validationError("level position must be non-negative")
+		}
+
+		levels = append(levels, storage.ExpandedCaseTemplateLevel{
+			Level: structs.CaseTemplateLevel{
+				Position:         position,
+				Name:             name,
+				IsDefault:        input.IsDefault,
+				TriggerCaseCount: input.TriggerCaseCount,
+				WindowMinutes:    input.WindowMinutes,
+				Enabled:          enabled,
+			},
+			Actions: actions,
+		})
+	}
+
+	if defaultCount == 0 {
+		return nil, validationError("exactly one default level is required")
+	}
+	if defaultCount > 1 {
+		return nil, validationError("only one default level is allowed")
+	}
+	if defaultEnabledActionCount == 0 {
+		return nil, validationError("default level requires at least one enabled action")
+	}
+
+	return levels, nil
+}
+
+func normalizeActions(inputs []TemplateActionInput) ([]structs.CaseTemplateLevelAction, int, error) {
+	actions := make([]structs.CaseTemplateLevelAction, 0, len(inputs))
 	enabledCount := 0
 	for i, input := range inputs {
+		if input.RequiredPermissionBits != 0 {
+			return nil, 0, validationError("action required_permission_bits is not part of foundation templates")
+		}
 		if !validActionType(input.ActionType) {
 			return nil, 0, validationError("action_type is invalid")
 		}
@@ -338,72 +406,20 @@ func normalizeActions(inputs []TemplateActionInput) ([]structs.CaseTemplateActio
 			enabledCount++
 		}
 
-		actions = append(actions, structs.CaseTemplateAction{
-			Position:               i + 1,
-			ActionType:             input.ActionType,
-			RequiredPermissionBits: input.RequiredPermissionBits,
-			ConfigJSON:             configJSON,
-			ContinueOnError:        input.ContinueOnError,
-			MaxRetries:             uint8(input.MaxRetries),
-			RetryBackoffMS:         input.RetryBackoffMS,
-			TimeoutMS:              input.TimeoutMS,
-			IdempotencyScope:       idempotencyScope,
-			Enabled:                enabled,
+		actions = append(actions, structs.CaseTemplateLevelAction{
+			Position:         i + 1,
+			ActionType:       input.ActionType,
+			ConfigJSON:       configJSON,
+			ContinueOnError:  input.ContinueOnError,
+			MaxRetries:       uint8(input.MaxRetries),
+			RetryBackoffMS:   input.RetryBackoffMS,
+			TimeoutMS:        input.TimeoutMS,
+			IdempotencyScope: idempotencyScope,
+			Enabled:          enabled,
 		})
 	}
 
 	return actions, enabledCount, nil
-}
-
-func normalizeEscalationRules(inputs []EscalationRuleInput) ([]structs.CaseTemplateEscalationRule, error) {
-	rules := make([]structs.CaseTemplateEscalationRule, 0, len(inputs))
-	for _, input := range inputs {
-		name := strings.TrimSpace(input.Name)
-		if name == "" {
-			return nil, validationError("escalation rule name is required")
-		}
-
-		scope := input.Scope
-		if scope == "" {
-			scope = structs.EscalationScopeUser
-		}
-		if scope != structs.EscalationScopeUser && scope != structs.EscalationScopeGuild {
-			return nil, validationError("escalation rule scope is invalid")
-		}
-		if input.TriggerCaseCount < 0 || input.TriggerWeightTotal < 0 || input.WindowMinutes < 0 {
-			return nil, validationError("escalation rule trigger values must be non-negative")
-		}
-
-		ruleConfigJSON, err := normalizeJSONObject(input.RuleConfig)
-		if err != nil {
-			return nil, validationError("rule_config must be a JSON object")
-		}
-
-		enabled := true
-		if input.Enabled != nil {
-			enabled = *input.Enabled
-		}
-
-		stopAfterMatch := true
-		if input.StopAfterMatch != nil {
-			stopAfterMatch = *input.StopAfterMatch
-		}
-
-		rules = append(rules, structs.CaseTemplateEscalationRule{
-			Name:                 name,
-			Scope:                scope,
-			Priority:             input.Priority,
-			TriggerCaseCount:     input.TriggerCaseCount,
-			TriggerWeightTotal:   input.TriggerWeightTotal,
-			WindowMinutes:        input.WindowMinutes,
-			EscalateToTemplateID: input.EscalateToTemplateID,
-			RuleConfigJSON:       ruleConfigJSON,
-			Enabled:              enabled,
-			StopAfterMatch:       stopAfterMatch,
-		})
-	}
-
-	return rules, nil
 }
 
 func normalizeJSONObject(raw json.RawMessage) (string, error) {
@@ -426,18 +442,9 @@ func normalizeJSONObject(raw json.RawMessage) (string, error) {
 	return string(body), nil
 }
 
-func validCaseSeverity(severity structs.CaseSeverity) bool {
-	switch severity {
-	case structs.CaseSeverityLow, structs.CaseSeverityMedium, structs.CaseSeverityHigh, structs.CaseSeverityCritical:
-		return true
-	default:
-		return false
-	}
-}
-
 func validActionType(actionType structs.ActionType) bool {
 	switch actionType {
-	case structs.ActionRecordWarning, structs.ActionSendDM, structs.ActionTimeoutUser, structs.ActionKickUser, structs.ActionBanUser, structs.ActionWriteModLog:
+	case structs.ActionRecordWarning, structs.ActionSendDM, structs.ActionTimeoutUser, structs.ActionKickUser, structs.ActionBanUser:
 		return true
 	default:
 		return false
@@ -488,53 +495,85 @@ func templateResponse(expanded storage.ExpandedCaseTemplate) TemplateResponse {
 		Name:                   template.Name,
 		Description:            template.Description,
 		ReasonTemplate:         template.ReasonTemplate,
-		RequiredPermissionBits: PermissionBitsString(template.RequiredPermissionBits),
-		DefaultSeverity:        template.DefaultSeverity,
-		DefaultWeight:          template.DefaultWeight,
-		DMEnabled:              template.DMEnabled,
-		DMTemplate:             template.DMTemplate,
+		Appealable:             template.Appealable,
 		Enabled:                template.Enabled,
 		Version:                template.Version,
 		CreatedByDiscordUserID: template.CreatedByDiscordUserID,
 		UpdatedByDiscordUserID: template.UpdatedByDiscordUserID,
 		ArchivedAt:             template.ArchivedAt,
-		Actions:                make([]TemplateActionResponse, 0, len(expanded.Actions)),
-		EscalationRules:        make([]EscalationRuleResponse, 0, len(expanded.EscalationRules)),
+		Levels:                 make([]TemplateLevelResponse, 0, len(expanded.Levels)),
 	}
 
-	for _, action := range expanded.Actions {
-		response.Actions = append(response.Actions, TemplateActionResponse{
-			ID:                     action.ID,
-			Position:               action.Position,
-			ActionType:             action.ActionType,
-			RequiredPermissionBits: PermissionBitsString(action.RequiredPermissionBits),
-			Config:                 parseJSON(action.ConfigJSON),
-			ContinueOnError:        action.ContinueOnError,
-			MaxRetries:             action.MaxRetries,
-			RetryBackoffMS:         action.RetryBackoffMS,
-			TimeoutMS:              action.TimeoutMS,
-			IdempotencyScope:       action.IdempotencyScope,
-			Enabled:                action.Enabled,
-		})
-	}
-
-	for _, rule := range expanded.EscalationRules {
-		response.EscalationRules = append(response.EscalationRules, EscalationRuleResponse{
-			ID:                   rule.ID,
-			Name:                 rule.Name,
-			Scope:                rule.Scope,
-			Priority:             rule.Priority,
-			TriggerCaseCount:     rule.TriggerCaseCount,
-			TriggerWeightTotal:   rule.TriggerWeightTotal,
-			WindowMinutes:        rule.WindowMinutes,
-			EscalateToTemplateID: rule.EscalateToTemplateID,
-			RuleConfig:           parseJSON(rule.RuleConfigJSON),
-			Enabled:              rule.Enabled,
-			StopAfterMatch:       rule.StopAfterMatch,
-		})
+	for _, level := range expanded.Levels {
+		levelResponse := TemplateLevelResponse{
+			ID:               level.Level.ID,
+			Position:         level.Level.Position,
+			Name:             level.Level.Name,
+			IsDefault:        level.Level.IsDefault,
+			TriggerCaseCount: level.Level.TriggerCaseCount,
+			WindowMinutes:    level.Level.WindowMinutes,
+			Enabled:          level.Level.Enabled,
+			Actions:          make([]TemplateActionResponse, 0, len(level.Actions)),
+		}
+		for _, action := range level.Actions {
+			levelResponse.Actions = append(levelResponse.Actions, TemplateActionResponse{
+				ID:               action.ID,
+				Position:         action.Position,
+				ActionType:       action.ActionType,
+				Config:           parseJSON(action.ConfigJSON),
+				ContinueOnError:  action.ContinueOnError,
+				MaxRetries:       action.MaxRetries,
+				RetryBackoffMS:   action.RetryBackoffMS,
+				TimeoutMS:        action.TimeoutMS,
+				IdempotencyScope: action.IdempotencyScope,
+				Enabled:          action.Enabled,
+			})
+		}
+		response.Levels = append(response.Levels, levelResponse)
 	}
 
 	return response
+}
+
+func defaultLevelActions(expanded *storage.ExpandedCaseTemplate) []structs.CaseTemplateLevelAction {
+	if expanded == nil {
+		return nil
+	}
+	for _, level := range expanded.Levels {
+		if level.Level.IsDefault {
+			return level.Actions
+		}
+	}
+	return nil
+}
+
+func enabledLevelActions(actions []structs.CaseTemplateLevelAction) []structs.CaseTemplateLevelAction {
+	enabled := make([]structs.CaseTemplateLevelAction, 0, len(actions))
+	for _, action := range actions {
+		if action.Enabled {
+			enabled = append(enabled, action)
+		}
+	}
+	return enabled
+}
+
+func levelActionResponses(actions []structs.CaseTemplateLevelAction) []TemplateActionResponse {
+	responses := make([]TemplateActionResponse, 0, len(actions))
+	for _, action := range actions {
+		responses = append(responses, TemplateActionResponse{
+			ID:               action.ID,
+			Position:         action.Position,
+			ActionType:       action.ActionType,
+			Config:           parseJSON(action.ConfigJSON),
+			ContinueOnError:  action.ContinueOnError,
+			MaxRetries:       action.MaxRetries,
+			RetryBackoffMS:   action.RetryBackoffMS,
+			TimeoutMS:        action.TimeoutMS,
+			IdempotencyScope: action.IdempotencyScope,
+			Enabled:          action.Enabled,
+		})
+	}
+	return responses
 }
 
 func parseJSON(body string) any {

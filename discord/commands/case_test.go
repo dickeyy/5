@@ -122,8 +122,15 @@ func newCaseCommandHarness(t *testing.T) (*storage.Store, *app.Services, string)
 		Slug:           "spam",
 		Name:           "Spam",
 		ReasonTemplate: "Spam",
-		Actions: []app.TemplateActionInput{
-			{ActionType: structs.ActionRecordWarning},
+		Levels: []app.TemplateLevelInput{
+			{
+				Name:      "Default",
+				Position:  1,
+				IsDefault: true,
+				Actions: []app.TemplateActionInput{
+					{ActionType: structs.ActionRecordWarning},
+				},
+			},
 		},
 	})
 	if err != nil {

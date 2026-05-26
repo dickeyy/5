@@ -69,27 +69,24 @@ type templateSnapshot struct {
 }
 
 type templateSnapshotTemplate struct {
-	ID                     string               `json:"id"`
-	Slug                   string               `json:"slug"`
-	Name                   string               `json:"name"`
-	Version                uint                 `json:"version"`
-	ReasonTemplate         string               `json:"reason_template"`
-	DefaultSeverity        structs.CaseSeverity `json:"default_severity"`
-	DefaultWeight          int                  `json:"default_weight"`
-	RequiredPermissionBits uint64               `json:"required_permission_bits"`
+	ID              string               `json:"id"`
+	Slug            string               `json:"slug"`
+	Name            string               `json:"name"`
+	Version         uint                 `json:"version"`
+	ReasonTemplate  string               `json:"reason_template"`
+	DefaultSeverity structs.CaseSeverity `json:"default_severity"`
 }
 
 type templateSnapshotAction struct {
-	ID                     string             `json:"id"`
-	Position               int                `json:"position"`
-	ActionType             structs.ActionType `json:"action_type"`
-	RequiredPermissionBits uint64             `json:"required_permission_bits"`
-	Config                 any                `json:"config"`
-	ContinueOnError        bool               `json:"continue_on_error"`
-	MaxRetries             uint8              `json:"max_retries"`
-	RetryBackoffMS         int                `json:"retry_backoff_ms"`
-	TimeoutMS              int                `json:"timeout_ms"`
-	IdempotencyScope       string             `json:"idempotency_scope"`
+	ID               string             `json:"id"`
+	Position         int                `json:"position"`
+	ActionType       structs.ActionType `json:"action_type"`
+	Config           any                `json:"config"`
+	ContinueOnError  bool               `json:"continue_on_error"`
+	MaxRetries       uint8              `json:"max_retries"`
+	RetryBackoffMS   int                `json:"retry_backoff_ms"`
+	TimeoutMS        int                `json:"timeout_ms"`
+	IdempotencyScope string             `json:"idempotency_scope"`
 }
 
 type escalationSnapshot struct {
@@ -174,9 +171,6 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 	if template == nil || !template.Template.Enabled || template.Template.ArchivedAt != nil {
 		return nil, ErrCaseTemplateNotAvailable
 	}
-	if !hasAllBits(guildContext.PermissionBits, template.Template.RequiredPermissionBits) {
-		return nil, ErrCasePermissionDenied
-	}
 
 	reason := strings.TrimSpace(input.ReasonOverride)
 	if reason == "" {
@@ -186,21 +180,12 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 		return nil, validationCaseError("reason is required")
 	}
 
-	enabledActions := make([]structs.CaseTemplateAction, 0, len(template.Actions))
-	for _, action := range template.Actions {
-		if !action.Enabled {
-			continue
-		}
-		if !hasAllBits(guildContext.PermissionBits, action.RequiredPermissionBits) {
-			return nil, ErrCasePermissionDenied
-		}
-		enabledActions = append(enabledActions, action)
-	}
+	enabledActions := enabledLevelActions(defaultLevelActions(template))
 	if len(enabledActions) == 0 {
 		return nil, validationCaseError("template has no enabled actions")
 	}
 
-	escalation, err := s.evaluateEscalation(ctx, guildContext.Guild.ID, targetDiscordUserID, template.EscalationRules)
+	escalation, err := s.evaluateEscalation(ctx, guildContext.Guild.ID, targetDiscordUserID, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +204,7 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 		ModeratorDiscordUserID:  guildContext.Staff.DiscordUserID,
 		Reason:                  reason,
 		Severity:                template.Template.DefaultSeverity,
-		Weight:                  template.Template.DefaultWeight,
+		Weight:                  1,
 		Status:                  structs.CaseStatusOpen,
 		Source:                  source,
 		ContextChannelDiscordID: strings.TrimSpace(input.ContextChannelDiscordID),
@@ -325,17 +310,15 @@ func (s *CaseService) evaluateEscalation(ctx context.Context, guildID, targetDis
 	return snapshot, nil
 }
 
-func buildTemplateSnapshot(template structs.CaseTemplate, actions []structs.CaseTemplateAction, escalation escalationSnapshot) (string, error) {
+func buildTemplateSnapshot(template structs.CaseTemplate, actions []structs.CaseTemplateLevelAction, escalation escalationSnapshot) (string, error) {
 	snapshot := templateSnapshot{
 		Template: templateSnapshotTemplate{
-			ID:                     template.ID,
-			Slug:                   template.Slug,
-			Name:                   template.Name,
-			Version:                template.Version,
-			ReasonTemplate:         template.ReasonTemplate,
-			DefaultSeverity:        template.DefaultSeverity,
-			DefaultWeight:          template.DefaultWeight,
-			RequiredPermissionBits: template.RequiredPermissionBits,
+			ID:              template.ID,
+			Slug:            template.Slug,
+			Name:            template.Name,
+			Version:         template.Version,
+			ReasonTemplate:  template.ReasonTemplate,
+			DefaultSeverity: template.DefaultSeverity,
 		},
 		Actions:    make([]templateSnapshotAction, 0, len(actions)),
 		Escalation: escalation,
@@ -343,16 +326,15 @@ func buildTemplateSnapshot(template structs.CaseTemplate, actions []structs.Case
 
 	for _, action := range actions {
 		snapshot.Actions = append(snapshot.Actions, templateSnapshotAction{
-			ID:                     action.ID,
-			Position:               action.Position,
-			ActionType:             action.ActionType,
-			RequiredPermissionBits: action.RequiredPermissionBits,
-			Config:                 parseJSON(action.ConfigJSON),
-			ContinueOnError:        action.ContinueOnError,
-			MaxRetries:             action.MaxRetries,
-			RetryBackoffMS:         action.RetryBackoffMS,
-			TimeoutMS:              action.TimeoutMS,
-			IdempotencyScope:       action.IdempotencyScope,
+			ID:               action.ID,
+			Position:         action.Position,
+			ActionType:       action.ActionType,
+			Config:           parseJSON(action.ConfigJSON),
+			ContinueOnError:  action.ContinueOnError,
+			MaxRetries:       action.MaxRetries,
+			RetryBackoffMS:   action.RetryBackoffMS,
+			TimeoutMS:        action.TimeoutMS,
+			IdempotencyScope: action.IdempotencyScope,
 		})
 	}
 
