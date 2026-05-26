@@ -46,7 +46,13 @@ type CaseResponse struct {
 	Weight                 int                  `json:"weight"`
 	Status                 structs.CaseStatus   `json:"status"`
 	Source                 structs.CaseSource   `json:"source"`
+	SelectedLevel          *CaseSelectedLevel   `json:"selected_level,omitempty"`
 	Actions                []CaseActionResponse `json:"actions"`
+}
+
+type CaseSelectedLevel struct {
+	TemplateLevelDetails
+	MatchedCaseCount int64 `json:"matched_case_count"`
 }
 
 type CaseActionResponse struct {
@@ -63,9 +69,9 @@ type CaseActionResponse struct {
 }
 
 type templateSnapshot struct {
-	Template   templateSnapshotTemplate `json:"template"`
-	Actions    []templateSnapshotAction `json:"actions"`
-	Escalation escalationSnapshot       `json:"escalation"`
+	Template      templateSnapshotTemplate `json:"template"`
+	SelectedLevel CaseSelectedLevel        `json:"selected_level"`
+	Actions       []templateSnapshotAction `json:"actions"`
 }
 
 type templateSnapshotTemplate struct {
@@ -89,27 +95,10 @@ type templateSnapshotAction struct {
 	IdempotencyScope string             `json:"idempotency_scope"`
 }
 
-type escalationSnapshot struct {
-	MatchedRules []matchedEscalationRule `json:"matched_rules"`
-	IgnoredRules []ignoredEscalationRule `json:"ignored_rules"`
-}
-
-type matchedEscalationRule struct {
-	ID                        string                  `json:"id"`
-	Name                      string                  `json:"name"`
-	Scope                     structs.EscalationScope `json:"scope"`
-	Priority                  int                     `json:"priority"`
-	CaseCount                 int64                   `json:"case_count"`
-	WeightTotal               int64                   `json:"weight_total"`
-	EscalateToTemplateID      *string                 `json:"escalate_to_template_id"`
-	ValidEscalationTemplateID *string                 `json:"valid_escalation_template_id,omitempty"`
-}
-
-type ignoredEscalationRule struct {
-	ID                   string  `json:"id"`
-	Name                 string  `json:"name"`
-	Reason               string  `json:"reason"`
-	EscalateToTemplateID *string `json:"escalate_to_template_id,omitempty"`
+type selectedTemplateLevel struct {
+	Level            structs.CaseTemplateLevel
+	Actions          []structs.CaseTemplateLevelAction
+	MatchedCaseCount int64
 }
 
 func NewCaseService(store *storage.Store) *CaseService {
@@ -180,17 +169,12 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 		return nil, validationCaseError("reason is required")
 	}
 
-	enabledActions := enabledLevelActions(defaultLevelActions(template))
-	if len(enabledActions) == 0 {
-		return nil, validationCaseError("template has no enabled actions")
-	}
-
-	escalation, err := s.evaluateEscalation(ctx, guildContext.Guild.ID, targetDiscordUserID, nil)
+	selectedLevel, err := s.selectTemplateLevel(ctx, guildContext.Guild.ID, targetDiscordUserID, template)
 	if err != nil {
 		return nil, err
 	}
 
-	snapshotJSON, err := buildTemplateSnapshot(template.Template, enabledActions, escalation)
+	snapshotJSON, err := buildTemplateSnapshot(template.Template, *selectedLevel)
 	if err != nil {
 		return nil, err
 	}
@@ -213,8 +197,8 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 		MetadataJSON:            metadataJSON,
 	}
 
-	actionExecutions := make([]structs.CaseActionExecution, 0, len(enabledActions))
-	for _, action := range enabledActions {
+	actionExecutions := make([]structs.CaseActionExecution, 0, len(selectedLevel.Actions))
+	for _, action := range selectedLevel.Actions {
 		templateActionID := action.ID
 		actionExecutions = append(actionExecutions, structs.CaseActionExecution{
 			TemplateActionID:   &templateActionID,
@@ -246,71 +230,93 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 	})
 }
 
-func (s *CaseService) evaluateEscalation(ctx context.Context, guildID, targetDiscordUserID string, rules []structs.CaseTemplateEscalationRule) (escalationSnapshot, error) {
-	snapshot := escalationSnapshot{
-		MatchedRules: []matchedEscalationRule{},
-		IgnoredRules: []ignoredEscalationRule{},
+func (s *CaseService) selectTemplateLevel(ctx context.Context, guildID, targetDiscordUserID string, template *storage.ExpandedCaseTemplate) (*selectedTemplateLevel, error) {
+	if template == nil {
+		return nil, validationCaseError("template is required")
 	}
 
-	for _, rule := range rules {
-		if !rule.Enabled {
+	var fallback *selectedTemplateLevel
+	var best *selectedTemplateLevel
+	now := time.Now().UTC()
+
+	for _, expandedLevel := range template.Levels {
+		level := expandedLevel.Level
+		if !level.Enabled {
 			continue
+		}
+
+		enabledActions := enabledLevelActions(expandedLevel.Actions)
+		if level.IsDefault {
+			if len(enabledActions) == 0 {
+				return nil, validationCaseError("default level has no enabled actions")
+			}
+			matchedCaseCount, err := s.matchingTemplateCaseCount(ctx, guildID, targetDiscordUserID, template.Template.ID, nil)
+			if err != nil {
+				return nil, err
+			}
+			fallback = &selectedTemplateLevel{
+				Level:            level,
+				Actions:          enabledActions,
+				MatchedCaseCount: matchedCaseCount,
+			}
+			continue
+		}
+
+		if level.TriggerCaseCount <= 0 {
+			return nil, validationCaseError("escalation level trigger_case_count must be positive")
 		}
 
 		var since *time.Time
-		if rule.WindowMinutes > 0 {
-			value := time.Now().UTC().Add(-time.Duration(rule.WindowMinutes) * time.Minute)
+		if level.WindowMinutes > 0 {
+			value := now.Add(-time.Duration(level.WindowMinutes) * time.Minute)
 			since = &value
 		}
-
-		stats, err := s.store.CaseHistoryStats(ctx, guildID, targetDiscordUserID, rule.Scope, since)
+		matchedCaseCount, err := s.matchingTemplateCaseCount(ctx, guildID, targetDiscordUserID, template.Template.ID, since)
 		if err != nil {
-			return snapshot, err
+			return nil, err
 		}
-
-		countMatches := rule.TriggerCaseCount > 0 && stats.CaseCount >= int64(rule.TriggerCaseCount)
-		weightMatches := rule.TriggerWeightTotal > 0 && stats.WeightTotal >= int64(rule.TriggerWeightTotal)
-		if !countMatches && !weightMatches {
+		if matchedCaseCount < int64(level.TriggerCaseCount) {
 			continue
 		}
-
-		matched := matchedEscalationRule{
-			ID:                   rule.ID,
-			Name:                 rule.Name,
-			Scope:                rule.Scope,
-			Priority:             rule.Priority,
-			CaseCount:            stats.CaseCount,
-			WeightTotal:          stats.WeightTotal,
-			EscalateToTemplateID: rule.EscalateToTemplateID,
+		candidate := &selectedTemplateLevel{
+			Level:            level,
+			Actions:          enabledActions,
+			MatchedCaseCount: matchedCaseCount,
 		}
-
-		if rule.EscalateToTemplateID != nil && strings.TrimSpace(*rule.EscalateToTemplateID) != "" {
-			escalationTemplate, err := s.store.GetCaseTemplateExpanded(ctx, guildID, *rule.EscalateToTemplateID)
-			if err != nil {
-				return snapshot, err
-			}
-			if escalationTemplate == nil || !escalationTemplate.Template.Enabled || escalationTemplate.Template.ArchivedAt != nil {
-				snapshot.IgnoredRules = append(snapshot.IgnoredRules, ignoredEscalationRule{
-					ID:                   rule.ID,
-					Name:                 rule.Name,
-					Reason:               "escalation target template unavailable",
-					EscalateToTemplateID: rule.EscalateToTemplateID,
-				})
-			} else {
-				matched.ValidEscalationTemplateID = &escalationTemplate.Template.ID
-			}
-		}
-
-		snapshot.MatchedRules = append(snapshot.MatchedRules, matched)
-		if rule.StopAfterMatch {
-			break
+		if best == nil ||
+			level.TriggerCaseCount > best.Level.TriggerCaseCount ||
+			(level.TriggerCaseCount == best.Level.TriggerCaseCount && level.Position > best.Level.Position) {
+			best = candidate
 		}
 	}
 
-	return snapshot, nil
+	if fallback == nil {
+		return nil, validationCaseError("template has no enabled default level")
+	}
+	if best != nil {
+		if len(best.Actions) == 0 {
+			return nil, validationCaseError("selected level has no enabled actions")
+		}
+		return best, nil
+	}
+
+	return fallback, nil
 }
 
-func buildTemplateSnapshot(template structs.CaseTemplate, actions []structs.CaseTemplateLevelAction, escalation escalationSnapshot) (string, error) {
+func (s *CaseService) matchingTemplateCaseCount(ctx context.Context, guildID, targetDiscordUserID, templateID string, since *time.Time) (int64, error) {
+	priorCount, err := s.store.CountTemplateCasesForTarget(ctx, storage.CountTemplateCasesForTargetParams{
+		GuildID:             guildID,
+		TemplateID:          templateID,
+		TargetDiscordUserID: targetDiscordUserID,
+		Since:               since,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return priorCount + 1, nil
+}
+
+func buildTemplateSnapshot(template structs.CaseTemplate, selectedLevel selectedTemplateLevel) (string, error) {
 	snapshot := templateSnapshot{
 		Template: templateSnapshotTemplate{
 			ID:              template.ID,
@@ -320,11 +326,14 @@ func buildTemplateSnapshot(template structs.CaseTemplate, actions []structs.Case
 			ReasonTemplate:  template.ReasonTemplate,
 			DefaultSeverity: template.DefaultSeverity,
 		},
-		Actions:    make([]templateSnapshotAction, 0, len(actions)),
-		Escalation: escalation,
+		SelectedLevel: CaseSelectedLevel{
+			TemplateLevelDetails: templateLevelDetails(selectedLevel.Level),
+			MatchedCaseCount:     selectedLevel.MatchedCaseCount,
+		},
+		Actions: make([]templateSnapshotAction, 0, len(selectedLevel.Actions)),
 	}
 
-	for _, action := range actions {
+	for _, action := range selectedLevel.Actions {
 		snapshot.Actions = append(snapshot.Actions, templateSnapshotAction{
 			ID:               action.ID,
 			Position:         action.Position,
@@ -359,6 +368,7 @@ func caseResponse(created storage.CreatedCase) CaseResponse {
 		Weight:                 created.Case.Weight,
 		Status:                 created.Case.Status,
 		Source:                 created.Case.Source,
+		SelectedLevel:          selectedLevelResponse(created.Case.TemplateSnapshotJSON),
 		Actions:                make([]CaseActionResponse, 0, len(created.ActionExecutions)),
 	}
 
@@ -378,6 +388,16 @@ func caseResponse(created storage.CreatedCase) CaseResponse {
 	}
 
 	return response
+}
+
+func selectedLevelResponse(snapshotJSON string) *CaseSelectedLevel {
+	var snapshot struct {
+		SelectedLevel CaseSelectedLevel `json:"selected_level"`
+	}
+	if err := json.Unmarshal([]byte(snapshotJSON), &snapshot); err != nil || snapshot.SelectedLevel.ID == "" {
+		return nil
+	}
+	return &snapshot.SelectedLevel
 }
 
 func validationCaseError(message string) error {

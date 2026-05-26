@@ -90,15 +90,19 @@ type TemplateResponse struct {
 	Levels                 []TemplateLevelResponse `json:"levels"`
 }
 
+type TemplateLevelDetails struct {
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Position         int    `json:"position"`
+	IsDefault        bool   `json:"is_default"`
+	TriggerCaseCount int    `json:"trigger_case_count"`
+	WindowMinutes    int    `json:"window_minutes"`
+}
+
 type TemplateLevelResponse struct {
-	ID               string                   `json:"id"`
-	Position         int                      `json:"position"`
-	Name             string                   `json:"name"`
-	IsDefault        bool                     `json:"is_default"`
-	TriggerCaseCount int                      `json:"trigger_case_count,omitempty"`
-	WindowMinutes    int                      `json:"window_minutes,omitempty"`
-	Enabled          bool                     `json:"enabled"`
-	Actions          []TemplateActionResponse `json:"actions"`
+	TemplateLevelDetails
+	Enabled bool                     `json:"enabled"`
+	Actions []TemplateActionResponse `json:"actions"`
 }
 
 type TemplateActionResponse struct {
@@ -506,14 +510,9 @@ func templateResponse(expanded storage.ExpandedCaseTemplate) TemplateResponse {
 
 	for _, level := range expanded.Levels {
 		levelResponse := TemplateLevelResponse{
-			ID:               level.Level.ID,
-			Position:         level.Level.Position,
-			Name:             level.Level.Name,
-			IsDefault:        level.Level.IsDefault,
-			TriggerCaseCount: level.Level.TriggerCaseCount,
-			WindowMinutes:    level.Level.WindowMinutes,
-			Enabled:          level.Level.Enabled,
-			Actions:          make([]TemplateActionResponse, 0, len(level.Actions)),
+			TemplateLevelDetails: templateLevelDetails(level.Level),
+			Enabled:              level.Level.Enabled,
+			Actions:              make([]TemplateActionResponse, 0, len(level.Actions)),
 		}
 		for _, action := range level.Actions {
 			levelResponse.Actions = append(levelResponse.Actions, TemplateActionResponse{
@@ -535,16 +534,15 @@ func templateResponse(expanded storage.ExpandedCaseTemplate) TemplateResponse {
 	return response
 }
 
-func defaultLevelActions(expanded *storage.ExpandedCaseTemplate) []structs.CaseTemplateLevelAction {
-	if expanded == nil {
-		return nil
+func templateLevelDetails(level structs.CaseTemplateLevel) TemplateLevelDetails {
+	return TemplateLevelDetails{
+		ID:               level.ID,
+		Name:             level.Name,
+		Position:         level.Position,
+		IsDefault:        level.IsDefault,
+		TriggerCaseCount: level.TriggerCaseCount,
+		WindowMinutes:    level.WindowMinutes,
 	}
-	for _, level := range expanded.Levels {
-		if level.Level.IsDefault {
-			return level.Actions
-		}
-	}
-	return nil
 }
 
 func enabledLevelActions(actions []structs.CaseTemplateLevelAction) []structs.CaseTemplateLevelAction {

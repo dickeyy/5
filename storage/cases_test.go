@@ -103,6 +103,75 @@ func TestCreateCaseAllocatesCaseNumbersPerGuild(t *testing.T) {
 	}
 }
 
+func TestCountTemplateCasesForTargetFiltersHistory(t *testing.T) {
+	ctx := context.Background()
+	store, guildID := templateTestStore(t)
+	template := createCaseStorageTemplate(t, store, guildID)
+	otherTemplate, err := store.CreateCaseTemplate(ctx, storage.CreateCaseTemplateParams{
+		Template: templateModel(guildID, "other"),
+		Levels:   templateLevels(),
+	})
+	if err != nil {
+		t.Fatalf("create other template: %v", err)
+	}
+
+	matching, err := store.CreateCase(ctx, storage.CreateCaseParams{Case: caseModel(guildID, &template.Template.ID), Event: caseEvent()})
+	if err != nil {
+		t.Fatalf("create matching case: %v", err)
+	}
+	oldMatching, err := store.CreateCase(ctx, storage.CreateCaseParams{Case: caseModel(guildID, &template.Template.ID), Event: caseEvent()})
+	if err != nil {
+		t.Fatalf("create old matching case: %v", err)
+	}
+	oldTime := time.Now().UTC().Add(-2 * time.Hour)
+	if err := store.DB().Model(&structs.Case{}).Where("id = ?", oldMatching.Case.ID).Update("created_at", oldTime).Error; err != nil {
+		t.Fatalf("age matching case: %v", err)
+	}
+
+	voided, err := store.CreateCase(ctx, storage.CreateCaseParams{Case: caseModel(guildID, &template.Template.ID), Event: caseEvent()})
+	if err != nil {
+		t.Fatalf("create voided case: %v", err)
+	}
+	if err := store.DB().Model(&structs.Case{}).Where("id = ?", voided.Case.ID).Update("status", structs.CaseStatusVoided).Error; err != nil {
+		t.Fatalf("void case: %v", err)
+	}
+
+	otherTarget := caseModel(guildID, &template.Template.ID)
+	otherTarget.TargetDiscordUserID = "target-2"
+	if _, err := store.CreateCase(ctx, storage.CreateCaseParams{Case: otherTarget, Event: caseEvent()}); err != nil {
+		t.Fatalf("create other target case: %v", err)
+	}
+	if _, err := store.CreateCase(ctx, storage.CreateCaseParams{Case: caseModel(guildID, &otherTemplate.Template.ID), Event: caseEvent()}); err != nil {
+		t.Fatalf("create other template case: %v", err)
+	}
+
+	count, err := store.CountTemplateCasesForTarget(ctx, storage.CountTemplateCasesForTargetParams{
+		GuildID:             guildID,
+		TemplateID:          template.Template.ID,
+		TargetDiscordUserID: "target-1",
+	})
+	if err != nil {
+		t.Fatalf("count cases: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected two non-voided matching cases, got %d; first=%s", count, matching.Case.ID)
+	}
+
+	since := time.Now().UTC().Add(-time.Hour)
+	count, err = store.CountTemplateCasesForTarget(ctx, storage.CountTemplateCasesForTargetParams{
+		GuildID:             guildID,
+		TemplateID:          template.Template.ID,
+		TargetDiscordUserID: "target-1",
+		Since:               &since,
+	})
+	if err != nil {
+		t.Fatalf("count cases with since: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one matching case inside window, got %d", count)
+	}
+}
+
 func TestCreateCaseRollsBackOnActionFailure(t *testing.T) {
 	ctx := context.Background()
 	store, guildID := templateTestStore(t)

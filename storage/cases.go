@@ -29,6 +29,13 @@ type CaseHistoryStats struct {
 	WeightTotal int64
 }
 
+type CountTemplateCasesForTargetParams struct {
+	GuildID             string
+	TemplateID          string
+	TargetDiscordUserID string
+	Since               *time.Time
+}
+
 type ClaimedCaseAction struct {
 	Case      structs.Case
 	Settings  structs.GuildSettings
@@ -185,6 +192,29 @@ func (s *Store) CaseHistoryStats(ctx context.Context, guildID, targetDiscordUser
 	}
 
 	return &CaseHistoryStats{CaseCount: row.CaseCount, WeightTotal: row.WeightTotal}, nil
+}
+
+func (s *Store) CountTemplateCasesForTarget(ctx context.Context, params CountTemplateCasesForTargetParams) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("database not connected")
+	}
+
+	query := s.db.WithContext(ctx).
+		Model(&structs.Case{}).
+		Where("guild_id = ?", params.GuildID).
+		Where("template_id = ?", params.TemplateID).
+		Where("target_discord_user_id = ?", params.TargetDiscordUserID).
+		Where("status <> ?", structs.CaseStatusVoided)
+	if params.Since != nil {
+		query = query.Where("created_at >= ?", *params.Since)
+	}
+
+	var count int64
+	if err := query.Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("count template cases for target: %w", err)
+	}
+
+	return count, nil
 }
 
 func (s *Store) ListCases(ctx context.Context, guildID string) ([]structs.Case, error) {

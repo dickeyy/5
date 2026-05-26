@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/app"
@@ -37,6 +38,9 @@ func TestCaseServiceCreateFromTemplate(t *testing.T) {
 	if len(created.Actions) != 2 {
 		t.Fatalf("expected two enabled actions, got %+v", created.Actions)
 	}
+	if created.SelectedLevel == nil || !created.SelectedLevel.IsDefault || created.SelectedLevel.MatchedCaseCount != 1 {
+		t.Fatalf("expected selected default level, got %+v", created.SelectedLevel)
+	}
 	if created.Actions[0].Position != 1 || created.Actions[0].Status != structs.ActionExecutionPending {
 		t.Fatalf("unexpected first action: %+v", created.Actions[0])
 	}
@@ -52,12 +56,20 @@ func TestCaseServiceCreateFromTemplate(t *testing.T) {
 		Actions []struct {
 			ActionType structs.ActionType `json:"action_type"`
 		} `json:"actions"`
+		SelectedLevel struct {
+			ID               string `json:"id"`
+			IsDefault        bool   `json:"is_default"`
+			MatchedCaseCount int64  `json:"matched_case_count"`
+		} `json:"selected_level"`
 	}
 	if err := json.Unmarshal([]byte(cases[0].TemplateSnapshotJSON), &snapshot); err != nil {
 		t.Fatalf("decode snapshot: %v", err)
 	}
 	if snapshot.Template.ID != template.ID || len(snapshot.Actions) != 2 {
 		t.Fatalf("unexpected snapshot: %+v", snapshot)
+	}
+	if snapshot.SelectedLevel.ID == "" || !snapshot.SelectedLevel.IsDefault || snapshot.SelectedLevel.MatchedCaseCount != 1 {
+		t.Fatalf("unexpected selected level snapshot: %+v", snapshot.SelectedLevel)
 	}
 }
 
@@ -182,21 +194,33 @@ func TestCaseServicePermissionFailures(t *testing.T) {
 	}
 }
 
-func TestCaseServiceSnapshotUsesDefaultLevelActionsDuringPhaseTwoCompatibility(t *testing.T) {
+func TestCaseServiceSelectsEscalationLevelFromSameTemplateHistory(t *testing.T) {
 	ctx := context.Background()
 	store := newMigratedStore(t)
 	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
 	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
 	service := app.NewCaseService(store)
 
-	input := validTemplateInput("spam")
-	template := createAppTemplate(t, ctx, store, adminContext, input)
+	template := createAppTemplate(t, ctx, store, adminContext, validTemplateInput("spam"))
+	for i := 0; i < 2; i++ {
+		created, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
+		if err != nil {
+			t.Fatalf("create prior case %d: %v", i+1, err)
+		}
+		if created.SelectedLevel == nil || !created.SelectedLevel.IsDefault {
+			t.Fatalf("expected prior case to use default level, got %+v", created.SelectedLevel)
+		}
+	}
+
 	created, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
 	if err != nil {
 		t.Fatalf("create case: %v", err)
 	}
-	if len(created.Actions) != 2 {
-		t.Fatalf("expected default level actions only, got %+v", created.Actions)
+	if created.SelectedLevel == nil || created.SelectedLevel.IsDefault || created.SelectedLevel.TriggerCaseCount != 3 || created.SelectedLevel.MatchedCaseCount != 3 {
+		t.Fatalf("expected repeat spam level, got %+v", created.SelectedLevel)
+	}
+	if len(created.Actions) != 1 || created.Actions[0].ActionType != structs.ActionTimeoutUser {
+		t.Fatalf("expected selected escalation action only, got %+v", created.Actions)
 	}
 
 	cases, err := store.ListCases(ctx, modContext.Guild.ID)
@@ -204,18 +228,191 @@ func TestCaseServiceSnapshotUsesDefaultLevelActionsDuringPhaseTwoCompatibility(t
 		t.Fatalf("list cases: %v", err)
 	}
 	var snapshot struct {
-		Escalation struct {
-			MatchedRules []struct {
-				ID        string `json:"id"`
-				CaseCount int64  `json:"case_count"`
-			} `json:"matched_rules"`
-		} `json:"escalation"`
+		SelectedLevel struct {
+			TriggerCaseCount int   `json:"trigger_case_count"`
+			MatchedCaseCount int64 `json:"matched_case_count"`
+		} `json:"selected_level"`
+		Actions []struct {
+			ActionType structs.ActionType `json:"action_type"`
+		} `json:"actions"`
 	}
-	if err := json.Unmarshal([]byte(cases[0].TemplateSnapshotJSON), &snapshot); err != nil {
+	if err := json.Unmarshal([]byte(cases[2].TemplateSnapshotJSON), &snapshot); err != nil {
 		t.Fatalf("decode snapshot: %v", err)
 	}
-	if len(snapshot.Escalation.MatchedRules) != 0 {
-		t.Fatalf("expected escalation to remain deferred to phase 3, got %+v", snapshot.Escalation.MatchedRules)
+	if snapshot.SelectedLevel.TriggerCaseCount != 3 || snapshot.SelectedLevel.MatchedCaseCount != 3 || len(snapshot.Actions) != 1 || snapshot.Actions[0].ActionType != structs.ActionTimeoutUser {
+		t.Fatalf("unexpected escalation snapshot: %+v", snapshot)
+	}
+}
+
+func TestCaseServiceHighestMatchingLevelWins(t *testing.T) {
+	ctx := context.Background()
+	store := newMigratedStore(t)
+	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
+	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
+	service := app.NewCaseService(store)
+
+	input := validTemplateInput("spam")
+	input.Levels = append(input.Levels, app.TemplateLevelInput{
+		Name:             "Early repeat",
+		Position:         3,
+		TriggerCaseCount: 2,
+		Actions: []app.TemplateActionInput{
+			{ActionType: structs.ActionRecordWarning, Config: json.RawMessage(`{}`), IdempotencyScope: "case"},
+		},
+	})
+	template := createAppTemplate(t, ctx, store, adminContext, input)
+
+	for i := 0; i < 2; i++ {
+		if _, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"}); err != nil {
+			t.Fatalf("create prior case %d: %v", i+1, err)
+		}
+	}
+	created, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
+	if err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	if created.SelectedLevel == nil || created.SelectedLevel.TriggerCaseCount != 3 {
+		t.Fatalf("expected highest trigger threshold to win, got %+v", created.SelectedLevel)
+	}
+}
+
+func TestCaseServiceLevelTieBreaksByHigherPosition(t *testing.T) {
+	ctx := context.Background()
+	store := newMigratedStore(t)
+	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
+	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
+	service := app.NewCaseService(store)
+
+	input := validTemplateInput("spam")
+	input.Levels[1].Name = "Lower position"
+	input.Levels[1].Position = 2
+	input.Levels[1].TriggerCaseCount = 1
+	input.Levels = append(input.Levels, app.TemplateLevelInput{
+		Name:             "Higher position",
+		Position:         3,
+		TriggerCaseCount: 1,
+		Actions: []app.TemplateActionInput{
+			{ActionType: structs.ActionKickUser, Config: json.RawMessage(`{"delete_message_seconds":0}`), IdempotencyScope: "case"},
+		},
+	})
+	template := createAppTemplate(t, ctx, store, adminContext, input)
+
+	created, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
+	if err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	if created.SelectedLevel == nil || created.SelectedLevel.Position != 3 {
+		t.Fatalf("expected higher position tie-breaker to win, got %+v", created.SelectedLevel)
+	}
+	if len(created.Actions) != 1 || created.Actions[0].ActionType != structs.ActionKickUser {
+		t.Fatalf("expected higher position level action, got %+v", created.Actions)
+	}
+}
+
+func TestCaseServiceLevelWindowsAndFilters(t *testing.T) {
+	ctx := context.Background()
+	store := newMigratedStore(t)
+	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
+	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
+	service := app.NewCaseService(store)
+
+	input := validTemplateInput("spam")
+	input.Levels[1].TriggerCaseCount = 2
+	input.Levels[1].WindowMinutes = 60
+	template := createAppTemplate(t, ctx, store, adminContext, input)
+
+	old, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
+	if err != nil {
+		t.Fatalf("create old case: %v", err)
+	}
+	oldTime := time.Now().UTC().Add(-2 * time.Hour)
+	if err := store.DB().Model(&structs.Case{}).Where("id = ?", old.ID).Update("created_at", oldTime).Error; err != nil {
+		t.Fatalf("age old case: %v", err)
+	}
+
+	otherTemplate := createAppTemplate(t, ctx, store, adminContext, validTemplateInput("other-template"))
+	if _, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: otherTemplate.ID, TargetDiscordUserID: "target-1"}); err != nil {
+		t.Fatalf("create other template case: %v", err)
+	}
+	if _, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-2"}); err != nil {
+		t.Fatalf("create other target case: %v", err)
+	}
+
+	created, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
+	if err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	if created.SelectedLevel == nil || !created.SelectedLevel.IsDefault || created.SelectedLevel.MatchedCaseCount != 2 {
+		t.Fatalf("expected default because matching prior cases are outside filters/window, got %+v", created.SelectedLevel)
+	}
+}
+
+func TestCaseServiceVoidedCasesDoNotCount(t *testing.T) {
+	ctx := context.Background()
+	store := newMigratedStore(t)
+	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
+	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
+	service := app.NewCaseService(store)
+
+	input := validTemplateInput("spam")
+	input.Levels[1].TriggerCaseCount = 2
+	template := createAppTemplate(t, ctx, store, adminContext, input)
+
+	prior, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
+	if err != nil {
+		t.Fatalf("create prior case: %v", err)
+	}
+	if err := store.DB().Model(&structs.Case{}).Where("id = ?", prior.ID).Update("status", structs.CaseStatusVoided).Error; err != nil {
+		t.Fatalf("void prior case: %v", err)
+	}
+
+	created, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
+	if err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	if created.SelectedLevel == nil || !created.SelectedLevel.IsDefault || created.SelectedLevel.MatchedCaseCount != 1 {
+		t.Fatalf("expected voided prior case to be ignored, got %+v", created.SelectedLevel)
+	}
+}
+
+func TestCaseServiceDisabledLevelsDoNotMatch(t *testing.T) {
+	ctx := context.Background()
+	store := newMigratedStore(t)
+	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
+	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
+	service := app.NewCaseService(store)
+
+	input := validTemplateInput("spam")
+	input.Levels[1].TriggerCaseCount = 1
+	disabled := false
+	input.Levels[1].Enabled = &disabled
+	template := createAppTemplate(t, ctx, store, adminContext, input)
+
+	created, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
+	if err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	if created.SelectedLevel == nil || !created.SelectedLevel.IsDefault || len(created.Actions) != 2 {
+		t.Fatalf("expected disabled escalation to be ignored, got level=%+v actions=%+v", created.SelectedLevel, created.Actions)
+	}
+}
+
+func TestCaseServiceRejectsSelectedLevelWithoutEnabledActions(t *testing.T) {
+	ctx := context.Background()
+	store := newMigratedStore(t)
+	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
+	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
+	service := app.NewCaseService(store)
+
+	input := validTemplateInput("spam")
+	input.Levels[1].TriggerCaseCount = 1
+	disabled := false
+	input.Levels[1].Actions[0].Enabled = &disabled
+	template := createAppTemplate(t, ctx, store, adminContext, input)
+
+	_, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
+	if !errors.Is(err, app.ErrCaseValidation) {
+		t.Fatalf("expected validation error, got %v", err)
 	}
 }
 
