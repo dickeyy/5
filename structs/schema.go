@@ -66,6 +66,15 @@ const (
 	ActionWriteModLog   ActionType = "write_mod_log"
 )
 
+type NotificationType string
+
+const (
+	NotificationWarning NotificationType = "warning"
+	NotificationTimeout NotificationType = "timeout"
+	NotificationKick    NotificationType = "kick"
+	NotificationBan     NotificationType = "ban"
+)
+
 type ActionExecutionStatus string
 
 const (
@@ -250,6 +259,8 @@ type CaseTemplateLevelAction struct {
 	Position         int        `gorm:"not null;uniqueIndex:idx_level_action_position,priority:2"`
 	ActionType       ActionType `gorm:"size:64;not null;index"`
 	ConfigJSON       string     `gorm:"type:json;not null"`
+	NotifyUser       bool       `gorm:"not null;default:false"`
+	NotificationType string     `gorm:"size:64"`
 	ContinueOnError  bool       `gorm:"not null;default:false"`
 	MaxRetries       uint8      `gorm:"not null;default:0"`
 	RetryBackoffMS   int        `gorm:"not null;default:0"`
@@ -306,6 +317,8 @@ type CaseActionExecution struct {
 	Status             ActionExecutionStatus `gorm:"size:32;not null;default:'pending';index:idx_action_execution_status_retry,priority:1"`
 	IdempotencyKey     string                `gorm:"size:191;not null;uniqueIndex"`
 	ConfigSnapshotJSON string                `gorm:"type:json;not null"`
+	NotifyUser         bool                  `gorm:"not null;default:false"`
+	NotificationType   string                `gorm:"size:64"`
 	AttemptCount       uint8                 `gorm:"not null;default:0"`
 	MaxRetries         uint8                 `gorm:"not null;default:0"`
 	RetryBackoffMS     int                   `gorm:"not null;default:0"`

@@ -95,7 +95,7 @@ func (s *ActionService) processClaimedAction(ctx context.Context, workerID strin
 		Execution: claimed.Execution,
 		Config:    config,
 	}
-	result := handler.Execute(ctx, actionContext)
+	result := s.executeAction(ctx, handler, actionContext)
 	requestPayload := map[string]any{
 		"case_id":      claimed.Case.ID,
 		"execution_id": claimed.Execution.ID,
@@ -174,6 +174,55 @@ func recordWarningAction(ctx context.Context, action ActionExecutionContext) Act
 	}}
 }
 
+func (s *ActionService) executeAction(ctx context.Context, handler ActionExecutor, action ActionExecutionContext) ActionResult {
+	var notification map[string]any
+	if action.Execution.NotifyUser {
+		if !executableActionType(action.Execution.ActionType) {
+			return handler.Execute(ctx, action)
+		}
+		response, err := s.sendActionNotification(ctx, action)
+		if err != nil {
+			return actionErrorFromDiscord(err)
+		}
+		notification = response
+	}
+
+	result := handler.Execute(ctx, action)
+	if notification != nil {
+		if result.Response == nil {
+			result.Response = map[string]any{}
+		}
+		result.Response["notification"] = notification
+	}
+	return result
+}
+
+func executableActionType(actionType structs.ActionType) bool {
+	switch actionType {
+	case structs.ActionRecordWarning, structs.ActionSendDM, structs.ActionWriteModLog:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *ActionService) sendActionNotification(ctx context.Context, action ActionExecutionContext) (map[string]any, error) {
+	if s.discord == nil {
+		return nil, DiscordActionError{Code: "discord_unavailable", Message: "discord action client is not configured", Retryable: false}
+	}
+
+	message := notificationMessage(action)
+	response, err := s.discord.SendDM(ctx, action.Case.TargetDiscordUserID, message)
+	if err != nil {
+		return nil, err
+	}
+	if response == nil {
+		response = map[string]any{}
+	}
+	response["type"] = notificationType(action)
+	return response, nil
+}
+
 func (s *ActionService) sendDMAction(ctx context.Context, action ActionExecutionContext) ActionResult {
 	if s.discord == nil {
 		return permanentActionError("discord_unavailable", "discord action client is not configured")
@@ -189,6 +238,48 @@ func (s *ActionService) sendDMAction(ctx context.Context, action ActionExecution
 		return actionErrorFromDiscord(err)
 	}
 	return ActionResult{Response: response}
+}
+
+func notificationMessage(action ActionExecutionContext) string {
+	message := configString(action.Config, "notification_message")
+	if message == "" {
+		message = configString(action.Config, "message")
+	}
+	if message != "" {
+		return message
+	}
+
+	switch structs.NotificationType(notificationType(action)) {
+	case structs.NotificationWarning:
+		return fmt.Sprintf("You received a warning in this server: %s", action.Case.Reason)
+	case structs.NotificationTimeout:
+		return fmt.Sprintf("You were timed out in this server: %s", action.Case.Reason)
+	case structs.NotificationKick:
+		return fmt.Sprintf("You were kicked from this server: %s", action.Case.Reason)
+	case structs.NotificationBan:
+		return fmt.Sprintf("You were banned from this server: %s", action.Case.Reason)
+	default:
+		return fmt.Sprintf("You received a moderation action in this server: %s", action.Case.Reason)
+	}
+}
+
+func notificationType(action ActionExecutionContext) string {
+	if action.Execution.NotificationType != "" {
+		return action.Execution.NotificationType
+	}
+
+	switch action.Execution.ActionType {
+	case structs.ActionRecordWarning:
+		return string(structs.NotificationWarning)
+	case structs.ActionTimeoutUser:
+		return string(structs.NotificationTimeout)
+	case structs.ActionKickUser:
+		return string(structs.NotificationKick)
+	case structs.ActionBanUser:
+		return string(structs.NotificationBan)
+	default:
+		return "moderation"
+	}
 }
 
 func (s *ActionService) writeModLogAction(ctx context.Context, action ActionExecutionContext) ActionResult {

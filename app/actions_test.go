@@ -58,8 +58,7 @@ func TestActionServiceProcessesSafeActions(t *testing.T) {
 	setModLogChannel(t, store, modContext.Guild.ID, "mod-log-1")
 
 	template := createAppTemplate(t, ctx, store, adminContext, actionTemplateInput("safe-actions", []app.TemplateActionInput{
-		{ActionType: structs.ActionRecordWarning, Config: json.RawMessage(`{}`), IdempotencyScope: "case"},
-		{ActionType: structs.ActionSendDM, Config: json.RawMessage(`{"message":"Please stop"}`), IdempotencyScope: "case"},
+		{ActionType: structs.ActionRecordWarning, Config: json.RawMessage(`{"notification_message":"Please stop"}`), NotifyUser: true, IdempotencyScope: "case"},
 	}))
 	created, err := app.NewCaseService(store).Create(ctx, modContext, app.CaseInput{
 		TemplateID:          template.ID,
@@ -107,8 +106,9 @@ func TestActionServiceRetriesTransientFailure(t *testing.T) {
 
 	template := createAppTemplate(t, ctx, store, adminContext, actionTemplateInput("retry-dm", []app.TemplateActionInput{
 		{
-			ActionType:       structs.ActionSendDM,
-			Config:           json.RawMessage(`{"message":"retry me"}`),
+			ActionType:       structs.ActionRecordWarning,
+			Config:           json.RawMessage(`{"notification_message":"retry me"}`),
+			NotifyUser:       true,
 			MaxRetries:       1,
 			RetryBackoffMS:   1000,
 			IdempotencyScope: "case",
@@ -160,7 +160,7 @@ func TestActionServiceFailureSkipsLaterActionsUnlessContinueOnError(t *testing.T
 	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
 
 	template := createAppTemplate(t, ctx, store, adminContext, actionTemplateInput("stop-on-error", []app.TemplateActionInput{
-		{ActionType: structs.ActionSendDM, Config: json.RawMessage(`{"message":"blocked"}`), IdempotencyScope: "case"},
+		{ActionType: structs.ActionRecordWarning, Config: json.RawMessage(`{"notification_message":"blocked"}`), NotifyUser: true, IdempotencyScope: "case"},
 		{ActionType: structs.ActionRecordWarning, Config: json.RawMessage(`{}`), IdempotencyScope: "case"},
 	}))
 	created, err := app.NewCaseService(store).Create(ctx, modContext, app.CaseInput{
@@ -185,7 +185,7 @@ func TestActionServiceFailureSkipsLaterActionsUnlessContinueOnError(t *testing.T
 	}
 
 	continueInput := actionTemplateInput("continue-on-error", []app.TemplateActionInput{
-		{ActionType: structs.ActionSendDM, Config: json.RawMessage(`{"message":"blocked"}`), ContinueOnError: true, IdempotencyScope: "case"},
+		{ActionType: structs.ActionRecordWarning, Config: json.RawMessage(`{"notification_message":"blocked"}`), NotifyUser: true, ContinueOnError: true, IdempotencyScope: "case"},
 		{ActionType: structs.ActionRecordWarning, Config: json.RawMessage(`{}`), IdempotencyScope: "case"},
 	})
 	continueTemplate := createAppTemplate(t, ctx, store, adminContext, continueInput)
@@ -208,6 +208,39 @@ func TestActionServiceFailureSkipsLaterActionsUnlessContinueOnError(t *testing.T
 	}
 	if actions[0].Status != structs.ActionExecutionFailed || actions[1].Status != structs.ActionExecutionSucceeded {
 		t.Fatalf("expected continue_on_error to run later action, got %+v", actions)
+	}
+}
+
+func TestActionServiceDoesNotNotifyForUnsupportedAction(t *testing.T) {
+	ctx := context.Background()
+	store := newMigratedStore(t)
+	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
+	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
+
+	template := createAppTemplate(t, ctx, store, adminContext, actionTemplateInput("unsupported-notify", []app.TemplateActionInput{
+		{ActionType: structs.ActionBanUser, Config: json.RawMessage(`{}`), NotifyUser: true, IdempotencyScope: "case"},
+	}))
+	created, err := app.NewCaseService(store).Create(ctx, modContext, app.CaseInput{
+		TemplateID:          template.ID,
+		TargetDiscordUserID: "target-1",
+	})
+	if err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+
+	fakeDiscord := &fakeActionClient{}
+	if err := app.NewActionService(store, fakeDiscord).ProcessCaseActions(ctx, created.ID); err != nil {
+		t.Fatalf("process actions: %v", err)
+	}
+	if len(fakeDiscord.dms) != 0 {
+		t.Fatalf("did not expect DM before unsupported ban action, got %+v", fakeDiscord.dms)
+	}
+	actions, err := store.ListCaseActionExecutions(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("list actions: %v", err)
+	}
+	if actions[0].Status != structs.ActionExecutionFailed {
+		t.Fatalf("expected unsupported action to fail, got %+v", actions[0])
 	}
 }
 

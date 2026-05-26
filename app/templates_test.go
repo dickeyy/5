@@ -29,8 +29,11 @@ func TestTemplateServiceCreateNormalizesActionsAndAudits(t *testing.T) {
 	if len(created.Levels) != 2 || !created.Levels[0].IsDefault {
 		t.Fatalf("expected default and escalation levels, got %+v", created.Levels)
 	}
-	if len(created.Levels[0].Actions) != 2 || created.Levels[0].Actions[0].Position != 1 || created.Levels[0].Actions[1].Position != 2 {
+	if len(created.Levels[0].Actions) != 1 || created.Levels[0].Actions[0].Position != 1 {
 		t.Fatalf("expected normalized default action positions, got %+v", created.Levels[0].Actions)
+	}
+	if !created.Levels[0].Actions[0].NotifyUser || created.Levels[0].Actions[0].NotificationType != string(structs.NotificationWarning) {
+		t.Fatalf("expected default action to notify as warning, got %+v", created.Levels[0].Actions[0])
 	}
 
 	audits, err := store.ListAuditLogEntries(ctx, guildContext.Guild.ID)
@@ -55,7 +58,9 @@ func TestTemplateServiceValidationFailures(t *testing.T) {
 		{name: "invalid slug", edit: func(input *app.TemplateInput) { input.Slug = "Invalid Slug" }},
 		{name: "empty reason", edit: func(input *app.TemplateInput) { input.ReasonTemplate = "" }},
 		{name: "invalid action", edit: func(input *app.TemplateInput) { input.Levels[0].Actions[0].ActionType = "explode_user" }},
+		{name: "send dm action", edit: func(input *app.TemplateInput) { input.Levels[0].Actions[0].ActionType = structs.ActionSendDM }},
 		{name: "invalid config", edit: func(input *app.TemplateInput) { input.Levels[0].Actions[0].Config = json.RawMessage(`[]`) }},
+		{name: "invalid notification type", edit: func(input *app.TemplateInput) { input.Levels[0].Actions[0].NotificationType = "notice" }},
 		{name: "negative retry", edit: func(input *app.TemplateInput) { input.Levels[0].Actions[0].MaxRetries = -1 }},
 		{name: "negative backoff", edit: func(input *app.TemplateInput) { input.Levels[0].Actions[0].RetryBackoffMS = -1 }},
 		{name: "negative timeout", edit: func(input *app.TemplateInput) { input.Levels[0].Actions[0].TimeoutMS = -1 }},
@@ -81,7 +86,6 @@ func TestTemplateServiceValidationFailures(t *testing.T) {
 		{name: "default with no enabled actions", edit: func(input *app.TemplateInput) {
 			disabled := false
 			input.Levels[0].Actions[0].Enabled = &disabled
-			input.Levels[0].Actions[1].Enabled = &disabled
 		}},
 	}
 
@@ -200,16 +204,12 @@ func validTemplateInput(slug string) app.TemplateInput {
 				IsDefault: true,
 				Actions: []app.TemplateActionInput{
 					{
-						ActionType:       structs.ActionSendDM,
-						Config:           json.RawMessage(`{"message":"Please stop"}`),
+						ActionType:       structs.ActionRecordWarning,
+						Config:           json.RawMessage(`{"notification_message":"Please stop"}`),
+						NotifyUser:       true,
 						MaxRetries:       1,
 						RetryBackoffMS:   1000,
 						TimeoutMS:        5000,
-						IdempotencyScope: "case",
-					},
-					{
-						ActionType:       structs.ActionRecordWarning,
-						Config:           json.RawMessage(`{}`),
 						IdempotencyScope: "case",
 					},
 				},

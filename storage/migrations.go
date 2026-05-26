@@ -56,6 +56,15 @@ func (s *Store) Migrate() error {
 				)
 			},
 		},
+		{
+			Name: "0003_action_notifications",
+			Apply: func(tx *gorm.DB) error {
+				return withMySQLTableOptions(tx).AutoMigrate(
+					&structs.CaseTemplateLevelAction{},
+					&structs.CaseActionExecution{},
+				)
+			},
+		},
 	}
 
 	for _, m := range migrations {

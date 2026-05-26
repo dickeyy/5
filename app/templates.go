@@ -52,6 +52,8 @@ type TemplateLevelInput struct {
 type TemplateActionInput struct {
 	ActionType             structs.ActionType `json:"action_type"`
 	Config                 json.RawMessage    `json:"config"`
+	NotifyUser             bool               `json:"notify_user"`
+	NotificationType       string             `json:"notification_type"`
 	ContinueOnError        bool               `json:"continue_on_error"`
 	MaxRetries             int                `json:"max_retries"`
 	RetryBackoffMS         int                `json:"retry_backoff_ms"`
@@ -110,6 +112,8 @@ type TemplateActionResponse struct {
 	Position         int                `json:"position"`
 	ActionType       structs.ActionType `json:"action_type"`
 	Config           any                `json:"config"`
+	NotifyUser       bool               `json:"notify_user"`
+	NotificationType string             `json:"notification_type,omitempty"`
 	ContinueOnError  bool               `json:"continue_on_error"`
 	MaxRetries       uint8              `json:"max_retries"`
 	RetryBackoffMS   int                `json:"retry_backoff_ms"`
@@ -376,6 +380,9 @@ func normalizeActions(inputs []TemplateActionInput) ([]structs.CaseTemplateLevel
 		if input.RequiredPermissionBits != 0 {
 			return nil, 0, validationError("action required_permission_bits is not part of foundation templates")
 		}
+		if input.ActionType == structs.ActionSendDM {
+			return nil, 0, validationError("send_dm is not a template action; set notify_user on the moderation action")
+		}
 		if !validActionType(input.ActionType) {
 			return nil, 0, validationError("action_type is invalid")
 		}
@@ -392,6 +399,10 @@ func normalizeActions(inputs []TemplateActionInput) ([]structs.CaseTemplateLevel
 		configJSON, err := normalizeJSONObject(input.Config)
 		if err != nil {
 			return nil, 0, validationError("config must be a JSON object")
+		}
+		notificationType, err := normalizeNotificationType(input.ActionType, input.NotifyUser, input.NotificationType)
+		if err != nil {
+			return nil, 0, err
 		}
 
 		idempotencyScope := strings.TrimSpace(input.IdempotencyScope)
@@ -414,6 +425,8 @@ func normalizeActions(inputs []TemplateActionInput) ([]structs.CaseTemplateLevel
 			Position:         i + 1,
 			ActionType:       input.ActionType,
 			ConfigJSON:       configJSON,
+			NotifyUser:       input.NotifyUser,
+			NotificationType: notificationType,
 			ContinueOnError:  input.ContinueOnError,
 			MaxRetries:       uint8(input.MaxRetries),
 			RetryBackoffMS:   input.RetryBackoffMS,
@@ -448,7 +461,49 @@ func normalizeJSONObject(raw json.RawMessage) (string, error) {
 
 func validActionType(actionType structs.ActionType) bool {
 	switch actionType {
-	case structs.ActionRecordWarning, structs.ActionSendDM, structs.ActionTimeoutUser, structs.ActionKickUser, structs.ActionBanUser:
+	case structs.ActionRecordWarning, structs.ActionTimeoutUser, structs.ActionKickUser, structs.ActionBanUser:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeNotificationType(actionType structs.ActionType, notifyUser bool, notificationType string) (string, error) {
+	if !notifyUser {
+		return "", nil
+	}
+
+	normalized := strings.ToLower(strings.TrimSpace(notificationType))
+	if normalized == "" {
+		normalized = defaultNotificationType(actionType)
+	}
+	if len(normalized) > 64 {
+		return "", validationError("notification_type must be 64 characters or fewer")
+	}
+	if !validNotificationType(normalized) {
+		return "", validationError("notification_type is invalid")
+	}
+	return normalized, nil
+}
+
+func defaultNotificationType(actionType structs.ActionType) string {
+	switch actionType {
+	case structs.ActionRecordWarning:
+		return string(structs.NotificationWarning)
+	case structs.ActionTimeoutUser:
+		return string(structs.NotificationTimeout)
+	case structs.ActionKickUser:
+		return string(structs.NotificationKick)
+	case structs.ActionBanUser:
+		return string(structs.NotificationBan)
+	default:
+		return ""
+	}
+}
+
+func validNotificationType(notificationType string) bool {
+	switch structs.NotificationType(notificationType) {
+	case structs.NotificationWarning, structs.NotificationTimeout, structs.NotificationKick, structs.NotificationBan:
 		return true
 	default:
 		return false
@@ -520,6 +575,8 @@ func templateResponse(expanded storage.ExpandedCaseTemplate) TemplateResponse {
 				Position:         action.Position,
 				ActionType:       action.ActionType,
 				Config:           parseJSON(action.ConfigJSON),
+				NotifyUser:       action.NotifyUser,
+				NotificationType: action.NotificationType,
 				ContinueOnError:  action.ContinueOnError,
 				MaxRetries:       action.MaxRetries,
 				RetryBackoffMS:   action.RetryBackoffMS,
@@ -563,6 +620,8 @@ func levelActionResponses(actions []structs.CaseTemplateLevelAction) []TemplateA
 			Position:         action.Position,
 			ActionType:       action.ActionType,
 			Config:           parseJSON(action.ConfigJSON),
+			NotifyUser:       action.NotifyUser,
+			NotificationType: action.NotificationType,
 			ContinueOnError:  action.ContinueOnError,
 			MaxRetries:       action.MaxRetries,
 			RetryBackoffMS:   action.RetryBackoffMS,

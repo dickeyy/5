@@ -25,7 +25,7 @@ func TestCaseTemplateStorageCreateListGetExpanded(t *testing.T) {
 			{
 				Level: structs.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, Enabled: true},
 				Actions: []structs.CaseTemplateLevelAction{
-					{Position: 2, ActionType: structs.ActionSendDM, ConfigJSON: `{"message":"stop"}`, IdempotencyScope: "case", Enabled: true},
+					{Position: 2, ActionType: structs.ActionRecordWarning, ConfigJSON: `{"notification_message":"stop"}`, NotifyUser: true, NotificationType: string(structs.NotificationWarning), IdempotencyScope: "case", Enabled: true},
 					{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
 				},
 			},
@@ -78,7 +78,7 @@ func TestCaseTemplateStorageUpdateReplacesChildrenAndIncrementsVersion(t *testin
 				Level: structs.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, Enabled: true},
 				Actions: []structs.CaseTemplateLevelAction{
 					{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
-					{Position: 2, ActionType: structs.ActionSendDM, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: false},
+					{Position: 2, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, NotifyUser: true, NotificationType: string(structs.NotificationWarning), IdempotencyScope: "case", Enabled: false},
 				},
 			},
 		},

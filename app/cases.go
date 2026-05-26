@@ -62,6 +62,8 @@ type CaseActionResponse struct {
 	Status           structs.ActionExecutionStatus `json:"status"`
 	TemplateActionID *string                       `json:"template_action_id"`
 	IdempotencyKey   string                        `json:"idempotency_key"`
+	NotifyUser       bool                          `json:"notify_user"`
+	NotificationType string                        `json:"notification_type,omitempty"`
 	MaxRetries       uint8                         `json:"max_retries"`
 	RetryBackoffMS   int                           `json:"retry_backoff_ms"`
 	SafeForRetry     bool                          `json:"safe_for_retry"`
@@ -88,6 +90,8 @@ type templateSnapshotAction struct {
 	Position         int                `json:"position"`
 	ActionType       structs.ActionType `json:"action_type"`
 	Config           any                `json:"config"`
+	NotifyUser       bool               `json:"notify_user"`
+	NotificationType string             `json:"notification_type,omitempty"`
 	ContinueOnError  bool               `json:"continue_on_error"`
 	MaxRetries       uint8              `json:"max_retries"`
 	RetryBackoffMS   int                `json:"retry_backoff_ms"`
@@ -206,6 +210,8 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 			ActionType:         action.ActionType,
 			Status:             structs.ActionExecutionPending,
 			ConfigSnapshotJSON: action.ConfigJSON,
+			NotifyUser:         action.NotifyUser,
+			NotificationType:   action.NotificationType,
 			MaxRetries:         action.MaxRetries,
 			RetryBackoffMS:     action.RetryBackoffMS,
 			SafeForRetry:       !irreversibleAction(action.ActionType),
@@ -339,6 +345,8 @@ func buildTemplateSnapshot(template structs.CaseTemplate, selectedLevel selected
 			Position:         action.Position,
 			ActionType:       action.ActionType,
 			Config:           parseJSON(action.ConfigJSON),
+			NotifyUser:       action.NotifyUser,
+			NotificationType: action.NotificationType,
 			ContinueOnError:  action.ContinueOnError,
 			MaxRetries:       action.MaxRetries,
 			RetryBackoffMS:   action.RetryBackoffMS,
@@ -380,6 +388,8 @@ func caseResponse(created storage.CreatedCase) CaseResponse {
 			Status:           action.Status,
 			TemplateActionID: action.TemplateActionID,
 			IdempotencyKey:   action.IdempotencyKey,
+			NotifyUser:       action.NotifyUser,
+			NotificationType: action.NotificationType,
 			MaxRetries:       action.MaxRetries,
 			RetryBackoffMS:   action.RetryBackoffMS,
 			SafeForRetry:     action.SafeForRetry,

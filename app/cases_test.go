@@ -35,8 +35,8 @@ func TestCaseServiceCreateFromTemplate(t *testing.T) {
 	if created.Reason != "No spam" || created.Status != structs.CaseStatusOpen || created.Source != structs.CaseSourceAPI {
 		t.Fatalf("unexpected case fields: %+v", created)
 	}
-	if len(created.Actions) != 2 {
-		t.Fatalf("expected two enabled actions, got %+v", created.Actions)
+	if len(created.Actions) != 1 {
+		t.Fatalf("expected one enabled action, got %+v", created.Actions)
 	}
 	if created.SelectedLevel == nil || !created.SelectedLevel.IsDefault || created.SelectedLevel.MatchedCaseCount != 1 {
 		t.Fatalf("expected selected default level, got %+v", created.SelectedLevel)
@@ -65,7 +65,7 @@ func TestCaseServiceCreateFromTemplate(t *testing.T) {
 	if err := json.Unmarshal([]byte(cases[0].TemplateSnapshotJSON), &snapshot); err != nil {
 		t.Fatalf("decode snapshot: %v", err)
 	}
-	if snapshot.Template.ID != template.ID || len(snapshot.Actions) != 2 {
+	if snapshot.Template.ID != template.ID || len(snapshot.Actions) != 1 {
 		t.Fatalf("unexpected snapshot: %+v", snapshot)
 	}
 	if snapshot.SelectedLevel.ID == "" || !snapshot.SelectedLevel.IsDefault || snapshot.SelectedLevel.MatchedCaseCount != 1 {
@@ -392,7 +392,7 @@ func TestCaseServiceDisabledLevelsDoNotMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create case: %v", err)
 	}
-	if created.SelectedLevel == nil || !created.SelectedLevel.IsDefault || len(created.Actions) != 2 {
+	if created.SelectedLevel == nil || !created.SelectedLevel.IsDefault || len(created.Actions) != 1 {
 		t.Fatalf("expected disabled escalation to be ignored, got level=%+v actions=%+v", created.SelectedLevel, created.Actions)
 	}
 }
