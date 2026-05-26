@@ -197,7 +197,7 @@ func handleTemplateAutocomplete(ctx context.Context, services *app.Services, int
 			continue
 		}
 		requiredBits, _ := strconv.ParseUint(template.RequiredPermissionBits, 10, 64)
-		if requiredBits != 0 && guildContext.PermissionBits&requiredBits != requiredBits && !guildContext.IsOwner && !guildContext.IsAdministrator {
+		if requiredBits != 0 && guildContext.PermissionBits&requiredBits != requiredBits && !guildContext.IsAdmin {
 			continue
 		}
 		search := strings.ToLower(template.Slug + " " + template.Name)

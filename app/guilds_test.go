@@ -80,6 +80,9 @@ func TestResolveStaffContextOwnerBypassAllowsAllActions(t *testing.T) {
 		t.Fatalf("resolve staff context: %v", err)
 	}
 
+	if !guildContext.IsAdmin || guildContext.IsModerator {
+		t.Fatalf("expected owner to classify as admin, got admin=%v moderator=%v", guildContext.IsAdmin, guildContext.IsModerator)
+	}
 	for action, allowed := range guildContext.Permissions {
 		if !allowed {
 			t.Fatalf("expected owner to be allowed for %s", action)
@@ -102,11 +105,8 @@ func TestResolveStaffContextEvaluatesPermissionBits(t *testing.T) {
 		t.Fatalf("resolve staff context: %v", err)
 	}
 
-	if !guildContext.IsModerator || guildContext.IsMember {
-		t.Fatalf("expected discord moderate members permission to classify as moderator, got moderator=%v member=%v", guildContext.IsModerator, guildContext.IsMember)
-	}
-	if !guildContext.CanModerateMembers || guildContext.CanManageGuild {
-		t.Fatalf("expected moderator capabilities without guild management, got moderate=%v manage=%v", guildContext.CanModerateMembers, guildContext.CanManageGuild)
+	if !guildContext.IsModerator || guildContext.IsAdmin {
+		t.Fatalf("expected discord moderate members permission to classify as moderator, got admin=%v moderator=%v", guildContext.IsAdmin, guildContext.IsModerator)
 	}
 	if !guildContext.Can(structs.PermissionActionCaseCreate) {
 		t.Fatalf("expected moderate members permission to allow case.create")
@@ -127,7 +127,7 @@ func TestResolveStaffContextEvaluatesPermissionBits(t *testing.T) {
 	}
 }
 
-func TestResolveStaffContextClassifiesMemberWithoutModeratorAccess(t *testing.T) {
+func TestResolveStaffContextRejectsMemberActions(t *testing.T) {
 	store := newMigratedStore(t)
 	service := app.NewGuildService(store, fakeDiscordClient{
 		userGuilds: []app.DiscordUserGuild{{
@@ -142,10 +142,10 @@ func TestResolveStaffContextClassifiesMemberWithoutModeratorAccess(t *testing.T)
 		t.Fatalf("resolve staff context: %v", err)
 	}
 
-	if !guildContext.IsMember || guildContext.IsModerator || guildContext.IsAdministrator || guildContext.IsOwner {
-		t.Fatalf("expected normal member classification, got owner=%v admin=%v moderator=%v member=%v", guildContext.IsOwner, guildContext.IsAdministrator, guildContext.IsModerator, guildContext.IsMember)
+	if guildContext.IsAdmin || guildContext.IsModerator {
+		t.Fatalf("expected normal member to have no staff role, got admin=%v moderator=%v", guildContext.IsAdmin, guildContext.IsModerator)
 	}
-	if guildContext.CanModerateMembers || guildContext.CanManageGuild || guildContext.Can(structs.PermissionActionCaseCreate) {
+	if guildContext.Can(structs.PermissionActionCaseCreate) || guildContext.Can(structs.PermissionActionCaseTemplateWrite) {
 		t.Fatalf("expected normal member without moderation capabilities")
 	}
 }
@@ -257,6 +257,9 @@ func TestResolveDiscordStaffContextOwnerBypassAllowsAllActions(t *testing.T) {
 		t.Fatalf("resolve discord staff context: %v", err)
 	}
 
+	if !guildContext.IsAdmin || guildContext.IsModerator {
+		t.Fatalf("expected owner to classify as admin, got admin=%v moderator=%v", guildContext.IsAdmin, guildContext.IsModerator)
+	}
 	for action, allowed := range guildContext.Permissions {
 		if !allowed {
 			t.Fatalf("expected owner to be allowed for %s", action)
