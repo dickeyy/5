@@ -1,0 +1,9 @@
+.git
+.env
+.env.*
+tmp/
+Legacy/
+docs/
+*.md
+Dockerfile
+compose.yaml

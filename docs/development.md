@@ -9,9 +9,31 @@ migrations, Redis-backed storage, and the in-process action queue. See
 Typical loop:
 
 1. Set the required env vars in `.env`.
-2. Start MySQL and Redis.
+2. Start MySQL and Redis with `docker compose up -d`.
 3. Run the app with `go run .`.
 4. Exercise API routes on `http://localhost:8080` unless `API_PORT` is changed.
+
+The Compose defaults expose:
+
+- MySQL on `127.0.0.1:3306`
+- Redis on `127.0.0.1:6379`
+
+Copy `.env.example` to `.env` for local defaults, then fill the Discord values.
+The local dependency DSNs are:
+
+```sh
+DATABASE_DSN='quack:quack@tcp(127.0.0.1:3306)/quack?charset=utf8mb4&parseTime=True&loc=Local'
+REDIS_URL='redis://127.0.0.1:6379/0'
+```
+
+To run the app in Docker as well:
+
+```sh
+docker compose --profile app up --build
+```
+
+The `app` profile uses the internal container hostnames `mysql` and `redis` and
+waits for both health checks before starting.
 
 There is no Makefile or task runner in this checkout. The repo is driven
 directly through `go` commands and environment variables.
@@ -22,6 +44,18 @@ Start the app:
 
 ```sh
 go run .
+```
+
+Start dependencies:
+
+```sh
+docker compose up -d
+```
+
+Stop dependencies:
+
+```sh
+docker compose down
 ```
 
 Run the test suite:
