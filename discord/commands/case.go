@@ -36,17 +36,12 @@ func HandleCaseInteraction(ctx context.Context, services *app.Services, session 
 		return ephemeralResponse("Use `/case add` to create a case from a template.")
 	}
 
-	created, err := createCaseFromInteraction(ctx, services, interaction, add)
+	result, err := createCaseFromInteraction(ctx, services, interaction, add)
 	if err != nil {
 		return ephemeralResponse(caseCommandErrorMessage(err))
 	}
 
-	return ephemeralResponse(fmt.Sprintf(
-		"Created case #%d for <@%s>. %d action(s) queued.",
-		created.CaseNumber,
-		created.TargetDiscordUserID,
-		len(created.Actions),
-	))
+	return publicResponse(formatCaseCreatedResponse(result))
 }
 
 func CaseCommandDefinition() *discordgo.ApplicationCommand {
@@ -93,7 +88,12 @@ func CommandDefinition() *discordgo.ApplicationCommand {
 	return CaseCommandDefinition()
 }
 
-func createCaseFromInteraction(ctx context.Context, services *app.Services, interaction *discordgo.InteractionCreate, add *discordgo.ApplicationCommandInteractionDataOption) (*app.CaseResponse, error) {
+type caseCommandCreateResult struct {
+	Case     *app.CaseResponse
+	Template *app.TemplateResponse
+}
+
+func createCaseFromInteraction(ctx context.Context, services *app.Services, interaction *discordgo.InteractionCreate, add *discordgo.ApplicationCommandInteractionDataOption) (*caseCommandCreateResult, error) {
 	if services == nil || services.Guilds == nil || services.Cases == nil {
 		return nil, errors.New("case command services are not configured")
 	}
@@ -115,7 +115,7 @@ func createCaseFromInteraction(ctx context.Context, services *app.Services, inte
 		return nil, app.ErrCasePermissionDenied
 	}
 
-	templateID, err := resolveTemplateID(ctx, services, guildContext, templateOption.StringValue())
+	templateID, template, err := resolveTemplate(ctx, services, guildContext, templateOption.StringValue())
 	if err != nil {
 		return nil, err
 	}
@@ -125,13 +125,18 @@ func createCaseFromInteraction(ctx context.Context, services *app.Services, inte
 		reason = reasonOption.StringValue()
 	}
 
-	return services.Cases.Create(ctx, guildContext, app.CaseInput{
+	created, err := services.Cases.Create(ctx, guildContext, app.CaseInput{
 		TemplateID:              templateID,
 		TargetDiscordUserID:     optionStringValue(userOption),
 		ReasonOverride:          reason,
 		Source:                  structs.CaseSourceDiscordCommand,
 		ContextChannelDiscordID: interaction.ChannelID,
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	return &caseCommandCreateResult{Case: created, Template: template}, nil
 }
 
 func resolveInteractionGuildContext(ctx context.Context, services *app.Services, interaction *discordgo.InteractionCreate) (*app.GuildStaffContext, error) {
@@ -145,26 +150,27 @@ func resolveInteractionGuildContext(ctx context.Context, services *app.Services,
 	})
 }
 
-func resolveTemplateID(ctx context.Context, services *app.Services, guildContext *app.GuildStaffContext, templateInput string) (string, error) {
+func resolveTemplate(ctx context.Context, services *app.Services, guildContext *app.GuildStaffContext, templateInput string) (string, *app.TemplateResponse, error) {
 	value := strings.TrimSpace(templateInput)
 	if value == "" {
-		return "", app.ErrCaseValidation
+		return "", nil, app.ErrCaseValidation
 	}
 
 	templates, err := services.Templates.List(ctx, guildContext)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	for _, template := range templates {
 		if template.ID == value || strings.EqualFold(template.Slug, value) {
 			if !template.Enabled {
-				return "", app.ErrCaseTemplateNotAvailable
+				return "", nil, app.ErrCaseTemplateNotAvailable
 			}
-			return template.ID, nil
+			matched := template
+			return template.ID, &matched, nil
 		}
 	}
 
-	return value, nil
+	return value, nil, nil
 }
 
 func handleTemplateAutocomplete(ctx context.Context, services *app.Services, interaction *discordgo.InteractionCreate) *discordgo.InteractionResponse {
@@ -195,19 +201,12 @@ func handleTemplateAutocomplete(ctx context.Context, services *app.Services, int
 		if !template.Enabled {
 			continue
 		}
-		search := strings.ToLower(template.Slug + " " + template.Name)
+		search := strings.ToLower(template.Slug + " " + template.Name + " " + template.Description)
 		if query != "" && !strings.Contains(search, query) {
 			continue
 		}
-		name := template.Slug
-		if template.Name != "" && template.Name != template.Slug {
-			name = fmt.Sprintf("%s - %s", template.Slug, template.Name)
-		}
-		if len(name) > 100 {
-			name = name[:100]
-		}
 		choices = append(choices, &discordgo.ApplicationCommandOptionChoice{
-			Name:  name,
+			Name:  templateAutocompleteLabel(template),
 			Value: template.ID,
 		})
 		if len(choices) == 25 {
@@ -254,6 +253,100 @@ func optionStringValue(option *discordgo.ApplicationCommandInteractionDataOption
 	}
 }
 
+func formatCaseCreatedResponse(result *caseCommandCreateResult) string {
+	if result == nil || result.Case == nil {
+		return "Created case."
+	}
+
+	created := result.Case
+	lines := []string{
+		fmt.Sprintf("Case #%d created", created.CaseNumber),
+		fmt.Sprintf("Target: <@%s>", created.TargetDiscordUserID),
+		fmt.Sprintf("Moderator: <@%s>", created.ModeratorDiscordUserID),
+	}
+
+	templateName := caseTemplateDisplayName(result.Template)
+	if templateName != "" {
+		lines = append(lines, "Template: "+templateName)
+	}
+
+	if created.SelectedLevel != nil {
+		levelName := strings.TrimSpace(created.SelectedLevel.Name)
+		if levelName == "" {
+			levelName = fmt.Sprintf("Level %d", created.SelectedLevel.Position)
+		}
+		lines = append(lines, fmt.Sprintf("Level: %s", levelName))
+		if created.SelectedLevel.MatchedCaseCount > 0 {
+			lines = append(lines, fmt.Sprintf("Matching cases: %d", created.SelectedLevel.MatchedCaseCount))
+		}
+	}
+
+	lines = append(lines, fmt.Sprintf("Queued actions: %d%s", len(created.Actions), actionSummary(created.Actions)))
+	return strings.Join(lines, "\n")
+}
+
+func caseTemplateDisplayName(template *app.TemplateResponse) string {
+	if template == nil {
+		return ""
+	}
+	name := strings.TrimSpace(template.Name)
+	slug := strings.TrimSpace(template.Slug)
+	switch {
+	case name != "" && slug != "" && !strings.EqualFold(name, slug):
+		return fmt.Sprintf("%s (`%s`)", name, slug)
+	case name != "":
+		return name
+	default:
+		return slug
+	}
+}
+
+func actionSummary(actions []app.CaseActionResponse) string {
+	if len(actions) == 0 {
+		return " (none)"
+	}
+
+	counts := map[structs.ActionType]int{}
+	order := make([]structs.ActionType, 0, len(actions))
+	for _, action := range actions {
+		if counts[action.ActionType] == 0 {
+			order = append(order, action.ActionType)
+		}
+		counts[action.ActionType]++
+	}
+
+	parts := make([]string, 0, len(order))
+	for _, actionType := range order {
+		count := counts[actionType]
+		if count == 1 {
+			parts = append(parts, string(actionType))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s x%d", actionType, count))
+	}
+	return ": " + strings.Join(parts, ", ")
+}
+
+func templateAutocompleteLabel(template app.TemplateResponse) string {
+	name := strings.TrimSpace(template.Name)
+	if name == "" {
+		name = strings.TrimSpace(template.Slug)
+	}
+	description := strings.TrimSpace(template.Description)
+	if description != "" {
+		name = fmt.Sprintf("%s - %s", name, description)
+	}
+	return truncateDiscordChoiceName(name)
+}
+
+func truncateDiscordChoiceName(value string) string {
+	runes := []rune(value)
+	if len(runes) <= 100 {
+		return value
+	}
+	return string(runes[:100])
+}
+
 func caseCommandErrorMessage(err error) string {
 	switch {
 	case errors.Is(err, app.ErrCasePermissionDenied):
@@ -276,6 +369,15 @@ func ephemeralResponse(content string) *discordgo.InteractionResponse {
 		Data: &discordgo.InteractionResponseData{
 			Content: content,
 			Flags:   discordgo.MessageFlagsEphemeral,
+		},
+	}
+}
+
+func publicResponse(content string) *discordgo.InteractionResponse {
+	return &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: content,
 		},
 	}
 }

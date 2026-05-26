@@ -57,8 +57,25 @@ func TestHandleCaseInteractionCreatesCase(t *testing.T) {
 	store, services, templateID := newCaseCommandHarness(t)
 
 	response := HandleCaseInteraction(ctx, services, nil, caseAddInteraction(templateID, "target-1", "manual reason", uint64(discordgo.PermissionModerateMembers)))
-	if response == nil || response.Data == nil || !strings.Contains(response.Data.Content, "Created case #1") {
+	if response == nil || response.Data == nil {
 		t.Fatalf("unexpected response: %+v", response)
+	}
+	if response.Data.Flags&discordgo.MessageFlagsEphemeral != 0 {
+		t.Fatalf("expected public success response, got flags %d", response.Data.Flags)
+	}
+	for _, want := range []string{
+		"Case #1 created",
+		"Target: <@target-1>",
+		"Moderator: <@mod-1>",
+		"Template: Spam",
+		"Level: Default",
+		"Matching cases: 1",
+		"Queued actions: 1",
+		"send_dm",
+	} {
+		if !strings.Contains(response.Data.Content, want) {
+			t.Fatalf("expected response to contain %q, got %q", want, response.Data.Content)
+		}
 	}
 
 	cases, err := store.ListCases(ctx, storeGuildID(t, store, "guild-1"))
@@ -83,17 +100,82 @@ func TestHandleCaseInteractionDeniesMissingPermission(t *testing.T) {
 	if response == nil || response.Data == nil || !strings.Contains(response.Data.Content, "do not have permission") {
 		t.Fatalf("unexpected response: %+v", response)
 	}
+	if response.Data.Flags&discordgo.MessageFlagsEphemeral == 0 {
+		t.Fatalf("expected ephemeral error response, got flags %d", response.Data.Flags)
+	}
 }
 
 func TestHandleTemplateAutocompleteReturnsUsableTemplates(t *testing.T) {
 	_, services, templateID := newCaseCommandHarness(t)
 
-	response := HandleCaseInteraction(context.Background(), services, nil, templateAutocompleteInteraction("sp", uint64(discordgo.PermissionModerateMembers)))
+	response := HandleCaseInteraction(context.Background(), services, nil, templateAutocompleteInteraction("repeated", uint64(discordgo.PermissionModerateMembers)))
 	if response == nil || response.Data == nil || len(response.Data.Choices) != 1 {
 		t.Fatalf("unexpected autocomplete response: %+v", response)
 	}
 	if response.Data.Choices[0].Value != templateID {
 		t.Fatalf("expected template id choice, got %+v", response.Data.Choices[0])
+	}
+	if response.Data.Choices[0].Name != "Spam - Unwanted repeated messages" {
+		t.Fatalf("expected name and description choice label, got %q", response.Data.Choices[0].Name)
+	}
+}
+
+func TestHandleTemplateAutocompleteFiltersDisabledTemplates(t *testing.T) {
+	_, services, _ := newCaseCommandHarness(t)
+	ctx := context.Background()
+	guildContext := caseCommandGuildContext(t, services)
+	enabled := false
+	createCaseCommandTemplate(t, services, guildContext, app.TemplateInput{
+		Slug:           "ghost",
+		Name:           "Ghost",
+		Description:    "Hidden moderation workflow",
+		ReasonTemplate: "Hidden",
+		Enabled:        &enabled,
+		Levels: []app.TemplateLevelInput{
+			{
+				Name:      "Default",
+				Position:  1,
+				IsDefault: true,
+			},
+		},
+	})
+
+	response := HandleCaseInteraction(ctx, services, nil, templateAutocompleteInteraction("hidden", uint64(discordgo.PermissionModerateMembers)))
+	if response == nil || response.Data == nil {
+		t.Fatalf("unexpected autocomplete response: %+v", response)
+	}
+	if len(response.Data.Choices) != 0 {
+		t.Fatalf("expected disabled template to be filtered, got %+v", response.Data.Choices)
+	}
+}
+
+func TestTemplateAutocompleteLabelTruncatesToDiscordLimit(t *testing.T) {
+	_, services, _ := newCaseCommandHarness(t)
+	ctx := context.Background()
+	guildContext := caseCommandGuildContext(t, services)
+	longTemplate := createCaseCommandTemplate(t, services, guildContext, app.TemplateInput{
+		Slug:           "longdesc",
+		Name:           "Long Description",
+		Description:    strings.Repeat("description ", 20),
+		ReasonTemplate: "Long description",
+		Levels: []app.TemplateLevelInput{
+			{
+				Name:      "Default",
+				Position:  1,
+				IsDefault: true,
+			},
+		},
+	})
+
+	response := HandleCaseInteraction(ctx, services, nil, templateAutocompleteInteraction("longdesc", uint64(discordgo.PermissionModerateMembers)))
+	if response == nil || response.Data == nil || len(response.Data.Choices) != 1 {
+		t.Fatalf("unexpected autocomplete response: %+v", response)
+	}
+	if response.Data.Choices[0].Value != longTemplate.ID {
+		t.Fatalf("expected long template id choice, got %+v", response.Data.Choices[0])
+	}
+	if len([]rune(response.Data.Choices[0].Name)) != 100 {
+		t.Fatalf("expected label length 100, got %d: %q", len([]rune(response.Data.Choices[0].Name)), response.Data.Choices[0].Name)
 	}
 }
 
@@ -118,23 +200,46 @@ func newCaseCommandHarness(t *testing.T) (*storage.Store, *app.Services, string)
 		t.Fatalf("resolve guild context: %v", err)
 	}
 
-	created, err := services.Templates.Create(ctx, guildContext, app.TemplateInput{
+	created := createCaseCommandTemplate(t, services, guildContext, app.TemplateInput{
 		Slug:           "spam",
 		Name:           "Spam",
+		Description:    "Unwanted repeated messages",
 		ReasonTemplate: "Spam",
 		Levels: []app.TemplateLevelInput{
 			{
-				Name:      "Default",
-				Position:  1,
-				IsDefault: true,
+				Name:       "Default",
+				Position:   1,
+				IsDefault:  true,
+				NotifyUser: true,
 			},
 		},
 	})
+
+	return store, services, created.ID
+}
+
+func createCaseCommandTemplate(t *testing.T, services *app.Services, guildContext *app.GuildStaffContext, input app.TemplateInput) *app.TemplateResponse {
+	t.Helper()
+
+	created, err := services.Templates.Create(context.Background(), guildContext, input)
 	if err != nil {
 		t.Fatalf("create template: %v", err)
 	}
+	return created
+}
 
-	return store, services, created.ID
+func caseCommandGuildContext(t *testing.T, services *app.Services) *app.GuildStaffContext {
+	t.Helper()
+
+	guildContext, err := services.Guilds.ResolveDiscordStaffContext(context.Background(), app.DiscordStaffContextInput{
+		DiscordGuildID: "guild-1",
+		DiscordUserID:  "owner-1",
+		DisplayName:    "Owner",
+	})
+	if err != nil {
+		t.Fatalf("resolve guild context: %v", err)
+	}
+	return guildContext
 }
 
 func caseAddInteraction(templateID, targetID, reason string, permissions uint64) *discordgo.InteractionCreate {
