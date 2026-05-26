@@ -19,7 +19,7 @@ Current working path:
 5. Authorized staff can create and manage case templates.
 6. Authorized staff can create a case from a template through the API.
 7. Moderators can also use Discord `/case add` to create template-driven cases.
-8. The backend action engine can process safe actions: `record_warning`, `send_dm`, and `write_mod_log`.
+8. Creating a case is the warning. The backend only queues extra work when the selected template level has notification enabled or executable moderation actions.
 
 ## Frontend Assumptions
 
@@ -142,8 +142,7 @@ Requires auth and requires the bot to be in the guild. This bootstraps or refres
     "discord_guild_id": "1005778938108325970",
     "name": "Quack's Pond",
     "icon_url": "https://cdn.discordapp.com/icons/...",
-    "owner_discord_user_id": "489264179472236557",
-    "rollout_state": "disabled"
+    "owner_discord_user_id": "489264179472236557"
   },
   "staff": {
     "id": "01...",
@@ -186,7 +185,7 @@ Requires `case_template.read`. Gets one expanded template.
 
 `PATCH /guilds/:discordGuildID/templates/:templateID`
 
-Requires `case_template.write`. Updates a template. The backend replaces actions and escalation rules from the request body and increments the template version.
+Requires `case_template.write`. Updates a template. The backend replaces levels and nested actions from the request body and increments the template version.
 
 `DELETE /guilds/:discordGuildID/templates/:templateID`
 
@@ -200,26 +199,45 @@ Template request shape:
   "name": "Spam Warning",
   "description": "Warns a user for spam.",
   "reason_template": "Please stop spamming in this server.",
-  "required_permission_bits": 0,
-  "default_severity": "low",
-  "default_weight": 1,
-  "dm_enabled": false,
-  "dm_template": "",
+  "appealable": true,
   "enabled": true,
-  "actions": [
+  "levels": [
     {
-      "action_type": "record_warning",
-      "required_permission_bits": 0,
-      "config": {},
-      "continue_on_error": false,
-      "max_retries": 0,
-      "retry_backoff_ms": 0,
-      "timeout_ms": 0,
-      "idempotency_scope": "case",
-      "enabled": true
+      "name": "Warning",
+      "position": 1,
+      "is_default": true,
+      "trigger_case_count": 0,
+      "window_minutes": 0,
+      "notify_user": true,
+      "notification_type": "warning",
+      "enabled": true,
+      "actions": []
+    },
+    {
+      "name": "Repeat spam",
+      "position": 2,
+      "is_default": false,
+      "trigger_case_count": 3,
+      "window_minutes": 10080,
+      "notify_user": true,
+      "notification_type": "warning",
+      "enabled": true,
+      "actions": [
+        {
+          "action_type": "timeout_user",
+          "config": { "duration_minutes": 60 },
+          "notify_user": true,
+          "notification_type": "timeout",
+          "continue_on_error": false,
+          "max_retries": 0,
+          "retry_backoff_ms": 0,
+          "timeout_ms": 0,
+          "idempotency_scope": "case",
+          "enabled": true
+        }
+      ]
     }
-  ],
-  "escalation_rules": []
+  ]
 }
 ```
 
@@ -234,57 +252,54 @@ Template response shape:
     "name": "Spam Warning",
     "description": "Warns a user for spam.",
     "reason_template": "Please stop spamming in this server.",
-    "required_permission_bits": "0",
-    "default_severity": "low",
-    "default_weight": 1,
-    "dm_enabled": false,
-    "dm_template": "",
+    "appealable": true,
     "enabled": true,
     "version": 1,
     "created_by_discord_user_id": "489264179472236557",
     "updated_by_discord_user_id": "489264179472236557",
     "archived_at": null,
-    "actions": [
+    "levels": [
       {
         "id": "01...",
+        "name": "Warning",
         "position": 1,
-        "action_type": "record_warning",
-        "required_permission_bits": "0",
-        "config": {},
-        "continue_on_error": false,
-        "max_retries": 0,
-        "retry_backoff_ms": 0,
-        "timeout_ms": 0,
-        "idempotency_scope": "case",
-        "enabled": true
+        "is_default": true,
+        "trigger_case_count": 0,
+        "window_minutes": 0,
+        "notify_user": true,
+        "notification_type": "warning",
+        "enabled": true,
+        "actions": []
       }
-    ],
-    "escalation_rules": []
+    ]
   }
 }
 ```
 
 Supported template action types:
 
-- `record_warning`: supported and safe.
-- `send_dm`: supported. Optional config: `{ "message": "..." }`.
-- `write_mod_log`: supported. Optional config: `{ "channel_id": "...", "message": "..." }`. If no `channel_id` is provided, backend needs guild settings to have a mod-log channel, but no settings update endpoint exists yet.
-- `timeout_user`: accepted by template validation, but execution is intentionally blocked for now.
-- `kick_user`: accepted by template validation, but execution is intentionally blocked for now.
-- `ban_user`: accepted by template validation, but execution is intentionally blocked for now.
+- `timeout_user`: accepted by template validation. The action module exists, but the Discord moderation call is not implemented yet.
+- `kick_user`: accepted by template validation. The action module exists, but the Discord moderation call is not implemented yet.
+- `ban_user`: accepted by template validation. The action module exists, but the Discord moderation call is not implemented yet.
+
+Not action types:
+
+- `record_warning`: creating the case is the warning.
+- `send_dm`: internal execution used for selected-level warning notification.
+- `write_mod_log`: mod-log mirroring should come from guild/audit settings later, not per-template actions.
 
 Dashboard guidance:
 
-- Start with a practical form for `record_warning`.
-- Add `send_dm` next because it is also supported today.
-- Treat timeout/kick/ban as future/disabled action choices until the backend supports guarded irreversible execution.
+- Start with actionless warning templates: a default level with `notify_user` configurable.
+- Model escalation as additional levels with `trigger_case_count`, optional `window_minutes`, and nested executable actions.
+- Treat timeout/kick/ban as configurable action modules, but surface that execution is not implemented until the backend fills in the Discord calls.
 - Preserve action order in the UI. The backend normalizes action positions from request order.
 
 ### Cases
 
 `POST /guilds/:discordGuildID/cases`
 
-Requires `case.create`. Creates a case from an enabled, non-archived template and creates pending action execution rows.
+Requires `case.create`. Creates a case from an enabled, non-archived template, selects the matching template level, and creates pending action execution rows only for that selected level's notification/executable actions.
 
 Request:
 
@@ -318,14 +333,26 @@ Response:
     "weight": 1,
     "status": "open",
     "source": "api",
+    "selected_level": {
+      "id": "01...",
+      "name": "Warning",
+      "position": 1,
+      "is_default": true,
+      "trigger_case_count": 0,
+      "window_minutes": 0,
+      "notify_user": true,
+      "notification_type": "warning",
+      "matched_case_count": 1
+    },
     "actions": [
       {
         "id": "01...",
         "position": 1,
-        "action_type": "record_warning",
+        "action_type": "send_dm",
         "status": "pending",
-        "template_action_id": "01...",
+        "template_action_id": null,
         "idempotency_key": "case:...",
+        "notify_user": false,
         "max_retries": 0,
         "retry_backoff_ms": 0,
         "safe_for_retry": true,
@@ -411,8 +438,8 @@ Build:
 - Template detail/edit panel.
 - Create template form.
 - Archive template action.
-- Start with one-action `record_warning` templates.
-- Allow `send_dm` once the simple path works.
+- Start with actionless warning templates: one default level, optional warning notification.
+- Add escalation levels with optional executable actions after the default-level flow works.
 
 Acceptance criteria:
 

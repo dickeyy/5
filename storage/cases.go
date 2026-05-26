@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -24,11 +25,6 @@ type CreatedCase struct {
 	ActionExecutions []structs.CaseActionExecution
 }
 
-type CaseHistoryStats struct {
-	CaseCount   int64
-	WeightTotal int64
-}
-
 type CountTemplateCasesForTargetParams struct {
 	GuildID             string
 	TemplateID          string
@@ -38,7 +34,6 @@ type CountTemplateCasesForTargetParams struct {
 
 type ClaimedCaseAction struct {
 	Case      structs.Case
-	Settings  structs.GuildSettings
 	Execution structs.CaseActionExecution
 }
 
@@ -168,30 +163,6 @@ func (s *Store) CreateCase(ctx context.Context, params CreateCaseParams) (*Creat
 		Event:            event,
 		ActionExecutions: actionExecutions,
 	}, nil
-}
-
-func (s *Store) CaseHistoryStats(ctx context.Context, guildID, targetDiscordUserID string, scope structs.EscalationScope, since *time.Time) (*CaseHistoryStats, error) {
-	if s == nil || s.db == nil {
-		return nil, errors.New("database not connected")
-	}
-
-	query := s.db.WithContext(ctx).Model(&structs.Case{}).Where("guild_id = ?", guildID)
-	if scope == structs.EscalationScopeUser {
-		query = query.Where("target_discord_user_id = ?", targetDiscordUserID)
-	}
-	if since != nil {
-		query = query.Where("created_at >= ?", *since)
-	}
-
-	var row struct {
-		CaseCount   int64
-		WeightTotal int64
-	}
-	if err := query.Select("COUNT(*) AS case_count, COALESCE(SUM(weight), 0) AS weight_total").Scan(&row).Error; err != nil {
-		return nil, fmt.Errorf("case history stats: %w", err)
-	}
-
-	return &CaseHistoryStats{CaseCount: row.CaseCount, WeightTotal: row.WeightTotal}, nil
 }
 
 func (s *Store) CountTemplateCasesForTarget(ctx context.Context, params CountTemplateCasesForTargetParams) (int64, error) {
@@ -337,15 +308,8 @@ func (s *Store) ClaimNextCaseAction(ctx context.Context, params ClaimCaseActionP
 			}
 		}
 
-		var settings structs.GuildSettings
-		result = tx.Where("guild_id = ?", caseModel.GuildID).Limit(1).Find(&settings)
-		if result.Error != nil {
-			return fmt.Errorf("get guild settings for action: %w", result.Error)
-		}
-
 		claimed = &ClaimedCaseAction{
 			Case:      caseModel,
-			Settings:  settings,
 			Execution: execution,
 		}
 		return nil
@@ -440,6 +404,10 @@ func (s *Store) CompleteCaseAction(ctx context.Context, params CompleteCaseActio
 			}
 		}
 
+		if err := createCaseActionAudit(tx, execution, params, now); err != nil {
+			return err
+		}
+
 		return updateCaseStatusFromActions(tx, execution.CaseID, now)
 	})
 }
@@ -469,10 +437,79 @@ func (s *Store) SkipCaseActions(ctx context.Context, params SkipCaseActionsParam
 			if err := tx.Select("*").Save(&executions[i]).Error; err != nil {
 				return fmt.Errorf("skip case action execution: %w", err)
 			}
+			if err := createSkippedCaseActionAudit(tx, executions[i], params, now); err != nil {
+				return err
+			}
 		}
 
 		return updateCaseStatusFromActions(tx, params.CaseID, now)
 	})
+}
+
+func createCaseActionAudit(tx *gorm.DB, execution structs.CaseActionExecution, params CompleteCaseActionParams, now time.Time) error {
+	var caseModel structs.Case
+	result := tx.Where("id = ?", execution.CaseID).Limit(1).Find(&caseModel)
+	if result.Error != nil {
+		return fmt.Errorf("get case for action audit: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return nil
+	}
+
+	action := "case_action.succeeded"
+	resultValue := structs.AuditResultSuccess
+	switch params.ExecutionStatus {
+	case structs.ActionExecutionRetrying:
+		action = "case_action.retrying"
+		resultValue = structs.AuditResultFailure
+	case structs.ActionExecutionFailed:
+		action = "case_action.failed"
+		resultValue = structs.AuditResultFailure
+	}
+
+	return createAuditLogEntry(tx, &structs.AuditLogEntry{
+		GuildID:       caseModel.GuildID,
+		Source:        structs.AuditSourceSystem,
+		Action:        action,
+		ResourceType:  "case_action_execution",
+		ResourceID:    execution.ID,
+		Result:        resultValue,
+		FailureReason: params.ErrorMessage,
+		MetadataJSON: marshalJSONObject(map[string]any{
+			"case_id":        caseModel.ID,
+			"case_number":    caseModel.CaseNumber,
+			"action_type":    execution.ActionType,
+			"attempt_number": params.AttemptNumber,
+			"retrying":       params.ExecutionStatus == structs.ActionExecutionRetrying,
+		}),
+	}, now)
+}
+
+func createSkippedCaseActionAudit(tx *gorm.DB, execution structs.CaseActionExecution, params SkipCaseActionsParams, now time.Time) error {
+	var caseModel structs.Case
+	result := tx.Where("id = ?", execution.CaseID).Limit(1).Find(&caseModel)
+	if result.Error != nil {
+		return fmt.Errorf("get case for skipped action audit: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return nil
+	}
+
+	return createAuditLogEntry(tx, &structs.AuditLogEntry{
+		GuildID:       caseModel.GuildID,
+		Source:        structs.AuditSourceSystem,
+		Action:        "case_action.skipped",
+		ResourceType:  "case_action_execution",
+		ResourceID:    execution.ID,
+		Result:        structs.AuditResultFailure,
+		FailureReason: params.Reason,
+		MetadataJSON: marshalJSONObject(map[string]any{
+			"case_id":                caseModel.ID,
+			"case_number":            caseModel.CaseNumber,
+			"action_type":            execution.ActionType,
+			"blocked_after_position": params.AfterPosition,
+		}),
+	}, now)
 }
 
 func (s *Store) ListExecutableCaseIDs(ctx context.Context, limit int) ([]string, error) {
@@ -568,4 +605,12 @@ func updateCaseStatusFromActions(tx *gorm.DB, caseID string, now time.Time) erro
 		return fmt.Errorf("update case status: %w", err)
 	}
 	return nil
+}
+
+func marshalJSONObject(value any) string {
+	body, err := json.Marshal(value)
+	if err != nil {
+		return "{}"
+	}
+	return string(body)
 }

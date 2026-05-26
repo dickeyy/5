@@ -24,56 +24,38 @@ type TemplateService struct {
 }
 
 type TemplateInput struct {
-	Slug                   string                `json:"slug"`
-	Name                   string                `json:"name"`
-	Description            string                `json:"description"`
-	ReasonTemplate         string                `json:"reason_template"`
-	Appealable             bool                  `json:"appealable"`
-	Enabled                *bool                 `json:"enabled"`
-	Levels                 []TemplateLevelInput  `json:"levels"`
-	RequiredPermissionBits uint64                `json:"required_permission_bits"`
-	DefaultWeight          int                   `json:"default_weight"`
-	Actions                []TemplateActionInput `json:"actions"`
-	EscalationRules        []EscalationRuleInput `json:"escalation_rules"`
+	Slug           string               `json:"slug"`
+	Name           string               `json:"name"`
+	Description    string               `json:"description"`
+	ReasonTemplate string               `json:"reason_template"`
+	Appealable     bool                 `json:"appealable"`
+	Enabled        *bool                `json:"enabled"`
+	Levels         []TemplateLevelInput `json:"levels"`
 }
 
 type TemplateLevelInput struct {
-	Name                 string                `json:"name"`
-	Position             int                   `json:"position"`
-	IsDefault            bool                  `json:"is_default"`
-	TriggerCaseCount     int                   `json:"trigger_case_count"`
-	WindowMinutes        int                   `json:"window_minutes"`
-	Enabled              *bool                 `json:"enabled"`
-	Actions              []TemplateActionInput `json:"actions"`
-	TriggerWeightTotal   int                   `json:"trigger_weight_total"`
-	EscalateToTemplateID *string               `json:"escalate_to_template_id"`
+	Name             string                `json:"name"`
+	Position         int                   `json:"position"`
+	IsDefault        bool                  `json:"is_default"`
+	TriggerCaseCount int                   `json:"trigger_case_count"`
+	WindowMinutes    int                   `json:"window_minutes"`
+	NotifyUser       bool                  `json:"notify_user"`
+	NotificationType string                `json:"notification_type"`
+	Enabled          *bool                 `json:"enabled"`
+	Actions          []TemplateActionInput `json:"actions"`
 }
 
 type TemplateActionInput struct {
-	ActionType             structs.ActionType `json:"action_type"`
-	Config                 json.RawMessage    `json:"config"`
-	NotifyUser             bool               `json:"notify_user"`
-	NotificationType       string             `json:"notification_type"`
-	ContinueOnError        bool               `json:"continue_on_error"`
-	MaxRetries             int                `json:"max_retries"`
-	RetryBackoffMS         int                `json:"retry_backoff_ms"`
-	TimeoutMS              int                `json:"timeout_ms"`
-	IdempotencyScope       string             `json:"idempotency_scope"`
-	Enabled                *bool              `json:"enabled"`
-	RequiredPermissionBits uint64             `json:"required_permission_bits"`
-}
-
-type EscalationRuleInput struct {
-	Name                 string                  `json:"name"`
-	Scope                structs.EscalationScope `json:"scope"`
-	Priority             int                     `json:"priority"`
-	TriggerCaseCount     int                     `json:"trigger_case_count"`
-	TriggerWeightTotal   int                     `json:"trigger_weight_total"`
-	WindowMinutes        int                     `json:"window_minutes"`
-	EscalateToTemplateID *string                 `json:"escalate_to_template_id"`
-	RuleConfig           json.RawMessage         `json:"rule_config"`
-	Enabled              *bool                   `json:"enabled"`
-	StopAfterMatch       *bool                   `json:"stop_after_match"`
+	ActionType       structs.ActionType `json:"action_type"`
+	Config           json.RawMessage    `json:"config"`
+	NotifyUser       bool               `json:"notify_user"`
+	NotificationType string             `json:"notification_type"`
+	ContinueOnError  bool               `json:"continue_on_error"`
+	MaxRetries       int                `json:"max_retries"`
+	RetryBackoffMS   int                `json:"retry_backoff_ms"`
+	TimeoutMS        int                `json:"timeout_ms"`
+	IdempotencyScope string             `json:"idempotency_scope"`
+	Enabled          *bool              `json:"enabled"`
 }
 
 type TemplateResponse struct {
@@ -99,6 +81,8 @@ type TemplateLevelDetails struct {
 	IsDefault        bool   `json:"is_default"`
 	TriggerCaseCount int    `json:"trigger_case_count"`
 	WindowMinutes    int    `json:"window_minutes"`
+	NotifyUser       bool   `json:"notify_user"`
+	NotificationType string `json:"notification_type,omitempty"`
 }
 
 type TemplateLevelResponse struct {
@@ -254,19 +238,6 @@ func (s *TemplateService) validate(ctx context.Context, guildContext *GuildStaff
 		return nil, validationError("reason_template is required")
 	}
 
-	if input.RequiredPermissionBits != 0 {
-		return nil, validationError("required_permission_bits is not part of foundation templates")
-	}
-	if input.DefaultWeight != 0 {
-		return nil, validationError("default_weight is not part of foundation templates")
-	}
-	if len(input.Actions) > 0 {
-		return nil, validationError("flat template actions are not supported; use levels[].actions")
-	}
-	if len(input.EscalationRules) > 0 {
-		return nil, validationError("escalation_rules are not supported; use levels")
-	}
-
 	levels, err := normalizeLevels(input.Levels)
 	if err != nil {
 		return nil, err
@@ -284,7 +255,6 @@ func (s *TemplateService) validate(ctx context.Context, guildContext *GuildStaff
 		Description:            strings.TrimSpace(input.Description),
 		ReasonTemplate:         reasonTemplate,
 		DefaultSeverity:        structs.CaseSeverityMedium,
-		DefaultWeight:          1,
 		Appealable:             input.Appealable,
 		Enabled:                enabled,
 		CreatedByDiscordUserID: guildContext.Staff.DiscordUserID,
@@ -301,18 +271,11 @@ func normalizeLevels(inputs []TemplateLevelInput) ([]storage.ExpandedCaseTemplat
 
 	levels := make([]storage.ExpandedCaseTemplateLevel, 0, len(inputs))
 	defaultCount := 0
-	defaultEnabledActionCount := 0
 
 	for i, input := range inputs {
 		name := strings.TrimSpace(input.Name)
 		if name == "" {
 			return nil, validationError("level name is required")
-		}
-		if input.TriggerWeightTotal != 0 {
-			return nil, validationError("trigger_weight_total is not part of foundation escalation")
-		}
-		if input.EscalateToTemplateID != nil && strings.TrimSpace(*input.EscalateToTemplateID) != "" {
-			return nil, validationError("escalate_to_template_id is not part of foundation escalation")
 		}
 		if input.TriggerCaseCount < 0 || input.WindowMinutes < 0 {
 			return nil, validationError("level trigger values must be non-negative")
@@ -326,17 +289,18 @@ func normalizeLevels(inputs []TemplateLevelInput) ([]storage.ExpandedCaseTemplat
 				return nil, validationError("default level cannot have escalation triggers")
 			}
 		}
+		notificationType, err := normalizeLevelNotificationType(input.NotifyUser, input.NotificationType)
+		if err != nil {
+			return nil, err
+		}
 
 		enabled := true
 		if input.Enabled != nil {
 			enabled = *input.Enabled
 		}
-		actions, enabledActionCount, err := normalizeActions(input.Actions)
+		actions, _, err := normalizeActions(input.Actions)
 		if err != nil {
 			return nil, err
-		}
-		if input.IsDefault {
-			defaultEnabledActionCount = enabledActionCount
 		}
 
 		position := input.Position
@@ -354,6 +318,8 @@ func normalizeLevels(inputs []TemplateLevelInput) ([]storage.ExpandedCaseTemplat
 				IsDefault:        input.IsDefault,
 				TriggerCaseCount: input.TriggerCaseCount,
 				WindowMinutes:    input.WindowMinutes,
+				NotifyUser:       input.NotifyUser,
+				NotificationType: notificationType,
 				Enabled:          enabled,
 			},
 			Actions: actions,
@@ -366,9 +332,6 @@ func normalizeLevels(inputs []TemplateLevelInput) ([]storage.ExpandedCaseTemplat
 	if defaultCount > 1 {
 		return nil, validationError("only one default level is allowed")
 	}
-	if defaultEnabledActionCount == 0 {
-		return nil, validationError("default level requires at least one enabled action")
-	}
 
 	return levels, nil
 }
@@ -377,11 +340,11 @@ func normalizeActions(inputs []TemplateActionInput) ([]structs.CaseTemplateLevel
 	actions := make([]structs.CaseTemplateLevelAction, 0, len(inputs))
 	enabledCount := 0
 	for i, input := range inputs {
-		if input.RequiredPermissionBits != 0 {
-			return nil, 0, validationError("action required_permission_bits is not part of foundation templates")
+		if input.ActionType == "record_warning" {
+			return nil, 0, validationError("record_warning is not a template action; creating a case records the warning")
 		}
 		if input.ActionType == structs.ActionSendDM {
-			return nil, 0, validationError("send_dm is not a template action; set notify_user on the moderation action")
+			return nil, 0, validationError("send_dm is not a template action; set notify_user on the level or moderation action")
 		}
 		if !validActionType(input.ActionType) {
 			return nil, 0, validationError("action_type is invalid")
@@ -461,11 +424,28 @@ func normalizeJSONObject(raw json.RawMessage) (string, error) {
 
 func validActionType(actionType structs.ActionType) bool {
 	switch actionType {
-	case structs.ActionRecordWarning, structs.ActionTimeoutUser, structs.ActionKickUser, structs.ActionBanUser:
+	case structs.ActionTimeoutUser, structs.ActionKickUser, structs.ActionBanUser:
 		return true
 	default:
 		return false
 	}
+}
+
+func normalizeLevelNotificationType(notifyUser bool, notificationType string) (string, error) {
+	if !notifyUser {
+		return "", nil
+	}
+	normalized := strings.ToLower(strings.TrimSpace(notificationType))
+	if normalized == "" {
+		normalized = string(structs.NotificationWarning)
+	}
+	if len(normalized) > 64 {
+		return "", validationError("notification_type must be 64 characters or fewer")
+	}
+	if !validNotificationType(normalized) {
+		return "", validationError("notification_type is invalid")
+	}
+	return normalized, nil
 }
 
 func normalizeNotificationType(actionType structs.ActionType, notifyUser bool, notificationType string) (string, error) {
@@ -488,8 +468,6 @@ func normalizeNotificationType(actionType structs.ActionType, notifyUser bool, n
 
 func defaultNotificationType(actionType structs.ActionType) string {
 	switch actionType {
-	case structs.ActionRecordWarning:
-		return string(structs.NotificationWarning)
 	case structs.ActionTimeoutUser:
 		return string(structs.NotificationTimeout)
 	case structs.ActionKickUser:
@@ -599,6 +577,8 @@ func templateLevelDetails(level structs.CaseTemplateLevel) TemplateLevelDetails 
 		IsDefault:        level.IsDefault,
 		TriggerCaseCount: level.TriggerCaseCount,
 		WindowMinutes:    level.WindowMinutes,
+		NotifyUser:       level.NotifyUser,
+		NotificationType: level.NotificationType,
 	}
 }
 

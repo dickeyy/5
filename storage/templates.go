@@ -149,8 +149,6 @@ func (s *Store) UpdateCaseTemplate(ctx context.Context, params UpdateCaseTemplat
 		template.ReasonTemplate = params.Template.ReasonTemplate
 		template.DefaultSeverity = params.Template.DefaultSeverity
 		template.Appealable = params.Template.Appealable
-		template.DMEnabled = params.Template.DMEnabled
-		template.DMTemplate = params.Template.DMTemplate
 		template.Enabled = params.Template.Enabled
 		template.UpdatedByDiscordUserID = params.Template.UpdatedByDiscordUserID
 		template.Version++

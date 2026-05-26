@@ -8,15 +8,12 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/app"
-	"github.com/quackdiscord/bot/storage"
 	"github.com/quackdiscord/bot/structs"
 )
 
 type fakeActionClient struct {
-	dmFailures  []error
-	logFailures []error
-	dms         []fakeActionMessage
-	logs        []fakeActionMessage
+	dmFailures []error
+	dms        []fakeActionMessage
 }
 
 type fakeActionMessage struct {
@@ -37,29 +34,12 @@ func (f *fakeActionClient) SendDM(ctx context.Context, discordUserID, message st
 	return map[string]any{"message_id": "dm-message-1"}, nil
 }
 
-func (f *fakeActionClient) SendModLog(ctx context.Context, discordChannelID, message string) (map[string]any, error) {
-	_ = ctx
-	if len(f.logFailures) > 0 {
-		err := f.logFailures[0]
-		f.logFailures = f.logFailures[1:]
-		if err != nil {
-			return nil, err
-		}
-	}
-	f.logs = append(f.logs, fakeActionMessage{TargetID: discordChannelID, Message: message})
-	return map[string]any{"message_id": "log-message-1"}, nil
-}
-
 func TestActionServiceProcessesSafeActions(t *testing.T) {
 	ctx := context.Background()
 	store := newMigratedStore(t)
 	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
 	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
-	setModLogChannel(t, store, modContext.Guild.ID, "mod-log-1")
-
-	template := createAppTemplate(t, ctx, store, adminContext, actionTemplateInput("safe-actions", []app.TemplateActionInput{
-		{ActionType: structs.ActionRecordWarning, Config: json.RawMessage(`{"notification_message":"Please stop"}`), NotifyUser: true, IdempotencyScope: "case"},
-	}))
+	template := createAppTemplate(t, ctx, store, adminContext, validTemplateInput("safe-actions"))
 	created, err := app.NewCaseService(store).Create(ctx, modContext, app.CaseInput{
 		TemplateID:          template.ID,
 		TargetDiscordUserID: "target-1",
@@ -73,21 +53,15 @@ func TestActionServiceProcessesSafeActions(t *testing.T) {
 		t.Fatalf("process actions: %v", err)
 	}
 
-	if len(fakeDiscord.dms) != 1 || fakeDiscord.dms[0].TargetID != "target-1" || fakeDiscord.dms[0].Message != "Please stop" {
+	if len(fakeDiscord.dms) != 1 || fakeDiscord.dms[0].TargetID != "target-1" || fakeDiscord.dms[0].Message != "You received a warning in this server: No spam" {
 		t.Fatalf("unexpected DMs: %+v", fakeDiscord.dms)
 	}
-	if len(fakeDiscord.logs) != 0 {
-		t.Fatalf("did not expect template-driven mod logs in phase 2, got %+v", fakeDiscord.logs)
-	}
-
 	actions, err := store.ListCaseActionExecutions(ctx, created.ID)
 	if err != nil {
 		t.Fatalf("list actions: %v", err)
 	}
-	for _, action := range actions {
-		if action.Status != structs.ActionExecutionSucceeded {
-			t.Fatalf("expected all actions succeeded, got %+v", actions)
-		}
+	if len(actions) != 1 || actions[0].ActionType != structs.ActionSendDM || actions[0].Status != structs.ActionExecutionSucceeded {
+		t.Fatalf("expected generated warning notification to succeed, got %+v", actions)
 	}
 	cases, err := store.ListCases(ctx, modContext.Guild.ID)
 	if err != nil {
@@ -104,22 +78,19 @@ func TestActionServiceRetriesTransientFailure(t *testing.T) {
 	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
 	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
 
-	template := createAppTemplate(t, ctx, store, adminContext, actionTemplateInput("retry-dm", []app.TemplateActionInput{
-		{
-			ActionType:       structs.ActionRecordWarning,
-			Config:           json.RawMessage(`{"notification_message":"retry me"}`),
-			NotifyUser:       true,
-			MaxRetries:       1,
-			RetryBackoffMS:   1000,
-			IdempotencyScope: "case",
-		},
-	}))
+	template := createAppTemplate(t, ctx, store, adminContext, validTemplateInput("retry-dm"))
 	created, err := app.NewCaseService(store).Create(ctx, modContext, app.CaseInput{
 		TemplateID:          template.ID,
 		TargetDiscordUserID: "target-1",
 	})
 	if err != nil {
 		t.Fatalf("create case: %v", err)
+	}
+	if err := store.DB().Model(&structs.CaseActionExecution{}).Where("case_id = ?", created.ID).Updates(map[string]any{
+		"max_retries":      1,
+		"retry_backoff_ms": 1000,
+	}).Error; err != nil {
+		t.Fatalf("configure retry: %v", err)
 	}
 
 	fakeDiscord := &fakeActionClient{dmFailures: []error{
@@ -159,10 +130,12 @@ func TestActionServiceFailureSkipsLaterActionsUnlessContinueOnError(t *testing.T
 	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
 	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
 
-	template := createAppTemplate(t, ctx, store, adminContext, actionTemplateInput("stop-on-error", []app.TemplateActionInput{
-		{ActionType: structs.ActionRecordWarning, Config: json.RawMessage(`{"notification_message":"blocked"}`), NotifyUser: true, IdempotencyScope: "case"},
-		{ActionType: structs.ActionRecordWarning, Config: json.RawMessage(`{}`), IdempotencyScope: "case"},
-	}))
+	input := actionTemplateInput("stop-on-error", []app.TemplateActionInput{
+		{ActionType: structs.ActionTimeoutUser, Config: json.RawMessage(`{"duration_minutes":60}`), IdempotencyScope: "case"},
+		{ActionType: structs.ActionKickUser, Config: json.RawMessage(`{}`), IdempotencyScope: "case"},
+	})
+	input.Levels[0].NotifyUser = false
+	template := createAppTemplate(t, ctx, store, adminContext, input)
 	created, err := app.NewCaseService(store).Create(ctx, modContext, app.CaseInput{
 		TemplateID:          template.ID,
 		TargetDiscordUserID: "target-1",
@@ -170,9 +143,7 @@ func TestActionServiceFailureSkipsLaterActionsUnlessContinueOnError(t *testing.T
 	if err != nil {
 		t.Fatalf("create case: %v", err)
 	}
-	fakeDiscord := &fakeActionClient{dmFailures: []error{
-		app.DiscordActionError{Code: "dm_closed", Message: "closed DMs", Retryable: false},
-	}}
+	fakeDiscord := &fakeActionClient{}
 	if err := app.NewActionService(store, fakeDiscord).ProcessCaseActions(ctx, created.ID); err != nil {
 		t.Fatalf("process actions: %v", err)
 	}
@@ -185,9 +156,10 @@ func TestActionServiceFailureSkipsLaterActionsUnlessContinueOnError(t *testing.T
 	}
 
 	continueInput := actionTemplateInput("continue-on-error", []app.TemplateActionInput{
-		{ActionType: structs.ActionRecordWarning, Config: json.RawMessage(`{"notification_message":"blocked"}`), NotifyUser: true, ContinueOnError: true, IdempotencyScope: "case"},
-		{ActionType: structs.ActionRecordWarning, Config: json.RawMessage(`{}`), IdempotencyScope: "case"},
+		{ActionType: structs.ActionTimeoutUser, Config: json.RawMessage(`{"duration_minutes":60}`), ContinueOnError: true, IdempotencyScope: "case"},
+		{ActionType: structs.ActionKickUser, Config: json.RawMessage(`{}`), IdempotencyScope: "case"},
 	})
+	continueInput.Levels[0].NotifyUser = false
 	continueTemplate := createAppTemplate(t, ctx, store, adminContext, continueInput)
 	continued, err := app.NewCaseService(store).Create(ctx, modContext, app.CaseInput{
 		TemplateID:          continueTemplate.ID,
@@ -196,9 +168,7 @@ func TestActionServiceFailureSkipsLaterActionsUnlessContinueOnError(t *testing.T
 	if err != nil {
 		t.Fatalf("create continuing case: %v", err)
 	}
-	fakeDiscord = &fakeActionClient{dmFailures: []error{
-		app.DiscordActionError{Code: "dm_closed", Message: "closed DMs", Retryable: false},
-	}}
+	fakeDiscord = &fakeActionClient{}
 	if err := app.NewActionService(store, fakeDiscord).ProcessCaseActions(ctx, continued.ID); err != nil {
 		t.Fatalf("process continuing actions: %v", err)
 	}
@@ -206,7 +176,7 @@ func TestActionServiceFailureSkipsLaterActionsUnlessContinueOnError(t *testing.T
 	if err != nil {
 		t.Fatalf("list continuing actions: %v", err)
 	}
-	if actions[0].Status != structs.ActionExecutionFailed || actions[1].Status != structs.ActionExecutionSucceeded {
+	if actions[0].Status != structs.ActionExecutionFailed || actions[1].Status != structs.ActionExecutionFailed {
 		t.Fatalf("expected continue_on_error to run later action, got %+v", actions)
 	}
 }
@@ -217,9 +187,11 @@ func TestActionServiceDoesNotNotifyForUnsupportedAction(t *testing.T) {
 	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
 	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
 
-	template := createAppTemplate(t, ctx, store, adminContext, actionTemplateInput("unsupported-notify", []app.TemplateActionInput{
+	unsupportedInput := actionTemplateInput("unsupported-notify", []app.TemplateActionInput{
 		{ActionType: structs.ActionBanUser, Config: json.RawMessage(`{}`), NotifyUser: true, IdempotencyScope: "case"},
-	}))
+	})
+	unsupportedInput.Levels[0].NotifyUser = false
+	template := createAppTemplate(t, ctx, store, adminContext, unsupportedInput)
 	created, err := app.NewCaseService(store).Create(ctx, modContext, app.CaseInput{
 		TemplateID:          template.ID,
 		TargetDiscordUserID: "target-1",
@@ -241,19 +213,6 @@ func TestActionServiceDoesNotNotifyForUnsupportedAction(t *testing.T) {
 	}
 	if actions[0].Status != structs.ActionExecutionFailed {
 		t.Fatalf("expected unsupported action to fail, got %+v", actions[0])
-	}
-}
-
-func setModLogChannel(t *testing.T, store *storage.Store, guildID, channelID string) {
-	t.Helper()
-
-	settings, err := store.EnsureGuildSettings(context.Background(), guildID)
-	if err != nil {
-		t.Fatalf("ensure guild settings: %v", err)
-	}
-	settings.ModLogChannelDiscordID = channelID
-	if err := store.DB().Save(settings).Error; err != nil {
-		t.Fatalf("save guild settings: %v", err)
 	}
 }
 

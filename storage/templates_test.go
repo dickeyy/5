@@ -23,10 +23,10 @@ func TestCaseTemplateStorageCreateListGetExpanded(t *testing.T) {
 				},
 			},
 			{
-				Level: structs.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, Enabled: true},
+				Level: structs.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, NotifyUser: true, NotificationType: string(structs.NotificationWarning), Enabled: true},
 				Actions: []structs.CaseTemplateLevelAction{
-					{Position: 2, ActionType: structs.ActionRecordWarning, ConfigJSON: `{"notification_message":"stop"}`, NotifyUser: true, NotificationType: string(structs.NotificationWarning), IdempotencyScope: "case", Enabled: true},
-					{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
+					{Position: 2, ActionType: structs.ActionKickUser, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
+					{Position: 1, ActionType: structs.ActionBanUser, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
 				},
 			},
 		},
@@ -77,8 +77,8 @@ func TestCaseTemplateStorageUpdateReplacesChildrenAndIncrementsVersion(t *testin
 			{
 				Level: structs.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, Enabled: true},
 				Actions: []structs.CaseTemplateLevelAction{
-					{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
-					{Position: 2, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, NotifyUser: true, NotificationType: string(structs.NotificationWarning), IdempotencyScope: "case", Enabled: false},
+					{Position: 1, ActionType: structs.ActionTimeoutUser, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
+					{Position: 2, ActionType: structs.ActionKickUser, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: false},
 				},
 			},
 		},
@@ -89,7 +89,7 @@ func TestCaseTemplateStorageUpdateReplacesChildrenAndIncrementsVersion(t *testin
 	if updated.Template.Version != created.Template.Version+1 {
 		t.Fatalf("expected version increment, got %d then %d", created.Template.Version, updated.Template.Version)
 	}
-	if len(updated.Levels) != 1 || len(updated.Levels[0].Actions) != 2 || updated.Levels[0].Actions[0].ActionType != structs.ActionRecordWarning {
+	if len(updated.Levels) != 1 || len(updated.Levels[0].Actions) != 2 || updated.Levels[0].Actions[0].ActionType != structs.ActionTimeoutUser {
 		t.Fatalf("expected replaced levels and actions, got %+v", updated.Levels)
 	}
 }
@@ -162,7 +162,7 @@ func templateLevels() []storage.ExpandedCaseTemplateLevel {
 				Enabled:   true,
 			},
 			Actions: []structs.CaseTemplateLevelAction{
-				{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
+				{Position: 1, ActionType: structs.ActionTimeoutUser, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
 			},
 		},
 	}
@@ -197,7 +197,6 @@ func templateModel(guildID, slug string) structs.CaseTemplate {
 		Description:            "Spam template",
 		ReasonTemplate:         "No spam",
 		DefaultSeverity:        structs.CaseSeverityMedium,
-		DefaultWeight:          1,
 		Enabled:                true,
 		CreatedByDiscordUserID: "moderator-1",
 		UpdatedByDiscordUserID: "moderator-1",

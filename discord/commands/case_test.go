@@ -127,9 +127,6 @@ func newCaseCommandHarness(t *testing.T) (*storage.Store, *app.Services, string)
 				Name:      "Default",
 				Position:  1,
 				IsDefault: true,
-				Actions: []app.TemplateActionInput{
-					{ActionType: structs.ActionRecordWarning},
-				},
 			},
 		},
 	})

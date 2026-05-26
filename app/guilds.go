@@ -24,7 +24,6 @@ type GuildService struct {
 
 type GuildStaffContext struct {
 	Guild          *structs.Guild
-	Settings       *structs.GuildSettings
 	Staff          *structs.StaffMember
 	PermissionBits uint64
 	Permissions    map[structs.PermissionAction]bool
@@ -147,11 +146,6 @@ func (s *GuildService) ResolveStaffContext(ctx context.Context, session *structs
 		return nil, err
 	}
 
-	settings, err := s.store.EnsureGuildSettings(ctx, guild.ID)
-	if err != nil {
-		return nil, err
-	}
-
 	staff, err := s.store.UpsertStaffMember(ctx, storage.UpsertStaffMemberParams{
 		GuildID:                guild.ID,
 		DiscordUserID:          session.DiscordUserID,
@@ -168,7 +162,6 @@ func (s *GuildService) ResolveStaffContext(ctx context.Context, session *structs
 
 	return &GuildStaffContext{
 		Guild:          guild,
-		Settings:       settings,
 		Staff:          staff,
 		PermissionBits: userGuild.Permissions,
 		Permissions:    role.permissions,
@@ -212,11 +205,6 @@ func (s *GuildService) ResolveDiscordStaffContext(ctx context.Context, input Dis
 		return nil, err
 	}
 
-	settings, err := s.store.EnsureGuildSettings(ctx, guild.ID)
-	if err != nil {
-		return nil, err
-	}
-
 	displayName := strings.TrimSpace(input.DisplayName)
 	if displayName == "" {
 		displayName = discordUserID
@@ -242,7 +230,6 @@ func (s *GuildService) ResolveDiscordStaffContext(ctx context.Context, input Dis
 
 	return &GuildStaffContext{
 		Guild:          guild,
-		Settings:       settings,
 		Staff:          staff,
 		PermissionBits: input.PermissionBits,
 		Permissions:    role.permissions,

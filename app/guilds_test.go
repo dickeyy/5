@@ -118,13 +118,6 @@ func TestResolveStaffContextEvaluatesPermissionBits(t *testing.T) {
 		t.Fatalf("expected moderate members permission not to allow audit.read")
 	}
 
-	policies, err := store.ListGuildPermissionPolicies(context.Background(), guildContext.Guild.ID)
-	if err != nil {
-		t.Fatalf("list guild permission policies: %v", err)
-	}
-	if len(policies) != 0 {
-		t.Fatalf("expected guild context resolution not to create permission policies, got %+v", policies)
-	}
 }
 
 func TestResolveStaffContextRejectsMemberActions(t *testing.T) {
@@ -173,45 +166,6 @@ func TestResolveStaffContextRejectsBotNotInGuild(t *testing.T) {
 	_, err := service.ResolveStaffContext(context.Background(), testSession("user-1"), "guild-1")
 	if !errors.Is(err, app.ErrBotNotInGuild) {
 		t.Fatalf("expected ErrBotNotInGuild, got %v", err)
-	}
-}
-
-func TestResolveStaffContextIgnoresDisabledStaffRows(t *testing.T) {
-	ctx := context.Background()
-	store := newMigratedStore(t)
-	guild, err := store.UpsertGuild(ctx, storage.UpsertGuildParams{
-		DiscordGuildID:     "guild-1",
-		Name:               "Guild",
-		OwnerDiscordUserID: "owner-1",
-	})
-	if err != nil {
-		t.Fatalf("upsert guild: %v", err)
-	}
-	staff, err := store.UpsertStaffMember(ctx, storage.UpsertStaffMemberParams{
-		GuildID:                guild.ID,
-		DiscordUserID:          "user-1",
-		LastSeenPermissionBits: uint64(discordgo.PermissionModerateMembers),
-		LastKnownDisplayName:   "User",
-	})
-	if err != nil {
-		t.Fatalf("upsert staff: %v", err)
-	}
-	disabledAt := time.Now().UTC()
-	if err := store.DB().Model(&structs.StaffMember{}).Where("id = ?", staff.ID).Update("disabled_at", disabledAt).Error; err != nil {
-		t.Fatalf("disable staff: %v", err)
-	}
-
-	service := app.NewGuildService(store, fakeDiscordClient{
-		userGuilds: []app.DiscordUserGuild{{ID: "guild-1", Permissions: uint64(discordgo.PermissionModerateMembers)}},
-		botGuild:   &app.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "owner-1"},
-	})
-
-	guildContext, err := service.ResolveStaffContext(ctx, testSession("user-1"), "guild-1")
-	if err != nil {
-		t.Fatalf("resolve staff context should ignore disabled staff rows: %v", err)
-	}
-	if !guildContext.Can(structs.PermissionActionCaseCreate) {
-		t.Fatalf("expected discord permissions to remain source of truth")
 	}
 }
 
@@ -264,49 +218,6 @@ func TestResolveDiscordStaffContextOwnerBypassAllowsAllActions(t *testing.T) {
 		if !allowed {
 			t.Fatalf("expected owner to be allowed for %s", action)
 		}
-	}
-}
-
-func TestResolveDiscordStaffContextIgnoresDisabledStaffRows(t *testing.T) {
-	ctx := context.Background()
-	store := newMigratedStore(t)
-	guild, err := store.UpsertGuild(ctx, storage.UpsertGuildParams{
-		DiscordGuildID:     "guild-1",
-		Name:               "Guild",
-		OwnerDiscordUserID: "owner-1",
-	})
-	if err != nil {
-		t.Fatalf("upsert guild: %v", err)
-	}
-	staff, err := store.UpsertStaffMember(ctx, storage.UpsertStaffMemberParams{
-		GuildID:                guild.ID,
-		DiscordUserID:          "user-1",
-		LastSeenPermissionBits: uint64(discordgo.PermissionModerateMembers),
-		LastKnownDisplayName:   "User",
-	})
-	if err != nil {
-		t.Fatalf("upsert staff: %v", err)
-	}
-	disabledAt := time.Now().UTC()
-	if err := store.DB().Model(&structs.StaffMember{}).Where("id = ?", staff.ID).Update("disabled_at", disabledAt).Error; err != nil {
-		t.Fatalf("disable staff: %v", err)
-	}
-
-	service := app.NewGuildService(store, fakeDiscordClient{
-		botGuild: &app.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "owner-1"},
-	})
-
-	guildContext, err := service.ResolveDiscordStaffContext(ctx, app.DiscordStaffContextInput{
-		DiscordGuildID: "guild-1",
-		DiscordUserID:  "user-1",
-		DisplayName:    "User",
-		PermissionBits: uint64(discordgo.PermissionModerateMembers),
-	})
-	if err != nil {
-		t.Fatalf("resolve discord staff context should ignore disabled staff rows: %v", err)
-	}
-	if !guildContext.Can(structs.PermissionActionCaseCreate) {
-		t.Fatalf("expected discord interaction permissions to remain source of truth")
 	}
 }
 

@@ -6,14 +6,6 @@ import (
 	"gorm.io/gorm"
 )
 
-type GuildRolloutState string
-
-const (
-	GuildRolloutDisabled GuildRolloutState = "disabled"
-	GuildRolloutBeta     GuildRolloutState = "beta"
-	GuildRolloutEnabled  GuildRolloutState = "enabled"
-)
-
 type PermissionAction string
 
 const (
@@ -58,12 +50,10 @@ const (
 type ActionType string
 
 const (
-	ActionRecordWarning ActionType = "record_warning"
-	ActionSendDM        ActionType = "send_dm"
-	ActionTimeoutUser   ActionType = "timeout_user"
-	ActionKickUser      ActionType = "kick_user"
-	ActionBanUser       ActionType = "ban_user"
-	ActionWriteModLog   ActionType = "write_mod_log"
+	ActionSendDM      ActionType = "send_dm"
+	ActionTimeoutUser ActionType = "timeout_user"
+	ActionKickUser    ActionType = "kick_user"
+	ActionBanUser     ActionType = "ban_user"
 )
 
 type NotificationType string
@@ -116,13 +106,6 @@ const (
 	CaseEventStatusChanged   CaseEventType = "status_changed"
 )
 
-type EscalationScope string
-
-const (
-	EscalationScopeUser  EscalationScope = "user"
-	EscalationScopeGuild EscalationScope = "guild"
-)
-
 type AppealStatus string
 
 const (
@@ -164,36 +147,11 @@ type ULIDModel struct {
 
 type Guild struct {
 	ULIDModel
-	DiscordGuildID     string            `gorm:"size:32;not null;uniqueIndex"`
-	Name               string            `gorm:"size:191;not null"`
-	IconURL            string            `gorm:"size:1024"`
-	OwnerDiscordUserID string            `gorm:"size:32;not null;index"`
-	RolloutState       GuildRolloutState `gorm:"size:32;not null;default:'disabled';index"`
-	IsActive           bool              `gorm:"not null;default:true;index"`
-	ImportedFromV4     bool              `gorm:"not null;default:false"`
-	ImportedAt         *time.Time
-}
-
-type GuildSettings struct {
-	ULIDModel
-	GuildID                       string `gorm:"type:char(26);not null;uniqueIndex"`
-	UseDiscordPermissionChecks    bool   `gorm:"not null;default:true"`
-	DefaultTemplatePermissionBits uint64 `gorm:"type:bigint unsigned;not null;default:0"`
-	ModLogChannelDiscordID        string `gorm:"size:32"`
-	AppealsChannelDiscordID       string `gorm:"size:32"`
-	TicketChannelDiscordID        string `gorm:"size:32"`
-	TicketLogChannelDiscordID     string `gorm:"size:32"`
-	HoneypotChannelDiscordID      string `gorm:"size:32"`
-	FeatureFlagsJSON              string `gorm:"type:json;not null"`
-	GuildModerationConfigJSON     string `gorm:"type:json;not null"`
-}
-
-type GuildPermissionPolicy struct {
-	ULIDModel
-	GuildID               string           `gorm:"type:char(26);not null;uniqueIndex:idx_guild_permission_policy,priority:1"`
-	Action                PermissionAction `gorm:"size:96;not null;uniqueIndex:idx_guild_permission_policy,priority:2"`
-	MinimumPermissionBits uint64           `gorm:"type:bigint unsigned;not null;default:0"`
-	Description           string           `gorm:"size:255"`
+	DiscordGuildID     string `gorm:"size:32;not null;uniqueIndex"`
+	Name               string `gorm:"size:191;not null"`
+	IconURL            string `gorm:"size:1024"`
+	OwnerDiscordUserID string `gorm:"size:32;not null;index"`
+	IsActive           bool   `gorm:"not null;default:true;index"`
 }
 
 type StaffMember struct {
@@ -203,7 +161,6 @@ type StaffMember struct {
 	LastSeenPermissionBits uint64     `gorm:"type:bigint unsigned;not null;default:0"`
 	LastKnownDisplayName   string     `gorm:"size:191"`
 	LastActiveAt           *time.Time `gorm:"index"`
-	DisabledAt             *time.Time
 }
 
 type CaseTemplate struct {
@@ -213,33 +170,14 @@ type CaseTemplate struct {
 	Name                   string         `gorm:"size:191;not null"`
 	Description            string         `gorm:"type:text;not null"`
 	ReasonTemplate         string         `gorm:"type:text;not null"`
-	RequiredPermissionBits uint64         `gorm:"type:bigint unsigned;not null;default:0"`
 	DefaultSeverity        CaseSeverity   `gorm:"size:32;not null;default:'medium'"`
-	DefaultWeight          int            `gorm:"not null;default:1"`
 	Appealable             bool           `gorm:"not null;default:false"`
-	DMEnabled              bool           `gorm:"not null;default:false"`
-	DMTemplate             string         `gorm:"type:text"`
 	Enabled                bool           `gorm:"not null;default:true;index:idx_case_template_guild_enabled,priority:2"`
 	Version                uint           `gorm:"not null;default:1"`
 	CreatedByDiscordUserID string         `gorm:"size:32;not null"`
 	UpdatedByDiscordUserID string         `gorm:"size:32;not null"`
 	ArchivedAt             *time.Time     `gorm:"index"`
 	DeletedAt              gorm.DeletedAt `gorm:"index"`
-}
-
-type CaseTemplateAction struct {
-	ULIDModel
-	TemplateID             string     `gorm:"type:char(26);not null;uniqueIndex:idx_template_action_position,priority:1;index"`
-	Position               int        `gorm:"not null;uniqueIndex:idx_template_action_position,priority:2"`
-	ActionType             ActionType `gorm:"size:64;not null;index"`
-	RequiredPermissionBits uint64     `gorm:"type:bigint unsigned;not null;default:0"`
-	ConfigJSON             string     `gorm:"type:json;not null"`
-	ContinueOnError        bool       `gorm:"not null;default:false"`
-	MaxRetries             uint8      `gorm:"not null;default:0"`
-	RetryBackoffMS         int        `gorm:"not null;default:0"`
-	TimeoutMS              int        `gorm:"not null;default:0"`
-	IdempotencyScope       string     `gorm:"size:32;not null;default:'case'"`
-	Enabled                bool       `gorm:"not null;default:true"`
 }
 
 type CaseTemplateLevel struct {
@@ -250,6 +188,8 @@ type CaseTemplateLevel struct {
 	IsDefault        bool   `gorm:"not null;default:false;index"`
 	TriggerCaseCount int    `gorm:"not null;default:0"`
 	WindowMinutes    int    `gorm:"not null;default:0"`
+	NotifyUser       bool   `gorm:"not null;default:false"`
+	NotificationType string `gorm:"size:64"`
 	Enabled          bool   `gorm:"not null;default:true"`
 }
 
@@ -267,22 +207,6 @@ type CaseTemplateLevelAction struct {
 	TimeoutMS        int        `gorm:"not null;default:0"`
 	IdempotencyScope string     `gorm:"size:32;not null;default:'case'"`
 	Enabled          bool       `gorm:"not null;default:true"`
-}
-
-type CaseTemplateEscalationRule struct {
-	ULIDModel
-	GuildID              string          `gorm:"type:char(26);not null;index"`
-	TemplateID           string          `gorm:"type:char(26);not null;index:idx_escalation_template_priority,priority:1"`
-	Name                 string          `gorm:"size:191;not null"`
-	Scope                EscalationScope `gorm:"size:32;not null;default:'user'"`
-	Priority             int             `gorm:"not null;default:0;index:idx_escalation_template_priority,priority:2"`
-	TriggerCaseCount     int             `gorm:"not null;default:0"`
-	TriggerWeightTotal   int             `gorm:"not null;default:0"`
-	WindowMinutes        int             `gorm:"not null;default:0"`
-	EscalateToTemplateID *string         `gorm:"type:char(26);index"`
-	RuleConfigJSON       string          `gorm:"type:json;not null"`
-	Enabled              bool            `gorm:"not null;default:true"`
-	StopAfterMatch       bool            `gorm:"not null;default:true"`
 }
 
 type Case struct {
@@ -427,14 +351,10 @@ type AuditLogEntry struct {
 func SchemaModels() []any {
 	return []any{
 		&Guild{},
-		&GuildSettings{},
-		&GuildPermissionPolicy{},
 		&StaffMember{},
 		&CaseTemplate{},
-		&CaseTemplateAction{},
 		&CaseTemplateLevel{},
 		&CaseTemplateLevelAction{},
-		&CaseTemplateEscalationRule{},
 		&Case{},
 		&CaseActionExecution{},
 		&CaseActionAttempt{},

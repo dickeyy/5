@@ -35,13 +35,13 @@ func TestCaseServiceCreateFromTemplate(t *testing.T) {
 	if created.Reason != "No spam" || created.Status != structs.CaseStatusOpen || created.Source != structs.CaseSourceAPI {
 		t.Fatalf("unexpected case fields: %+v", created)
 	}
-	if len(created.Actions) != 1 {
-		t.Fatalf("expected one enabled action, got %+v", created.Actions)
+	if len(created.Actions) != 1 || created.Actions[0].ActionType != structs.ActionSendDM {
+		t.Fatalf("expected generated warning notification action, got %+v", created.Actions)
 	}
 	if created.SelectedLevel == nil || !created.SelectedLevel.IsDefault || created.SelectedLevel.MatchedCaseCount != 1 {
 		t.Fatalf("expected selected default level, got %+v", created.SelectedLevel)
 	}
-	if created.Actions[0].Position != 1 || created.Actions[0].Status != structs.ActionExecutionPending {
+	if created.Actions[0].Position != 0 || created.Actions[0].Status != structs.ActionExecutionPending {
 		t.Fatalf("unexpected first action: %+v", created.Actions[0])
 	}
 
@@ -65,7 +65,7 @@ func TestCaseServiceCreateFromTemplate(t *testing.T) {
 	if err := json.Unmarshal([]byte(cases[0].TemplateSnapshotJSON), &snapshot); err != nil {
 		t.Fatalf("decode snapshot: %v", err)
 	}
-	if snapshot.Template.ID != template.ID || len(snapshot.Actions) != 1 {
+	if snapshot.Template.ID != template.ID || len(snapshot.Actions) != 0 {
 		t.Fatalf("unexpected snapshot: %+v", snapshot)
 	}
 	if snapshot.SelectedLevel.ID == "" || !snapshot.SelectedLevel.IsDefault || snapshot.SelectedLevel.MatchedCaseCount != 1 {
@@ -151,7 +151,6 @@ func TestCaseServiceRejectsEmptyFinalReason(t *testing.T) {
 			Name:                   "Empty Reason",
 			ReasonTemplate:         " ",
 			DefaultSeverity:        structs.CaseSeverityMedium,
-			DefaultWeight:          1,
 			Enabled:                true,
 			CreatedByDiscordUserID: "admin-1",
 			UpdatedByDiscordUserID: "admin-1",
@@ -159,9 +158,6 @@ func TestCaseServiceRejectsEmptyFinalReason(t *testing.T) {
 		Levels: []storage.ExpandedCaseTemplateLevel{
 			{
 				Level: structs.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, Enabled: true},
-				Actions: []structs.CaseTemplateLevelAction{
-					{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
-				},
 			},
 		},
 	})
@@ -175,6 +171,40 @@ func TestCaseServiceRejectsEmptyFinalReason(t *testing.T) {
 	})
 	if !errors.Is(err, app.ErrCaseValidation) {
 		t.Fatalf("expected validation error, got %v", err)
+	}
+}
+
+func TestCaseServiceCreatesActionlessWarningCase(t *testing.T) {
+	ctx := context.Background()
+	store := newMigratedStore(t)
+	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
+	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
+	service := app.NewCaseService(store)
+
+	input := validTemplateInput("silent-warning")
+	input.Levels[0].NotifyUser = false
+	template := createAppTemplate(t, ctx, store, adminContext, input)
+
+	created, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
+	if err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	if len(created.Actions) != 0 {
+		t.Fatalf("expected no action rows for silent warning case, got %+v", created.Actions)
+	}
+	events, err := store.ListCaseEvents(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("list case events: %v", err)
+	}
+	if len(events) != 1 || events[0].EventType != structs.CaseEventCreated {
+		t.Fatalf("expected only case created event, got %+v", events)
+	}
+	audits, err := store.ListAuditLogEntries(ctx, modContext.Guild.ID)
+	if err != nil {
+		t.Fatalf("list audits: %v", err)
+	}
+	if audits[len(audits)-1].Action != "case.create" {
+		t.Fatalf("expected case.create as warning audit trail, got %+v", audits)
 	}
 }
 
@@ -256,9 +286,6 @@ func TestCaseServiceHighestMatchingLevelWins(t *testing.T) {
 		Name:             "Early repeat",
 		Position:         3,
 		TriggerCaseCount: 2,
-		Actions: []app.TemplateActionInput{
-			{ActionType: structs.ActionRecordWarning, Config: json.RawMessage(`{}`), IdempotencyScope: "case"},
-		},
 	})
 	template := createAppTemplate(t, ctx, store, adminContext, input)
 
@@ -392,27 +419,8 @@ func TestCaseServiceDisabledLevelsDoNotMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create case: %v", err)
 	}
-	if created.SelectedLevel == nil || !created.SelectedLevel.IsDefault || len(created.Actions) != 1 {
+	if created.SelectedLevel == nil || !created.SelectedLevel.IsDefault || len(created.Actions) != 1 || created.Actions[0].ActionType != structs.ActionSendDM {
 		t.Fatalf("expected disabled escalation to be ignored, got level=%+v actions=%+v", created.SelectedLevel, created.Actions)
-	}
-}
-
-func TestCaseServiceRejectsSelectedLevelWithoutEnabledActions(t *testing.T) {
-	ctx := context.Background()
-	store := newMigratedStore(t)
-	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
-	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
-	service := app.NewCaseService(store)
-
-	input := validTemplateInput("spam")
-	input.Levels[1].TriggerCaseCount = 1
-	disabled := false
-	input.Levels[1].Actions[0].Enabled = &disabled
-	template := createAppTemplate(t, ctx, store, adminContext, input)
-
-	_, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
-	if !errors.Is(err, app.ErrCaseValidation) {
-		t.Fatalf("expected validation error, got %v", err)
 	}
 }
 

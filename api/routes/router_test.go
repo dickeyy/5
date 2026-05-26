@@ -346,7 +346,7 @@ func TestCaseRouteCreate(t *testing.T) {
 	if body.Case.ID == "" || body.Case.CaseNumber != 1 || body.Case.TargetDiscordUserID != "target-1" {
 		t.Fatalf("unexpected case response: %+v", body.Case)
 	}
-	if len(body.Case.Actions) != 1 || body.Case.Actions[0].Status != string(structs.ActionExecutionPending) {
+	if len(body.Case.Actions) != 0 {
 		t.Fatalf("unexpected actions: %+v", body.Case.Actions)
 	}
 }
@@ -484,7 +484,6 @@ func newCaseRouteHarness(t *testing.T, permissionBits uint64) (*gin.Engine, stri
 			Description:            "Spam template",
 			ReasonTemplate:         "No spam",
 			DefaultSeverity:        structs.CaseSeverityMedium,
-			DefaultWeight:          1,
 			Enabled:                true,
 			CreatedByDiscordUserID: "admin-1",
 			UpdatedByDiscordUserID: "admin-1",
@@ -492,9 +491,6 @@ func newCaseRouteHarness(t *testing.T, permissionBits uint64) (*gin.Engine, stri
 		Levels: []storage.ExpandedCaseTemplateLevel{
 			{
 				Level: structs.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, Enabled: true},
-				Actions: []structs.CaseTemplateLevelAction{
-					{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
-				},
 			},
 		},
 	})
@@ -533,14 +529,7 @@ func templateRoutePayload(slug string) string {
 				"position": 1,
 				"is_default": true,
 				"enabled": true,
-				"actions": [
-					{
-						"action_type": "record_warning",
-						"config": {},
-						"idempotency_scope": "case",
-						"enabled": true
-					}
-				]
+				"actions": []
 			}
 		]
 	}`

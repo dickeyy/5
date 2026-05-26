@@ -104,12 +104,15 @@ Current template behavior in the app layer:
 
 - Templates must contain `levels`, and exactly one enabled default level is
   expected by validation in `app/templates.go`.
-- Flat `actions` and `escalation_rules` request fields are rejected for the
-  foundation flow; callers must use `levels[].actions` instead.
-- Template-authored action types are currently limited to
-  `record_warning`, `timeout_user`, `kick_user`, and `ban_user`.
-- User DM delivery is modeled as `notify_user` plus `notification_type` on a
-  moderation action, not as a standalone `send_dm` template action.
+- Actions are authored under `levels[].actions`; there is no flat template
+  action list or separate escalation-rule list in the app model.
+- Creating a case is the warning. `record_warning` is not an action type and no
+  execution row is created just to record a warning.
+- Template-authored executable action types are currently `timeout_user`,
+  `kick_user`, and `ban_user`.
+- Warning notification is modeled as `notify_user` plus `notification_type` on
+  the selected level. Moderation-action notification uses the same fields on
+  the action. `send_dm` is an internal queued execution, not a template action.
 - When `notify_user` is enabled, validation normalizes `notification_type` and
   defaults it from the moderation action type in `app/templates.go`.
 
@@ -144,19 +147,17 @@ Flow:
 Current execution support splits into two layers:
 
 - Template-authored actions can currently create case executions for
-  `record_warning`, `timeout_user`, `kick_user`, and `ban_user`.
-- The action executor also has standalone handlers for `send_dm` and
-  `write_mod_log`, but foundation template validation does not currently accept
-  those action types in `app/templates.go`.
-- `timeout_user`, `kick_user`, and `ban_user` are recognized action types, but
-  the current executor returns an unsupported irreversible-action error in
-  `app/actions.go`.
+  `timeout_user`, `kick_user`, and `ban_user`.
+- Warning-level notification creates an internal `send_dm` execution when the
+  selected level has `notify_user` enabled.
+- `timeout_user`, `kick_user`, and `ban_user` are recognized action modules, but
+  their current implementations return `action_not_implemented` until the
+  Discord moderation calls are filled in.
 
-Notification behavior changed recently: `CaseTemplateLevelAction` and
-`CaseActionExecution` now persist `notify_user` and `notification_type`, and the
-action executor sends the notification before running supported executable
-actions. This is reflected in migration `0003_action_notifications` in
-`storage/migrations.go`.
+Notification behavior: `CaseTemplateLevel`, `CaseTemplateLevelAction`, and
+`CaseActionExecution` persist notification metadata. Warning notification comes
+from the selected level; moderation-action notification comes from the action.
+This is part of the current schema applied by `storage/migrations.go`.
 
 Relevant files:
 
@@ -174,7 +175,7 @@ The schema registry is defined in `structs/schema.go` and applied through
 
 Important records:
 
-- `Guild`, `GuildSettings`, `GuildPermissionPolicy`, `StaffMember`
+- `Guild`, `StaffMember`
 - `CaseTemplate`, `CaseTemplateLevel`, `CaseTemplateLevelAction`
 - `Case`, `CaseActionExecution`, `CaseActionAttempt`, `CaseEvent`
 - `Appeal`, `AppealEvent`
@@ -185,8 +186,6 @@ Important records:
 The current migration set is:
 
 - `0001_v5_schema`
-- `0002_template_levels`
-- `0003_action_notifications`
 
 Relevant files:
 

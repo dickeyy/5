@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	actionmods "github.com/quackdiscord/bot/app/actions"
 	"github.com/quackdiscord/bot/storage"
 	"github.com/quackdiscord/bot/structs"
 )
@@ -15,47 +16,20 @@ import (
 type ActionService struct {
 	store    *storage.Store
 	discord  DiscordActionClient
-	handlers map[structs.ActionType]ActionExecutor
-}
-
-type ActionExecutor interface {
-	Execute(ctx context.Context, action ActionExecutionContext) ActionResult
-}
-
-type ActionExecutorFunc func(ctx context.Context, action ActionExecutionContext) ActionResult
-
-func (f ActionExecutorFunc) Execute(ctx context.Context, action ActionExecutionContext) ActionResult {
-	return f(ctx, action)
-}
-
-type ActionExecutionContext struct {
-	Case      structs.Case
-	Settings  structs.GuildSettings
-	Execution structs.CaseActionExecution
-	Config    map[string]any
-}
-
-type ActionResult struct {
-	Retryable bool
-	ErrorCode string
-	Error     string
-	Response  map[string]any
+	handlers map[structs.ActionType]actionmods.Executor
 }
 
 func NewActionService(store *storage.Store, discord DiscordActionClient) *ActionService {
-	service := &ActionService{
+	return &ActionService{
 		store:   store,
 		discord: discord,
-		handlers: map[structs.ActionType]ActionExecutor{
-			structs.ActionRecordWarning: ActionExecutorFunc(recordWarningAction),
-			structs.ActionTimeoutUser:   ActionExecutorFunc(unsupportedIrreversibleAction),
-			structs.ActionKickUser:      ActionExecutorFunc(unsupportedIrreversibleAction),
-			structs.ActionBanUser:       ActionExecutorFunc(unsupportedIrreversibleAction),
+		handlers: map[structs.ActionType]actionmods.Executor{
+			structs.ActionSendDM:      actionmods.SendDM(discord),
+			structs.ActionTimeoutUser: actionmods.TimeoutUser(),
+			structs.ActionKickUser:    actionmods.KickUser(),
+			structs.ActionBanUser:     actionmods.BanUser(),
 		},
 	}
-	service.handlers[structs.ActionSendDM] = ActionExecutorFunc(service.sendDMAction)
-	service.handlers[structs.ActionWriteModLog] = ActionExecutorFunc(service.writeModLogAction)
-	return service
 }
 
 func (s *ActionService) ProcessCaseActions(ctx context.Context, caseID string) error {
@@ -85,13 +59,12 @@ func (s *ActionService) ProcessCaseActions(ctx context.Context, caseID string) e
 func (s *ActionService) processClaimedAction(ctx context.Context, workerID string, claimed storage.ClaimedCaseAction) error {
 	handler, ok := s.handlers[claimed.Execution.ActionType]
 	if !ok || handler == nil {
-		handler = ActionExecutorFunc(unsupportedAction)
+		handler = actionmods.Func(actionmods.Unsupported)
 	}
 
 	config := parseConfigMap(claimed.Execution.ConfigSnapshotJSON)
-	actionContext := ActionExecutionContext{
+	actionContext := actionmods.Context{
 		Case:      claimed.Case,
-		Settings:  claimed.Settings,
 		Execution: claimed.Execution,
 		Config:    config,
 	}
@@ -166,47 +139,22 @@ func (s *ActionService) processClaimedAction(ctx context.Context, workerID strin
 	return nil
 }
 
-func recordWarningAction(ctx context.Context, action ActionExecutionContext) ActionResult {
-	_ = ctx
-	return ActionResult{Response: map[string]any{
-		"recorded": true,
-		"case_id":  action.Case.ID,
-	}}
-}
-
-func (s *ActionService) executeAction(ctx context.Context, handler ActionExecutor, action ActionExecutionContext) ActionResult {
-	var notification map[string]any
-	if action.Execution.NotifyUser {
-		if !executableActionType(action.Execution.ActionType) {
-			return handler.Execute(ctx, action)
-		}
+func (s *ActionService) executeAction(ctx context.Context, handler actionmods.Executor, action actionmods.Context) actionmods.Result {
+	result := handler.Execute(ctx, action)
+	if result.Error == "" && action.Execution.NotifyUser {
 		response, err := s.sendActionNotification(ctx, action)
 		if err != nil {
-			return actionErrorFromDiscord(err)
+			return actionmods.ResultFromError(err)
 		}
-		notification = response
-	}
-
-	result := handler.Execute(ctx, action)
-	if notification != nil {
 		if result.Response == nil {
 			result.Response = map[string]any{}
 		}
-		result.Response["notification"] = notification
+		result.Response["notification"] = response
 	}
 	return result
 }
 
-func executableActionType(actionType structs.ActionType) bool {
-	switch actionType {
-	case structs.ActionRecordWarning, structs.ActionSendDM, structs.ActionWriteModLog:
-		return true
-	default:
-		return false
-	}
-}
-
-func (s *ActionService) sendActionNotification(ctx context.Context, action ActionExecutionContext) (map[string]any, error) {
+func (s *ActionService) sendActionNotification(ctx context.Context, action actionmods.Context) (map[string]any, error) {
 	if s.discord == nil {
 		return nil, DiscordActionError{Code: "discord_unavailable", Message: "discord action client is not configured", Retryable: false}
 	}
@@ -223,27 +171,10 @@ func (s *ActionService) sendActionNotification(ctx context.Context, action Actio
 	return response, nil
 }
 
-func (s *ActionService) sendDMAction(ctx context.Context, action ActionExecutionContext) ActionResult {
-	if s.discord == nil {
-		return permanentActionError("discord_unavailable", "discord action client is not configured")
-	}
-
-	message := configString(action.Config, "message")
+func notificationMessage(action actionmods.Context) string {
+	message := actionmods.ConfigString(action.Config, "notification_message")
 	if message == "" {
-		message = fmt.Sprintf("You received a moderation case in this server: %s", action.Case.Reason)
-	}
-
-	response, err := s.discord.SendDM(ctx, action.Case.TargetDiscordUserID, message)
-	if err != nil {
-		return actionErrorFromDiscord(err)
-	}
-	return ActionResult{Response: response}
-}
-
-func notificationMessage(action ActionExecutionContext) string {
-	message := configString(action.Config, "notification_message")
-	if message == "" {
-		message = configString(action.Config, "message")
+		message = actionmods.ConfigString(action.Config, "message")
 	}
 	if message != "" {
 		return message
@@ -263,14 +194,12 @@ func notificationMessage(action ActionExecutionContext) string {
 	}
 }
 
-func notificationType(action ActionExecutionContext) string {
+func notificationType(action actionmods.Context) string {
 	if action.Execution.NotificationType != "" {
 		return action.Execution.NotificationType
 	}
 
 	switch action.Execution.ActionType {
-	case structs.ActionRecordWarning:
-		return string(structs.NotificationWarning)
 	case structs.ActionTimeoutUser:
 		return string(structs.NotificationTimeout)
 	case structs.ActionKickUser:
@@ -282,42 +211,7 @@ func notificationType(action ActionExecutionContext) string {
 	}
 }
 
-func (s *ActionService) writeModLogAction(ctx context.Context, action ActionExecutionContext) ActionResult {
-	if s.discord == nil {
-		return permanentActionError("discord_unavailable", "discord action client is not configured")
-	}
-
-	channelID := configString(action.Config, "channel_id")
-	if channelID == "" {
-		channelID = strings.TrimSpace(action.Settings.ModLogChannelDiscordID)
-	}
-	if channelID == "" {
-		return permanentActionError("mod_log_channel_missing", "mod log channel is not configured")
-	}
-
-	message := configString(action.Config, "message")
-	if message == "" {
-		message = fmt.Sprintf("Case #%d: <@%s> was moderated by <@%s> for %s", action.Case.CaseNumber, action.Case.TargetDiscordUserID, action.Case.ModeratorDiscordUserID, action.Case.Reason)
-	}
-
-	response, err := s.discord.SendModLog(ctx, channelID, message)
-	if err != nil {
-		return actionErrorFromDiscord(err)
-	}
-	return ActionResult{Response: response}
-}
-
-func unsupportedAction(ctx context.Context, action ActionExecutionContext) ActionResult {
-	_ = ctx
-	return permanentActionError("unsupported_action", fmt.Sprintf("action type %s is not supported", action.Execution.ActionType))
-}
-
-func unsupportedIrreversibleAction(ctx context.Context, action ActionExecutionContext) ActionResult {
-	_ = ctx
-	return permanentActionError("irreversible_action_unsupported", fmt.Sprintf("action type %s is not enabled in this phase", action.Execution.ActionType))
-}
-
-func shouldRetryAction(execution structs.CaseActionExecution, result ActionResult) bool {
+func shouldRetryAction(execution structs.CaseActionExecution, result actionmods.Result) bool {
 	if !result.Retryable || !execution.SafeForRetry {
 		return false
 	}
@@ -362,33 +256,12 @@ func parseConfigMap(body string) map[string]any {
 	return config
 }
 
-func configString(config map[string]any, key string) string {
-	value, ok := config[key]
-	if !ok {
-		return ""
-	}
-	switch typed := value.(type) {
-	case string:
-		return strings.TrimSpace(typed)
-	default:
-		return strings.TrimSpace(fmt.Sprint(typed))
-	}
-}
-
 func mustMarshalJSONObject(value any) string {
 	body, err := json.Marshal(value)
 	if err != nil {
 		return "{}"
 	}
 	return string(body)
-}
-
-func permanentActionError(code, message string) ActionResult {
-	return ActionResult{ErrorCode: code, Error: message}
-}
-
-func retryableActionError(code, message string) ActionResult {
-	return ActionResult{Retryable: true, ErrorCode: code, Error: message}
 }
 
 func actionWorkerID() string {

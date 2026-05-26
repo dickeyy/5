@@ -201,7 +201,10 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 		MetadataJSON:            metadataJSON,
 	}
 
-	actionExecutions := make([]structs.CaseActionExecution, 0, len(selectedLevel.Actions))
+	actionExecutions := make([]structs.CaseActionExecution, 0, len(selectedLevel.Actions)+1)
+	if selectedLevel.Level.NotifyUser {
+		actionExecutions = append(actionExecutions, warningNotificationExecution(caseModel, selectedLevel.Level.NotificationType))
+	}
 	for _, action := range selectedLevel.Actions {
 		templateActionID := action.ID
 		actionExecutions = append(actionExecutions, structs.CaseActionExecution{
@@ -253,9 +256,6 @@ func (s *CaseService) selectTemplateLevel(ctx context.Context, guildID, targetDi
 
 		enabledActions := enabledLevelActions(expandedLevel.Actions)
 		if level.IsDefault {
-			if len(enabledActions) == 0 {
-				return nil, validationCaseError("default level has no enabled actions")
-			}
 			matchedCaseCount, err := s.matchingTemplateCaseCount(ctx, guildID, targetDiscordUserID, template.Template.ID, nil)
 			if err != nil {
 				return nil, err
@@ -300,9 +300,6 @@ func (s *CaseService) selectTemplateLevel(ctx context.Context, guildID, targetDi
 		return nil, validationCaseError("template has no enabled default level")
 	}
 	if best != nil {
-		if len(best.Actions) == 0 {
-			return nil, validationCaseError("selected level has no enabled actions")
-		}
 		return best, nil
 	}
 
@@ -360,6 +357,30 @@ func buildTemplateSnapshot(template structs.CaseTemplate, selectedLevel selected
 		return "", fmt.Errorf("marshal case template snapshot: %w", err)
 	}
 	return string(body), nil
+}
+
+func warningNotificationExecution(caseModel structs.Case, notificationType string) structs.CaseActionExecution {
+	if strings.TrimSpace(notificationType) == "" {
+		notificationType = string(structs.NotificationWarning)
+	}
+	return structs.CaseActionExecution{
+		Position:           0,
+		ActionType:         structs.ActionSendDM,
+		Status:             structs.ActionExecutionPending,
+		ConfigSnapshotJSON: warningNotificationConfig(caseModel.Reason),
+		NotificationType:   notificationType,
+		SafeForRetry:       true,
+	}
+}
+
+func warningNotificationConfig(reason string) string {
+	body, err := json.Marshal(map[string]any{
+		"message": fmt.Sprintf("You received a warning in this server: %s", reason),
+	})
+	if err != nil {
+		return "{}"
+	}
+	return string(body)
 }
 
 func caseResponse(created storage.CreatedCase) CaseResponse {

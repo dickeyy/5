@@ -22,8 +22,8 @@ func TestCreateCasePersistsCaseEventActionsAndAudit(t *testing.T) {
 			Body:               "Case created",
 		},
 		ActionExecutions: []structs.CaseActionExecution{
-			{TemplateActionID: &template.Levels[0].Actions[0].ID, Position: 1, ActionType: structs.ActionRecordWarning, ConfigSnapshotJSON: `{}`},
-			{TemplateActionID: &template.Levels[0].Actions[1].ID, Position: 2, ActionType: structs.ActionRecordWarning, ConfigSnapshotJSON: `{}`, NotifyUser: true, NotificationType: string(structs.NotificationWarning)},
+			{TemplateActionID: &template.Levels[0].Actions[0].ID, Position: 1, ActionType: structs.ActionTimeoutUser, ConfigSnapshotJSON: `{}`},
+			{TemplateActionID: &template.Levels[0].Actions[1].ID, Position: 2, ActionType: structs.ActionKickUser, ConfigSnapshotJSON: `{}`},
 		},
 		Audit: &structs.AuditLogEntry{
 			GuildID:            guildID,
@@ -63,10 +63,6 @@ func TestCreateCasePersistsCaseEventActionsAndAudit(t *testing.T) {
 	if actions[0].Status != structs.ActionExecutionPending {
 		t.Fatalf("expected pending action, got %s", actions[0].Status)
 	}
-	if !actions[1].NotifyUser || actions[1].NotificationType != string(structs.NotificationWarning) {
-		t.Fatalf("expected notification metadata on second action, got %+v", actions[1])
-	}
-
 	audits, err := store.ListAuditLogEntries(ctx, guildID)
 	if err != nil {
 		t.Fatalf("list audits: %v", err)
@@ -183,8 +179,8 @@ func TestCreateCaseRollsBackOnActionFailure(t *testing.T) {
 		Case:  caseModel(guildID, nil),
 		Event: caseEvent(),
 		ActionExecutions: []structs.CaseActionExecution{
-			{Position: 1, ActionType: structs.ActionRecordWarning, IdempotencyKey: "duplicate-key", ConfigSnapshotJSON: `{}`},
-			{Position: 2, ActionType: structs.ActionWriteModLog, IdempotencyKey: "duplicate-key", ConfigSnapshotJSON: `{}`},
+			{Position: 1, ActionType: structs.ActionTimeoutUser, IdempotencyKey: "duplicate-key", ConfigSnapshotJSON: `{}`},
+			{Position: 2, ActionType: structs.ActionKickUser, IdempotencyKey: "duplicate-key", ConfigSnapshotJSON: `{}`},
 		},
 		Audit: &structs.AuditLogEntry{
 			GuildID:      guildID,
@@ -223,8 +219,8 @@ func TestCaseActionStateMachineClaimCompleteAndSkip(t *testing.T) {
 		Case:  caseModel(guildID, nil),
 		Event: caseEvent(),
 		ActionExecutions: []structs.CaseActionExecution{
-			{Position: 1, ActionType: structs.ActionRecordWarning, ConfigSnapshotJSON: `{}`, NotifyUser: true, NotificationType: string(structs.NotificationWarning)},
-			{Position: 2, ActionType: structs.ActionWriteModLog, ConfigSnapshotJSON: `{}`},
+			{Position: 1, ActionType: structs.ActionSendDM, ConfigSnapshotJSON: `{}`},
+			{Position: 2, ActionType: structs.ActionTimeoutUser, ConfigSnapshotJSON: `{}`},
 		},
 	})
 	if err != nil {
@@ -278,6 +274,13 @@ func TestCaseActionStateMachineClaimCompleteAndSkip(t *testing.T) {
 	if len(attempts) != 1 || attempts[0].Status != structs.ActionAttemptFailed || attempts[0].AttemptNumber != 1 {
 		t.Fatalf("unexpected attempts: %+v", attempts)
 	}
+	audits, err := store.ListAuditLogEntries(ctx, guildID)
+	if err != nil {
+		t.Fatalf("list audits: %v", err)
+	}
+	if len(audits) != 2 || audits[0].Action != "case_action.failed" || audits[1].Action != "case_action.skipped" {
+		t.Fatalf("expected action failure and skip audits, got %+v", audits)
+	}
 
 	cases, err := store.ListCases(ctx, guildID)
 	if err != nil {
@@ -296,7 +299,7 @@ func TestCaseActionRetryScheduling(t *testing.T) {
 		Case:  caseModel(guildID, nil),
 		Event: caseEvent(),
 		ActionExecutions: []structs.CaseActionExecution{
-			{Position: 1, ActionType: structs.ActionRecordWarning, ConfigSnapshotJSON: `{}`, NotifyUser: true, NotificationType: string(structs.NotificationWarning), MaxRetries: 1, RetryBackoffMS: 100},
+			{Position: 1, ActionType: structs.ActionSendDM, ConfigSnapshotJSON: `{}`, MaxRetries: 1, RetryBackoffMS: 100},
 		},
 	})
 	if err != nil {
@@ -356,8 +359,8 @@ func createCaseStorageTemplate(t *testing.T, store *storage.Store, guildID strin
 			{
 				Level: structs.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, Enabled: true},
 				Actions: []structs.CaseTemplateLevelAction{
-					{Position: 1, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
-					{Position: 2, ActionType: structs.ActionRecordWarning, ConfigJSON: `{}`, NotifyUser: true, NotificationType: string(structs.NotificationWarning), IdempotencyScope: "case", Enabled: true},
+					{Position: 1, ActionType: structs.ActionTimeoutUser, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
+					{Position: 2, ActionType: structs.ActionKickUser, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
 					{Position: 3, ActionType: structs.ActionKickUser, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: false},
 				},
 			},

@@ -6,53 +6,7 @@ import (
 
 	"github.com/quackdiscord/bot/internal/testutil"
 	"github.com/quackdiscord/bot/storage"
-	"github.com/quackdiscord/bot/structs"
 )
-
-func TestGuildBootstrapCreatesSettingsAndPolicies(t *testing.T) {
-	ctx := context.Background()
-	store := testutil.NewSQLiteStore(t)
-	migrateStore(t, store)
-
-	guild, err := store.UpsertGuild(ctx, storage.UpsertGuildParams{
-		DiscordGuildID:     "100",
-		Name:               "Quack Test",
-		OwnerDiscordUserID: "200",
-	})
-	if err != nil {
-		t.Fatalf("upsert guild: %v", err)
-	}
-
-	settings, err := store.EnsureGuildSettings(ctx, guild.ID)
-	if err != nil {
-		t.Fatalf("ensure guild settings: %v", err)
-	}
-	if settings.FeatureFlagsJSON != "{}" || settings.GuildModerationConfigJSON != "{}" {
-		t.Fatalf("expected default settings json fields to be empty objects")
-	}
-
-	policies, err := store.EnsureDefaultGuildPermissionPolicies(ctx, guild.ID)
-	if err != nil {
-		t.Fatalf("ensure default policies: %v", err)
-	}
-	if len(policies) != len(storage.DefaultGuildPermissionPolicies(guild.ID)) {
-		t.Fatalf("expected %d policies, got %d", len(storage.DefaultGuildPermissionPolicies(guild.ID)), len(policies))
-	}
-	if requirePolicy(t, policies, structs.PermissionActionCaseCreate).MinimumPermissionBits == 0 {
-		t.Fatalf("expected case create to require discord permissions")
-	}
-	if requirePolicy(t, policies, structs.PermissionActionCaseTemplateWrite).MinimumPermissionBits == 0 {
-		t.Fatalf("expected template write to require discord permissions")
-	}
-
-	policiesAgain, err := store.EnsureDefaultGuildPermissionPolicies(ctx, guild.ID)
-	if err != nil {
-		t.Fatalf("ensure default policies again: %v", err)
-	}
-	if len(policiesAgain) != len(policies) {
-		t.Fatalf("expected no duplicate policies, got %d then %d", len(policies), len(policiesAgain))
-	}
-}
 
 func TestStaffUpsertRefreshesActivity(t *testing.T) {
 	ctx := context.Background()
@@ -111,17 +65,4 @@ func migrateStore(t *testing.T, store *storage.Store) {
 	if err := store.Migrate(); err != nil {
 		t.Fatalf("migrate test schema: %v", err)
 	}
-}
-
-func requirePolicy(t *testing.T, policies []structs.GuildPermissionPolicy, action structs.PermissionAction) structs.GuildPermissionPolicy {
-	t.Helper()
-
-	for _, policy := range policies {
-		if policy.Action == action {
-			return policy
-		}
-	}
-
-	t.Fatalf("missing policy for action %s", action)
-	return structs.GuildPermissionPolicy{}
 }
