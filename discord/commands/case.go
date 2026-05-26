@@ -9,6 +9,8 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/app"
+	"github.com/quackdiscord/bot/discord/ui"
+	"github.com/quackdiscord/bot/discord/ui/views"
 	"github.com/quackdiscord/bot/structs"
 	"github.com/rs/zerolog/log"
 )
@@ -22,26 +24,63 @@ func init() {
 	})
 }
 
-func HandleCaseInteraction(ctx context.Context, services *app.Services, session *discordgo.Session, interaction *discordgo.InteractionCreate) *discordgo.InteractionResponse {
+func HandleCaseInteraction(ctx ui.Context) ui.HandlerResult {
+	interaction := ctx.Interaction
 	if interaction == nil || interaction.Interaction == nil {
-		return nil
+		return ui.HandlerResult{}
 	}
 	if interaction.Type == discordgo.InteractionApplicationCommandAutocomplete {
-		return handleTemplateAutocomplete(ctx, services, interaction)
+		return ui.Immediate(handleTemplateAutocomplete(ctx.Context, ctx.Services, interaction))
 	}
 
 	data := interaction.ApplicationCommandData()
 	add := data.GetOption("add")
 	if add == nil {
-		return ephemeralResponse("Use `/case add` to create a case from a template.")
+		return ui.Immediate(ui.Error("Use `/case add` to create a case from a template."))
 	}
 
-	result, err := createCaseFromInteraction(ctx, services, interaction, add)
-	if err != nil {
-		return ephemeralResponse(caseCommandErrorMessage(err))
+	if err := validateCaseInteraction(ctx.Services, interaction, add); err != nil {
+		return ui.Immediate(ui.Error(caseCommandErrorMessage(err)))
 	}
 
-	return publicResponse(formatCaseCreatedResponse(result))
+	return ui.Async(ui.DeferPublic(), func(taskCtx context.Context, responder ui.Responder) error {
+		result, err := createCaseFromInteraction(taskCtx, ctx.Services, interaction, add)
+		if err != nil {
+			_, editErr := responder.EditOriginal(ui.ErrorEdit(caseCommandErrorMessage(err)))
+			if editErr != nil {
+				return editErr
+			}
+			return nil
+		}
+
+		_, err = responder.EditOriginal(ui.EditMessage(views.CaseCreatedMessage(views.CaseCreated{
+			Case:     result.Case,
+			Template: result.Template,
+		})))
+		return err
+	})
+}
+
+func validateCaseInteraction(services *app.Services, interaction *discordgo.InteractionCreate, add *discordgo.ApplicationCommandInteractionDataOption) error {
+	if services == nil || services.Guilds == nil || services.Cases == nil {
+		return errors.New("case command services are not configured")
+	}
+	if interaction.GuildID == "" {
+		return errors.New("case commands must be used in a server")
+	}
+
+	templateOption := add.GetOption("template")
+	userOption := add.GetOption("user")
+	if templateOption == nil || userOption == nil {
+		return app.ErrCaseValidation
+	}
+
+	_, _, permissionBits := interactionMemberFields(interaction)
+	if permissionBits&uint64(discordgo.PermissionAdministrator) == 0 &&
+		permissionBits&uint64(discordgo.PermissionModerateMembers) == 0 {
+		return app.ErrCasePermissionDenied
+	}
+	return nil
 }
 
 func CaseCommandDefinition() *discordgo.ApplicationCommand {
@@ -253,80 +292,6 @@ func optionStringValue(option *discordgo.ApplicationCommandInteractionDataOption
 	}
 }
 
-func formatCaseCreatedResponse(result *caseCommandCreateResult) string {
-	if result == nil || result.Case == nil {
-		return "Created case."
-	}
-
-	created := result.Case
-	lines := []string{
-		fmt.Sprintf("Case #%d created", created.CaseNumber),
-		fmt.Sprintf("Target: <@%s>", created.TargetDiscordUserID),
-		fmt.Sprintf("Moderator: <@%s>", created.ModeratorDiscordUserID),
-	}
-
-	templateName := caseTemplateDisplayName(result.Template)
-	if templateName != "" {
-		lines = append(lines, "Template: "+templateName)
-	}
-
-	if created.SelectedLevel != nil {
-		levelName := strings.TrimSpace(created.SelectedLevel.Name)
-		if levelName == "" {
-			levelName = fmt.Sprintf("Level %d", created.SelectedLevel.Position)
-		}
-		lines = append(lines, fmt.Sprintf("Level: %s", levelName))
-		if created.SelectedLevel.MatchedCaseCount > 0 {
-			lines = append(lines, fmt.Sprintf("Matching cases: %d", created.SelectedLevel.MatchedCaseCount))
-		}
-	}
-
-	lines = append(lines, fmt.Sprintf("Queued actions: %d%s", len(created.Actions), actionSummary(created.Actions)))
-	return strings.Join(lines, "\n")
-}
-
-func caseTemplateDisplayName(template *app.TemplateResponse) string {
-	if template == nil {
-		return ""
-	}
-	name := strings.TrimSpace(template.Name)
-	slug := strings.TrimSpace(template.Slug)
-	switch {
-	case name != "" && slug != "" && !strings.EqualFold(name, slug):
-		return fmt.Sprintf("%s (`%s`)", name, slug)
-	case name != "":
-		return name
-	default:
-		return slug
-	}
-}
-
-func actionSummary(actions []app.CaseActionResponse) string {
-	if len(actions) == 0 {
-		return " (none)"
-	}
-
-	counts := map[structs.ActionType]int{}
-	order := make([]structs.ActionType, 0, len(actions))
-	for _, action := range actions {
-		if counts[action.ActionType] == 0 {
-			order = append(order, action.ActionType)
-		}
-		counts[action.ActionType]++
-	}
-
-	parts := make([]string, 0, len(order))
-	for _, actionType := range order {
-		count := counts[actionType]
-		if count == 1 {
-			parts = append(parts, string(actionType))
-			continue
-		}
-		parts = append(parts, fmt.Sprintf("%s x%d", actionType, count))
-	}
-	return ": " + strings.Join(parts, ", ")
-}
-
 func templateAutocompleteLabel(template app.TemplateResponse) string {
 	name := strings.TrimSpace(template.Name)
 	if name == "" {
@@ -363,30 +328,6 @@ func caseCommandErrorMessage(err error) string {
 	}
 }
 
-func ephemeralResponse(content string) *discordgo.InteractionResponse {
-	return &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Content: content,
-			Flags:   discordgo.MessageFlagsEphemeral,
-		},
-	}
-}
-
-func publicResponse(content string) *discordgo.InteractionResponse {
-	return &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Content: content,
-		},
-	}
-}
-
 func autocompleteResponse(choices []*discordgo.ApplicationCommandOptionChoice) *discordgo.InteractionResponse {
-	return &discordgo.InteractionResponse{
-		Type: discordgo.InteractionApplicationCommandAutocompleteResult,
-		Data: &discordgo.InteractionResponseData{
-			Choices: choices,
-		},
-	}
+	return ui.Autocomplete(choices)
 }

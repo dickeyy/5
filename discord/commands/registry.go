@@ -9,15 +9,14 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/app"
+	"github.com/quackdiscord/bot/discord/interactions"
+	"github.com/quackdiscord/bot/discord/ui"
 	"github.com/quackdiscord/bot/lib"
-	"github.com/rs/zerolog/log"
 )
-
-type Handler func(ctx context.Context, services *app.Services, session *discordgo.Session, interaction *discordgo.InteractionCreate) *discordgo.InteractionResponse
 
 type CommandSpec struct {
 	Definition *discordgo.ApplicationCommand
-	Handler    Handler
+	Handler    ui.Handler
 }
 
 type Registry struct {
@@ -79,6 +78,14 @@ func (r *Registry) Lookup(name string) (CommandSpec, bool) {
 	return spec, ok
 }
 
+func (r *Registry) LookupCommand(name string) (ui.Handler, bool) {
+	spec, ok := r.Lookup(name)
+	if !ok {
+		return nil, false
+	}
+	return spec.Handler, true
+}
+
 func registerCommand(spec CommandSpec) {
 	if err := defaultRegistry.Register(spec); err != nil {
 		panic(err)
@@ -94,28 +101,8 @@ func Register(session *discordgo.Session, services *app.Services) error {
 	}
 
 	registry := defaultRegistry
-	session.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		if i == nil || i.Interaction == nil {
-			return
-		}
-		if i.Type != discordgo.InteractionApplicationCommand && i.Type != discordgo.InteractionApplicationCommandAutocomplete {
-			return
-		}
-
-		data := i.ApplicationCommandData()
-		spec, ok := registry.Lookup(data.Name)
-		if !ok {
-			return
-		}
-
-		response := spec.Handler(context.Background(), services, s, i)
-		if response == nil {
-			return
-		}
-		if err := s.InteractionRespond(i.Interaction, response); err != nil {
-			log.Error().Err(err).Str("command", data.Name).Msg("failed to respond to command interaction")
-		}
-	})
+	dispatcher := interactions.NewDispatcher(services, registry)
+	session.AddHandler(dispatcher.Handle)
 
 	appID := strings.TrimSpace(lib.Config.Discord.AppID)
 	if appID == "" && session.State != nil && session.State.User != nil {

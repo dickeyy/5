@@ -7,6 +7,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/app"
+	"github.com/quackdiscord/bot/discord/ui"
 	"github.com/quackdiscord/bot/internal/testutil"
 	"github.com/quackdiscord/bot/storage"
 	"github.com/quackdiscord/bot/structs"
@@ -56,13 +57,32 @@ func TestHandleCaseInteractionCreatesCase(t *testing.T) {
 	ctx := context.Background()
 	store, services, templateID := newCaseCommandHarness(t)
 
-	response := HandleCaseInteraction(ctx, services, nil, caseAddInteraction(templateID, "target-1", "manual reason", uint64(discordgo.PermissionModerateMembers)))
-	if response == nil || response.Data == nil {
+	result := HandleCaseInteraction(ui.Context{
+		Context:     ctx,
+		Services:    services,
+		Interaction: caseAddInteraction(templateID, "target-1", "manual reason", uint64(discordgo.PermissionModerateMembers)),
+	})
+	response := result.Response
+	if response == nil {
 		t.Fatalf("unexpected response: %+v", response)
 	}
-	if response.Data.Flags&discordgo.MessageFlagsEphemeral != 0 {
+	if response.Type != discordgo.InteractionResponseDeferredChannelMessageWithSource {
+		t.Fatalf("expected deferred success response, got %v", response.Type)
+	}
+	if response.Data != nil && response.Data.Flags&discordgo.MessageFlagsEphemeral != 0 {
 		t.Fatalf("expected public success response, got flags %d", response.Data.Flags)
 	}
+	if result.Task == nil {
+		t.Fatalf("expected deferred case creation task")
+	}
+	responder := &fakeResponder{}
+	if err := result.Task(ctx, responder); err != nil {
+		t.Fatalf("run deferred task: %v", err)
+	}
+	if responder.edit.Content == nil {
+		t.Fatalf("expected task to edit original response")
+	}
+	content := *responder.edit.Content
 	for _, want := range []string{
 		"Case #1 created",
 		"Target: <@target-1>",
@@ -73,8 +93,8 @@ func TestHandleCaseInteractionCreatesCase(t *testing.T) {
 		"Queued actions: 1",
 		"send_dm",
 	} {
-		if !strings.Contains(response.Data.Content, want) {
-			t.Fatalf("expected response to contain %q, got %q", want, response.Data.Content)
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected response to contain %q, got %q", want, content)
 		}
 	}
 
@@ -96,9 +116,17 @@ func TestHandleCaseInteractionCreatesCase(t *testing.T) {
 func TestHandleCaseInteractionDeniesMissingPermission(t *testing.T) {
 	_, services, templateID := newCaseCommandHarness(t)
 
-	response := HandleCaseInteraction(context.Background(), services, nil, caseAddInteraction(templateID, "target-1", "", 0))
+	result := HandleCaseInteraction(ui.Context{
+		Context:     context.Background(),
+		Services:    services,
+		Interaction: caseAddInteraction(templateID, "target-1", "", 0),
+	})
+	response := result.Response
 	if response == nil || response.Data == nil || !strings.Contains(response.Data.Content, "do not have permission") {
 		t.Fatalf("unexpected response: %+v", response)
+	}
+	if result.Task != nil {
+		t.Fatalf("expected permission denial to be immediate")
 	}
 	if response.Data.Flags&discordgo.MessageFlagsEphemeral == 0 {
 		t.Fatalf("expected ephemeral error response, got flags %d", response.Data.Flags)
@@ -108,9 +136,17 @@ func TestHandleCaseInteractionDeniesMissingPermission(t *testing.T) {
 func TestHandleTemplateAutocompleteReturnsUsableTemplates(t *testing.T) {
 	_, services, templateID := newCaseCommandHarness(t)
 
-	response := HandleCaseInteraction(context.Background(), services, nil, templateAutocompleteInteraction("repeated", uint64(discordgo.PermissionModerateMembers)))
+	result := HandleCaseInteraction(ui.Context{
+		Context:     context.Background(),
+		Services:    services,
+		Interaction: templateAutocompleteInteraction("repeated", uint64(discordgo.PermissionModerateMembers)),
+	})
+	response := result.Response
 	if response == nil || response.Data == nil || len(response.Data.Choices) != 1 {
 		t.Fatalf("unexpected autocomplete response: %+v", response)
+	}
+	if result.Task != nil {
+		t.Fatalf("expected autocomplete to be immediate")
 	}
 	if response.Data.Choices[0].Value != templateID {
 		t.Fatalf("expected template id choice, got %+v", response.Data.Choices[0])
@@ -140,7 +176,12 @@ func TestHandleTemplateAutocompleteFiltersDisabledTemplates(t *testing.T) {
 		},
 	})
 
-	response := HandleCaseInteraction(ctx, services, nil, templateAutocompleteInteraction("hidden", uint64(discordgo.PermissionModerateMembers)))
+	result := HandleCaseInteraction(ui.Context{
+		Context:     ctx,
+		Services:    services,
+		Interaction: templateAutocompleteInteraction("hidden", uint64(discordgo.PermissionModerateMembers)),
+	})
+	response := result.Response
 	if response == nil || response.Data == nil {
 		t.Fatalf("unexpected autocomplete response: %+v", response)
 	}
@@ -167,7 +208,12 @@ func TestTemplateAutocompleteLabelTruncatesToDiscordLimit(t *testing.T) {
 		},
 	})
 
-	response := HandleCaseInteraction(ctx, services, nil, templateAutocompleteInteraction("longdesc", uint64(discordgo.PermissionModerateMembers)))
+	result := HandleCaseInteraction(ui.Context{
+		Context:     ctx,
+		Services:    services,
+		Interaction: templateAutocompleteInteraction("longdesc", uint64(discordgo.PermissionModerateMembers)),
+	})
+	response := result.Response
 	if response == nil || response.Data == nil || len(response.Data.Choices) != 1 {
 		t.Fatalf("unexpected autocomplete response: %+v", response)
 	}
@@ -177,6 +223,35 @@ func TestTemplateAutocompleteLabelTruncatesToDiscordLimit(t *testing.T) {
 	if len([]rune(response.Data.Choices[0].Name)) != 100 {
 		t.Fatalf("expected label length 100, got %d: %q", len([]rune(response.Data.Choices[0].Name)), response.Data.Choices[0].Name)
 	}
+}
+
+type fakeResponder struct {
+	edit      ui.Edit
+	followup  ui.Message
+	deleted   bool
+	updated   ui.Edit
+	editCount int
+}
+
+func (f *fakeResponder) EditOriginal(edit ui.Edit) (*discordgo.Message, error) {
+	f.edit = edit
+	f.editCount++
+	return &discordgo.Message{ID: "message-1"}, nil
+}
+
+func (f *fakeResponder) Followup(message ui.Message) (*discordgo.Message, error) {
+	f.followup = message
+	return &discordgo.Message{ID: "followup-1"}, nil
+}
+
+func (f *fakeResponder) DeleteOriginal() error {
+	f.deleted = true
+	return nil
+}
+
+func (f *fakeResponder) UpdateMessage(edit ui.Edit) (*discordgo.Message, error) {
+	f.updated = edit
+	return &discordgo.Message{ID: "message-1"}, nil
 }
 
 func newCaseCommandHarness(t *testing.T) (*storage.Store, *app.Services, string) {

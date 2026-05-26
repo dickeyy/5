@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/quackdiscord/bot/app"
+	"github.com/quackdiscord/bot/discord/ui"
 )
 
 func TestRegistryRejectsDuplicateCommandNames(t *testing.T) {
@@ -33,6 +33,7 @@ func TestDefaultRegistryIncludesCaseCommand(t *testing.T) {
 	}
 }
 
-func noopHandler(ctx context.Context, services *app.Services, session *discordgo.Session, interaction *discordgo.InteractionCreate) *discordgo.InteractionResponse {
-	return nil
+func noopHandler(ctx ui.Context) ui.HandlerResult {
+	_ = context.Background()
+	return ui.HandlerResult{}
 }
