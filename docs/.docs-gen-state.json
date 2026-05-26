@@ -1,0 +1,5 @@
+{
+  "last_successful_update_at": "2026-05-26T09:36:20Z",
+  "last_processed_commit": "cdb1fb00f8c15cfc20ee7e8e14f94762c7cc2d8b",
+  "notes": "Refined architecture docs for the notification-toggle model and aligned action support notes with the current template-validation rules."
+}
