@@ -102,6 +102,12 @@ func TestResolveStaffContextEvaluatesPermissionBits(t *testing.T) {
 		t.Fatalf("resolve staff context: %v", err)
 	}
 
+	if !guildContext.IsModerator || guildContext.IsMember {
+		t.Fatalf("expected discord moderate members permission to classify as moderator, got moderator=%v member=%v", guildContext.IsModerator, guildContext.IsMember)
+	}
+	if !guildContext.CanModerateMembers || guildContext.CanManageGuild {
+		t.Fatalf("expected moderator capabilities without guild management, got moderate=%v manage=%v", guildContext.CanModerateMembers, guildContext.CanManageGuild)
+	}
 	if !guildContext.Can(structs.PermissionActionCaseCreate) {
 		t.Fatalf("expected moderate members permission to allow case.create")
 	}
@@ -110,6 +116,37 @@ func TestResolveStaffContextEvaluatesPermissionBits(t *testing.T) {
 	}
 	if guildContext.Can(structs.PermissionActionAuditRead) {
 		t.Fatalf("expected moderate members permission not to allow audit.read")
+	}
+
+	policies, err := store.ListGuildPermissionPolicies(context.Background(), guildContext.Guild.ID)
+	if err != nil {
+		t.Fatalf("list guild permission policies: %v", err)
+	}
+	if len(policies) != 0 {
+		t.Fatalf("expected guild context resolution not to create permission policies, got %+v", policies)
+	}
+}
+
+func TestResolveStaffContextClassifiesMemberWithoutModeratorAccess(t *testing.T) {
+	store := newMigratedStore(t)
+	service := app.NewGuildService(store, fakeDiscordClient{
+		userGuilds: []app.DiscordUserGuild{{
+			ID:          "guild-1",
+			Permissions: uint64(discordgo.PermissionSendMessages),
+		}},
+		botGuild: &app.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "owner-1"},
+	})
+
+	guildContext, err := service.ResolveStaffContext(context.Background(), testSession("user-1"), "guild-1")
+	if err != nil {
+		t.Fatalf("resolve staff context: %v", err)
+	}
+
+	if !guildContext.IsMember || guildContext.IsModerator || guildContext.IsAdministrator || guildContext.IsOwner {
+		t.Fatalf("expected normal member classification, got owner=%v admin=%v moderator=%v member=%v", guildContext.IsOwner, guildContext.IsAdministrator, guildContext.IsModerator, guildContext.IsMember)
+	}
+	if guildContext.CanModerateMembers || guildContext.CanManageGuild || guildContext.Can(structs.PermissionActionCaseCreate) {
+		t.Fatalf("expected normal member without moderation capabilities")
 	}
 }
 
@@ -139,7 +176,7 @@ func TestResolveStaffContextRejectsBotNotInGuild(t *testing.T) {
 	}
 }
 
-func TestResolveStaffContextRejectsDisabledStaff(t *testing.T) {
+func TestResolveStaffContextIgnoresDisabledStaffRows(t *testing.T) {
 	ctx := context.Background()
 	store := newMigratedStore(t)
 	guild, err := store.UpsertGuild(ctx, storage.UpsertGuildParams{
@@ -169,9 +206,12 @@ func TestResolveStaffContextRejectsDisabledStaff(t *testing.T) {
 		botGuild:   &app.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "owner-1"},
 	})
 
-	_, err = service.ResolveStaffContext(ctx, testSession("user-1"), "guild-1")
-	if !errors.Is(err, app.ErrStaffDisabled) {
-		t.Fatalf("expected ErrStaffDisabled, got %v", err)
+	guildContext, err := service.ResolveStaffContext(ctx, testSession("user-1"), "guild-1")
+	if err != nil {
+		t.Fatalf("resolve staff context should ignore disabled staff rows: %v", err)
+	}
+	if !guildContext.Can(structs.PermissionActionCaseCreate) {
+		t.Fatalf("expected discord permissions to remain source of truth")
 	}
 }
 
@@ -224,7 +264,7 @@ func TestResolveDiscordStaffContextOwnerBypassAllowsAllActions(t *testing.T) {
 	}
 }
 
-func TestResolveDiscordStaffContextRejectsDisabledStaff(t *testing.T) {
+func TestResolveDiscordStaffContextIgnoresDisabledStaffRows(t *testing.T) {
 	ctx := context.Background()
 	store := newMigratedStore(t)
 	guild, err := store.UpsertGuild(ctx, storage.UpsertGuildParams{
@@ -253,14 +293,17 @@ func TestResolveDiscordStaffContextRejectsDisabledStaff(t *testing.T) {
 		botGuild: &app.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "owner-1"},
 	})
 
-	_, err = service.ResolveDiscordStaffContext(ctx, app.DiscordStaffContextInput{
+	guildContext, err := service.ResolveDiscordStaffContext(ctx, app.DiscordStaffContextInput{
 		DiscordGuildID: "guild-1",
 		DiscordUserID:  "user-1",
 		DisplayName:    "User",
 		PermissionBits: uint64(discordgo.PermissionModerateMembers),
 	})
-	if !errors.Is(err, app.ErrStaffDisabled) {
-		t.Fatalf("expected ErrStaffDisabled, got %v", err)
+	if err != nil {
+		t.Fatalf("resolve discord staff context should ignore disabled staff rows: %v", err)
+	}
+	if !guildContext.Can(structs.PermissionActionCaseCreate) {
+		t.Fatalf("expected discord interaction permissions to remain source of truth")
 	}
 }
 

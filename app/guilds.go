@@ -15,7 +15,6 @@ import (
 var (
 	ErrUserNotInGuild = errors.New("user is not in guild")
 	ErrBotNotInGuild  = errors.New("bot is not in guild")
-	ErrStaffDisabled  = errors.New("staff member is disabled")
 )
 
 type GuildService struct {
@@ -24,13 +23,19 @@ type GuildService struct {
 }
 
 type GuildStaffContext struct {
-	Guild           *structs.Guild
-	Settings        *structs.GuildSettings
-	Staff           *structs.StaffMember
-	PermissionBits  uint64
-	Permissions     map[structs.PermissionAction]bool
-	IsOwner         bool
-	IsAdministrator bool
+	Guild              *structs.Guild
+	Settings           *structs.GuildSettings
+	Staff              *structs.StaffMember
+	DiscordUserID      string
+	DisplayName        string
+	PermissionBits     uint64
+	Permissions        map[structs.PermissionAction]bool
+	IsOwner            bool
+	IsAdministrator    bool
+	IsModerator        bool
+	IsMember           bool
+	CanManageGuild     bool
+	CanModerateMembers bool
 }
 
 type UserGuildListItem struct {
@@ -153,11 +158,6 @@ func (s *GuildService) ResolveStaffContext(ctx context.Context, session *structs
 		return nil, err
 	}
 
-	policies, err := s.store.EnsureDefaultGuildPermissionPolicies(ctx, guild.ID)
-	if err != nil {
-		return nil, err
-	}
-
 	staff, err := s.store.UpsertStaffMember(ctx, storage.UpsertStaffMemberParams{
 		GuildID:                guild.ID,
 		DiscordUserID:          session.DiscordUserID,
@@ -169,21 +169,24 @@ func (s *GuildService) ResolveStaffContext(ctx context.Context, session *structs
 		return nil, err
 	}
 
-	if staff.DisabledAt != nil {
-		return nil, ErrStaffDisabled
-	}
-
 	isOwner := userGuild.Owner || guild.OwnerDiscordUserID == session.DiscordUserID
-	isAdmin := hasAllBits(userGuild.Permissions, uint64(discordgo.PermissionAdministrator))
+	role := discordRoleContext(userGuild.Permissions, isOwner)
+	displayName := staffDisplayName(session)
 
 	return &GuildStaffContext{
-		Guild:           guild,
-		Settings:        settings,
-		Staff:           staff,
-		PermissionBits:  userGuild.Permissions,
-		Permissions:     evaluatePermissions(policies, userGuild.Permissions, isOwner || isAdmin),
-		IsOwner:         isOwner,
-		IsAdministrator: isAdmin,
+		Guild:              guild,
+		Settings:           settings,
+		Staff:              staff,
+		DiscordUserID:      session.DiscordUserID,
+		DisplayName:        displayName,
+		PermissionBits:     userGuild.Permissions,
+		Permissions:        role.permissions,
+		IsOwner:            role.isOwner,
+		IsAdministrator:    role.isAdministrator,
+		IsModerator:        role.isModerator,
+		IsMember:           role.isMember,
+		CanManageGuild:     role.canManageGuild,
+		CanModerateMembers: role.canModerateMembers,
 	}, nil
 }
 
@@ -227,11 +230,6 @@ func (s *GuildService) ResolveDiscordStaffContext(ctx context.Context, input Dis
 		return nil, err
 	}
 
-	policies, err := s.store.EnsureDefaultGuildPermissionPolicies(ctx, guild.ID)
-	if err != nil {
-		return nil, err
-	}
-
 	displayName := strings.TrimSpace(input.DisplayName)
 	if displayName == "" {
 		displayName = discordUserID
@@ -251,21 +249,24 @@ func (s *GuildService) ResolveDiscordStaffContext(ctx context.Context, input Dis
 	if err != nil {
 		return nil, err
 	}
-	if staff.DisabledAt != nil {
-		return nil, ErrStaffDisabled
-	}
 
 	isOwner := guild.OwnerDiscordUserID == discordUserID
-	isAdmin := hasAllBits(input.PermissionBits, uint64(discordgo.PermissionAdministrator))
+	role := discordRoleContext(input.PermissionBits, isOwner)
 
 	return &GuildStaffContext{
-		Guild:           guild,
-		Settings:        settings,
-		Staff:           staff,
-		PermissionBits:  input.PermissionBits,
-		Permissions:     evaluatePermissions(policies, input.PermissionBits, isOwner || isAdmin),
-		IsOwner:         isOwner,
-		IsAdministrator: isAdmin,
+		Guild:              guild,
+		Settings:           settings,
+		Staff:              staff,
+		DiscordUserID:      discordUserID,
+		DisplayName:        displayName,
+		PermissionBits:     input.PermissionBits,
+		Permissions:        role.permissions,
+		IsOwner:            role.isOwner,
+		IsAdministrator:    role.isAdministrator,
+		IsModerator:        role.isModerator,
+		IsMember:           role.isMember,
+		CanManageGuild:     role.canManageGuild,
+		CanModerateMembers: role.canModerateMembers,
 	}, nil
 }
 
@@ -285,19 +286,56 @@ func (s *GuildService) userGuild(ctx context.Context, accessToken, discordGuildI
 }
 
 func (ctx *GuildStaffContext) Can(action structs.PermissionAction) bool {
-	if ctx == nil || ctx.Permissions == nil {
+	if ctx == nil {
+		return false
+	}
+	if ctx.Permissions == nil {
 		return false
 	}
 
 	return ctx.Permissions[action]
 }
 
-func evaluatePermissions(policies []structs.GuildPermissionPolicy, permissionBits uint64, allowAll bool) map[structs.PermissionAction]bool {
-	permissions := make(map[structs.PermissionAction]bool, len(policies))
-	for _, policy := range policies {
-		permissions[policy.Action] = allowAll || hasAllBits(permissionBits, policy.MinimumPermissionBits)
+type discordRole struct {
+	isOwner            bool
+	isAdministrator    bool
+	isModerator        bool
+	isMember           bool
+	canManageGuild     bool
+	canModerateMembers bool
+	permissions        map[structs.PermissionAction]bool
+}
+
+func discordRoleContext(permissionBits uint64, isOwner bool) discordRole {
+	isAdmin := hasAllBits(permissionBits, uint64(discordgo.PermissionAdministrator))
+	hasManageGuild := hasAllBits(permissionBits, uint64(discordgo.PermissionManageGuild))
+	hasModerateMembers := hasAllBits(permissionBits, uint64(discordgo.PermissionModerateMembers))
+
+	role := discordRole{
+		isOwner:            isOwner,
+		isAdministrator:    isAdmin,
+		isModerator:        !isOwner && !isAdmin && hasModerateMembers,
+		canManageGuild:     isOwner || isAdmin || hasManageGuild,
+		canModerateMembers: isOwner || isAdmin || hasModerateMembers,
 	}
-	return permissions
+	role.isMember = !role.isOwner && !role.isAdministrator && !role.isModerator
+	role.permissions = discordPermissionMap(role)
+	return role
+}
+
+func discordPermissionMap(role discordRole) map[structs.PermissionAction]bool {
+	canModerate := role.canModerateMembers
+	canManage := role.canManageGuild
+
+	return map[structs.PermissionAction]bool{
+		structs.PermissionActionCaseCreate:         canModerate,
+		structs.PermissionActionCaseTemplateRead:   canModerate,
+		structs.PermissionActionCaseTemplateWrite:  canManage,
+		structs.PermissionActionCaseTemplateDelete: canManage,
+		structs.PermissionActionAppealReview:       canModerate,
+		structs.PermissionActionTicketResolve:      canModerate,
+		structs.PermissionActionAuditRead:          canManage,
+	}
 }
 
 func hasAllBits(bits, required uint64) bool {

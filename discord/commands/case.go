@@ -90,6 +90,10 @@ func CaseCommandDefinition() *discordgo.ApplicationCommand {
 	}
 }
 
+func CommandDefinition() *discordgo.ApplicationCommand {
+	return CaseCommandDefinition()
+}
+
 func createCaseFromInteraction(ctx context.Context, services *app.Services, interaction *discordgo.InteractionCreate, add *discordgo.ApplicationCommandInteractionDataOption) (*app.CaseResponse, error) {
 	if services == nil || services.Guilds == nil || services.Cases == nil {
 		return nil, errors.New("case command services are not configured")
@@ -265,8 +269,6 @@ func caseCommandErrorMessage(err error) string {
 		return "That case request is invalid."
 	case errors.Is(err, app.ErrBotNotInGuild):
 		return "Quack is not active in this server."
-	case errors.Is(err, app.ErrStaffDisabled):
-		return "Your staff access is disabled in this server."
 	default:
 		log.Error().Err(err).Msg("case command failed")
 		return "Quack could not create that case."

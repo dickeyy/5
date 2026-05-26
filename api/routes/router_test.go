@@ -91,9 +91,13 @@ func TestGuildMeRouteAuthenticated(t *testing.T) {
 			OwnerDiscordUser string `json:"owner_discord_user_id"`
 		} `json:"guild"`
 		Staff struct {
-			ID             string `json:"id"`
-			DiscordUserID  string `json:"discord_user_id"`
-			PermissionBits string `json:"permission_bits"`
+			ID                 string `json:"id"`
+			DiscordUserID      string `json:"discord_user_id"`
+			PermissionBits     string `json:"permission_bits"`
+			IsModerator        bool   `json:"is_moderator"`
+			IsMember           bool   `json:"is_member"`
+			CanManageGuild     bool   `json:"can_manage_guild"`
+			CanModerateMembers bool   `json:"can_moderate_members"`
 		} `json:"staff"`
 		Permissions map[string]bool `json:"permissions"`
 	}
@@ -106,6 +110,9 @@ func TestGuildMeRouteAuthenticated(t *testing.T) {
 	}
 	if body.Staff.ID == "" || body.Staff.DiscordUserID != "user-1" {
 		t.Fatalf("unexpected staff payload: %+v", body.Staff)
+	}
+	if !body.Staff.IsModerator || body.Staff.IsMember || body.Staff.CanManageGuild || !body.Staff.CanModerateMembers {
+		t.Fatalf("unexpected staff role payload: %+v", body.Staff)
 	}
 	if body.Permissions[string(structs.PermissionActionCaseCreate)] != true {
 		t.Fatalf("expected case.create permission")
