@@ -11,6 +11,7 @@ remain the higher-level planning references.
 - `architecture.md`: service layout, startup flow, request flow, and action execution.
 - `configuration.md`: environment variables and runtime dependencies.
 - `development.md`: local workflow, commands, and where to make common changes.
+- `modules/README.md`: focused notes for core runtime modules and pipelines.
 - `testing.md`: current test harness and scope limits.
 
 ## Current Surface

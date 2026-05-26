@@ -168,6 +168,12 @@ Relevant files:
 - `storage/migrations.go`
 - `structs/schema.go`
 
+Module docs for this area:
+
+- `docs/modules/action-engine.md`
+- `docs/modules/event-queue.md`
+- `docs/modules/case-pipeline.md`
+
 ## Data Model
 
 The schema registry is defined in `structs/schema.go` and applied through
@@ -192,3 +198,12 @@ Relevant files:
 - `structs/schema.go`
 - `storage/migrations.go`
 - `storage/storage.go`
+
+## Module Docs
+
+For subsystem-level notes, use:
+
+- `docs/modules/action-engine.md`
+- `docs/modules/case-pipeline.md`
+- `docs/modules/command-registry.md`
+- `docs/modules/event-queue.md`

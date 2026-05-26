@@ -1,0 +1,113 @@
+# Case Pipeline
+
+The case pipeline connects templates, permission-checked case creation, action
+row generation, and later queued execution. The creation logic starts in
+`app/cases.go`, while persistence lives in `storage/cases.go`.
+
+## Inputs And Boundaries
+
+Case creation is exposed through two entrypoints:
+
+- HTTP: `POST /guilds/:discordGuildID/cases` in `api/routes/cases.go`
+- Discord: `/case add` in `discord/commands/case.go`
+
+Both entrypoints eventually call `CaseService.Create(...)` through
+`app.Services`.
+
+## Creation Flow
+
+1. Validate guild context, permission, template ID, target user, source, and
+   metadata.
+2. Load the expanded template with `GetCaseTemplateExpanded`.
+3. Reject disabled or archived templates.
+4. Resolve the case reason from `reason_override` or the template
+   `reason_template`.
+5. Choose the selected template level based on prior case count for the same
+   target and template.
+6. Build `TemplateSnapshotJSON` so the case keeps the policy that was used at
+   creation time.
+7. Build action execution rows from the selected level actions.
+8. Add a generated `send_dm` execution first when the level itself has
+   `notify_user` enabled.
+9. Persist the case, initial case event, action executions, and audit row in
+   one transaction.
+10. Enqueue the case for asynchronous action processing.
+
+## Level Selection Rules
+
+Level selection in `selectTemplateLevel` depends on:
+
+- `enabled`
+- `is_default`
+- `trigger_case_count`
+- `window_minutes`
+
+The service counts prior non-voided cases for the same guild, template, and
+target user. Matching uses the current stored case history, not transient queue
+state.
+
+The default level acts as fallback when no escalation level matches. Validation
+in `app/templates.go` expects exactly one enabled default level.
+
+## Snapshot Contract
+
+`TemplateSnapshotJSON` is not just audit data. Runtime behavior depends on it.
+
+Current consumers include:
+
+- `continueOnError` in `app/actions.go`
+- API and Discord responses that expose selected level and action details
+
+Changing the snapshot shape needs migration discipline because old cases keep
+their stored JSON.
+
+## Action Execution Rows
+
+For each selected template action, `CaseService.Create` snapshots:
+
+- action type
+- config JSON
+- notification settings
+- retry settings
+- whether the action is considered irreversible
+
+Storage then fills in:
+
+- ULIDs
+- `case_id`
+- default pending status
+- idempotency key in the form `case:<caseID>:action:<position>` when none is supplied
+
+`storage.CreateCase` also assigns the next per-guild case number inside the
+transaction.
+
+## Status Progression
+
+Initial case status is `open`. Later updates come from the action engine in
+`storage/updateCaseStatusFromActions`:
+
+- `action_running` while any execution is pending, running, or retrying
+- `completed` when all executions succeed or are otherwise terminal without failure
+- `failed` when any execution is failed
+
+Resolved timestamps are currently written automatically when the case reaches
+`completed` or `failed`.
+
+## Maintainability Notes
+
+- Warning notification is modeled as a generated internal action, not as a
+  direct side effect of case creation.
+- The template snapshot is the durable policy source for a created case; live
+  template edits do not rewrite old cases.
+- Action idempotency scope exists in template input and snapshots, but current
+  execution flow mainly relies on the stored per-row idempotency key.
+
+Relevant files:
+
+- `app/cases.go`
+- `app/templates.go`
+- `api/routes/cases.go`
+- `discord/commands/case.go`
+- `storage/cases.go`
+- `storage/templates.go`
+- `structs/schema.go`
