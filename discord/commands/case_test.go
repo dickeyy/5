@@ -80,21 +80,26 @@ func TestHandleCaseInteractionCreatesCase(t *testing.T) {
 		t.Fatalf("run deferred task: %v", err)
 	}
 	if responder.edit.Content == nil {
-		t.Fatalf("expected task to edit original response")
+		t.Fatalf("expected task to clear original response content")
 	}
-	content := *responder.edit.Content
-	for _, want := range []string{
-		"Case #1 created",
-		"Target: <@target-1>",
-		"Moderator: <@mod-1>",
-		"Template: Spam",
-		"Level: Default",
-		"Matching cases: 1",
-		"Queued actions: 1",
-		"send_dm",
+	if responder.edit.Embeds == nil || len(*responder.edit.Embeds) != 1 {
+		t.Fatalf("expected task to edit original response with an embed, got %+v", responder.edit)
+	}
+	embed := (*responder.edit.Embeds)[0]
+	if embed.Title != "Case #1 Created" {
+		t.Fatalf("unexpected embed title: %q", embed.Title)
+	}
+	fields := embedFields(embed)
+	for name, want := range map[string]string{
+		"Target":         "<@target-1>",
+		"Moderator":      "<@mod-1>",
+		"Template":       "Spam",
+		"Level":          "Default",
+		"Matching Cases": "1",
+		"Queued Actions": "1: send_dm",
 	} {
-		if !strings.Contains(content, want) {
-			t.Fatalf("expected response to contain %q, got %q", want, content)
+		if !strings.Contains(fields[name], want) {
+			t.Fatalf("expected embed field %q to contain %q, got %q", name, want, fields[name])
 		}
 	}
 
@@ -122,7 +127,7 @@ func TestHandleCaseInteractionDeniesMissingPermission(t *testing.T) {
 		Interaction: caseAddInteraction(templateID, "target-1", "", 0),
 	})
 	response := result.Response
-	if response == nil || response.Data == nil || !strings.Contains(response.Data.Content, "do not have permission") {
+	if response == nil || response.Data == nil || len(response.Data.Embeds) != 1 || !strings.Contains(response.Data.Embeds[0].Description, "do not have permission") {
 		t.Fatalf("unexpected response: %+v", response)
 	}
 	if result.Task != nil {
@@ -395,4 +400,12 @@ func storeGuildID(t *testing.T, store *storage.Store, discordGuildID string) str
 		t.Fatalf("expected guild %s", discordGuildID)
 	}
 	return guild.ID
+}
+
+func embedFields(embed *discordgo.MessageEmbed) map[string]string {
+	fields := map[string]string{}
+	for _, field := range embed.Fields {
+		fields[field.Name] = field.Value
+	}
+	return fields
 }

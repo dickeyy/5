@@ -67,6 +67,56 @@ func TestEmbedTruncatesByRuneLimit(t *testing.T) {
 	}
 }
 
+func TestEmbedHelpersBuildPresetEmbedsAndMessages(t *testing.T) {
+	embed := ui.NewInfoEmbed("Title", "Description").
+		AddField("", "", true).
+		AddFields(ui.Field("Count", 3, true)).
+		SetAuthor("Quack", "https://example.com/icon.png").
+		SetThumbnail("https://example.com/thumb.png").
+		SetNamedColor("error").
+		Build()
+
+	if embed.Color != ui.ColorError {
+		t.Fatalf("expected named color to set error color, got %d", embed.Color)
+	}
+	if embed.Fields[0].Name != "\u200b" || embed.Fields[0].Value != "\u200b" {
+		t.Fatalf("expected blank fields to use zero-width placeholders, got %+v", embed.Fields[0])
+	}
+	if embed.Fields[1].Value != "3" {
+		t.Fatalf("expected field helper to stringify values, got %+v", embed.Fields[1])
+	}
+	if embed.Author == nil || embed.Author.Name != "Quack" {
+		t.Fatalf("expected author metadata, got %+v", embed.Author)
+	}
+	if embed.Thumbnail == nil || embed.Thumbnail.URL == "" {
+		t.Fatalf("expected thumbnail metadata, got %+v", embed.Thumbnail)
+	}
+
+	message := ui.EmbedMessage(embed, true)
+	data := message.ResponseData()
+	if len(data.Embeds) != 1 || data.Embeds[0] != embed {
+		t.Fatalf("expected embed response data, got %+v", data.Embeds)
+	}
+	if data.Flags&discordgo.MessageFlagsEphemeral == 0 {
+		t.Fatalf("expected embed message to preserve ephemeral flag")
+	}
+}
+
+func TestErrorResponsesUseEmbeds(t *testing.T) {
+	response := ui.Error("Nope")
+	if response.Data == nil || response.Data.Content != "" || len(response.Data.Embeds) != 1 {
+		t.Fatalf("expected embed error response, got %+v", response)
+	}
+	if response.Data.Embeds[0].Color != ui.ColorError {
+		t.Fatalf("expected error color, got %d", response.Data.Embeds[0].Color)
+	}
+
+	edit := ui.ErrorEdit("Nope").WebhookEdit()
+	if edit.Content == nil || *edit.Content != "" || edit.Embeds == nil || len(*edit.Embeds) != 1 {
+		t.Fatalf("expected embed error edit, got %+v", edit)
+	}
+}
+
 func TestCustomIDCodec(t *testing.T) {
 	encoded, err := ui.EncodeCustomID(ui.CustomID{
 		Namespace: "case",

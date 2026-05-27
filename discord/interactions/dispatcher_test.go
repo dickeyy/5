@@ -76,7 +76,10 @@ func TestDispatcherConvertsAsyncErrorsToErrorEdit(t *testing.T) {
 	dispatcher.Handle(nil, commandInteraction("slow", discordgo.InteractionApplicationCommand))
 	client.wait(t)
 
-	if len(client.edits) != 1 || client.edits[0].Content == nil || *client.edits[0].Content != "Quack could not finish that interaction." {
+	if len(client.edits) != 1 ||
+		client.edits[0].Embeds == nil ||
+		len(*client.edits[0].Embeds) != 1 ||
+		(*client.edits[0].Embeds)[0].Description != "Quack could not finish that interaction." {
 		t.Fatalf("expected standard error edit, got %+v", client.edits)
 	}
 }

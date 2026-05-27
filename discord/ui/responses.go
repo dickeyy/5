@@ -103,9 +103,9 @@ func Modal(title, customID string, components []discordgo.MessageComponent) *dis
 }
 
 func Error(content string) *discordgo.InteractionResponse {
-	return Ephemeral(Content(content, true))
+	return Ephemeral(EmbedMessage(ErrorEmbed(content), true))
 }
 
 func ErrorEdit(content string) Edit {
-	return EditMessage(Content(content, false))
+	return EditMessage(EmbedMessage(ErrorEmbed(content), false))
 }

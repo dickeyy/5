@@ -3,7 +3,9 @@ package views
 import (
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/app"
 	"github.com/quackdiscord/bot/discord/ui"
 	"github.com/quackdiscord/bot/structs"
@@ -15,7 +17,39 @@ type CaseCreated struct {
 }
 
 func CaseCreatedMessage(result CaseCreated) ui.Message {
-	return ui.Content(FormatCaseCreated(result), false)
+	return ui.EmbedMessage(CaseCreatedEmbed(result), false)
+}
+
+func CaseCreatedEmbed(result CaseCreated) *discordgo.MessageEmbed {
+	if result.Case == nil {
+		return ui.SuccessEmbed("Case Created", "Created case.")
+	}
+
+	created := result.Case
+	embed := ui.NewSuccessEmbed(fmt.Sprintf("Case #%d Created", created.CaseNumber), "").
+		AddField("Target", fmt.Sprintf("<@%s>", created.TargetDiscordUserID), true).
+		AddField("Moderator", fmt.Sprintf("<@%s>", created.ModeratorDiscordUserID), true).
+		SetFooter(fmt.Sprintf("Case ID: %s", created.ID)).
+		SetTimestamp(time.Now())
+
+	templateName := caseTemplateDisplayName(result.Template)
+	if templateName != "" {
+		embed.AddField("Template", templateName, false)
+	}
+
+	if created.SelectedLevel != nil {
+		levelName := strings.TrimSpace(created.SelectedLevel.Name)
+		if levelName == "" {
+			levelName = fmt.Sprintf("Level %d", created.SelectedLevel.Position)
+		}
+		embed.AddField("Level", levelName, true)
+		if created.SelectedLevel.MatchedCaseCount > 0 {
+			embed.AddField("Matching Cases", created.SelectedLevel.MatchedCaseCount, true)
+		}
+	}
+
+	embed.AddField("Queued Actions", fmt.Sprintf("%d%s", len(created.Actions), actionSummary(created.Actions)), false)
+	return embed.Build()
 }
 
 func FormatCaseCreated(result CaseCreated) string {
