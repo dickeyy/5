@@ -53,3 +53,12 @@ func registerEvents() {
 	}
 	log.Info().Msgf("Registered %d events", len(Events))
 }
+
+func Close() {
+	if Session == nil {
+		return
+	}
+	if err := Session.Close(); err != nil {
+		log.Error().Err(err).Msg("failed to close discord session")
+	}
+}

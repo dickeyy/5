@@ -97,7 +97,8 @@ func (d *Dispatcher) handleModal(session *discordgo.Session, interaction *discor
 }
 
 func (d *Dispatcher) execute(session *discordgo.Session, interaction *discordgo.InteractionCreate, name string, handler ui.Handler) {
-	result := d.safeHandle(session, interaction, name, handler)
+	ctx := interactionTraceContext(interaction)
+	result := d.safeHandle(ctx, session, interaction, name, handler)
 	if result.Response == nil {
 		return
 	}
@@ -109,14 +110,16 @@ func (d *Dispatcher) execute(session *discordgo.Session, interaction *discordgo.
 		return
 	}
 
-	go d.runTask(interaction, name, result.Task)
+	go d.runTask(ctx, interaction, name, result.Task)
 }
 
-func (d *Dispatcher) safeHandle(session *discordgo.Session, interaction *discordgo.InteractionCreate, name string, handler ui.Handler) (result ui.HandlerResult) {
+func (d *Dispatcher) safeHandle(ctx context.Context, session *discordgo.Session, interaction *discordgo.InteractionCreate, name string, handler ui.Handler) (result ui.HandlerResult) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			log.Error().
 				Str("interaction", name).
+				Str("request_id", app.RequestIDFromContext(ctx)).
+				Str("correlation_id", app.CorrelationIDFromContext(ctx)).
 				Interface("panic", recovered).
 				Bytes("stack", debug.Stack()).
 				Msg("Discord interaction handler panicked")
@@ -124,28 +127,45 @@ func (d *Dispatcher) safeHandle(session *discordgo.Session, interaction *discord
 		}
 	}()
 	return handler(ui.Context{
-		Context:     context.Background(),
+		Context:     ctx,
 		Services:    d.Services,
 		Session:     session,
 		Interaction: interaction,
 	})
 }
 
-func (d *Dispatcher) runTask(interaction *discordgo.InteractionCreate, name string, task ui.Task) {
+func (d *Dispatcher) runTask(ctx context.Context, interaction *discordgo.InteractionCreate, name string, task ui.Task) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			log.Error().
 				Str("interaction", name).
+				Str("request_id", app.RequestIDFromContext(ctx)).
+				Str("correlation_id", app.CorrelationIDFromContext(ctx)).
 				Interface("panic", recovered).
 				Bytes("stack", debug.Stack()).
 				Msg("Discord interaction task panicked")
 			_, _ = d.responder(interaction).EditOriginal(ui.ErrorEdit("Quack could not finish that interaction."))
 		}
 	}()
-	if err := task(context.Background(), d.responder(interaction)); err != nil {
-		log.Error().Err(err).Str("interaction", name).Msg("Discord interaction task failed")
+	if err := task(ctx, d.responder(interaction)); err != nil {
+		log.Error().
+			Err(err).
+			Str("interaction", name).
+			Str("request_id", app.RequestIDFromContext(ctx)).
+			Str("correlation_id", app.CorrelationIDFromContext(ctx)).
+			Msg("Discord interaction task failed")
 		_, _ = d.responder(interaction).EditOriginal(ui.ErrorEdit("Quack could not finish that interaction."))
 	}
+}
+
+func interactionTraceContext(interaction *discordgo.InteractionCreate) context.Context {
+	requestID := app.NewTraceID()
+	correlationID := requestID
+	if interaction != nil && interaction.ID != "" {
+		requestID = "discord:" + interaction.ID
+		correlationID = requestID
+	}
+	return app.ContextWithTrace(context.Background(), requestID, correlationID)
 }
 
 func (d *Dispatcher) respond(interaction *discordgo.InteractionCreate, response *discordgo.InteractionResponse) error {

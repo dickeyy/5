@@ -171,6 +171,222 @@ func TestCountTemplateCasesForTargetFiltersHistory(t *testing.T) {
 	}
 }
 
+func TestListCasesFilteredAndGetCaseByReference(t *testing.T) {
+	ctx := context.Background()
+	store, guildID := templateTestStore(t)
+	template := createCaseStorageTemplate(t, store, guildID)
+	otherGuild, err := store.UpsertGuild(ctx, storage.UpsertGuildParams{
+		DiscordGuildID:     "guild-2",
+		Name:               "Guild Two",
+		OwnerDiscordUserID: "owner-2",
+	})
+	if err != nil {
+		t.Fatalf("upsert other guild: %v", err)
+	}
+
+	firstCase := caseModel(guildID, &template.Template.ID)
+	first, err := store.CreateCase(ctx, storage.CreateCaseParams{Case: firstCase, Event: caseEvent()})
+	if err != nil {
+		t.Fatalf("create first case: %v", err)
+	}
+	secondCase := caseModel(guildID, &template.Template.ID)
+	secondCase.TargetDiscordUserID = "target-2"
+	secondCase.ModeratorDiscordUserID = "moderator-2"
+	secondCase.Status = structs.CaseStatusFailed
+	second, err := store.CreateCase(ctx, storage.CreateCaseParams{Case: secondCase, Event: caseEvent()})
+	if err != nil {
+		t.Fatalf("create second case: %v", err)
+	}
+	if _, err := store.CreateCase(ctx, storage.CreateCaseParams{Case: caseModel(otherGuild.ID, &template.Template.ID), Event: caseEvent()}); err != nil {
+		t.Fatalf("create other guild case: %v", err)
+	}
+
+	list, err := store.ListCasesFiltered(ctx, storage.ListCasesParams{GuildID: guildID, Limit: 10})
+	if err != nil {
+		t.Fatalf("list filtered cases: %v", err)
+	}
+	if list.Total != 2 || len(list.Cases) != 2 || list.Cases[0].ID != second.Case.ID || list.Cases[1].ID != first.Case.ID {
+		t.Fatalf("expected newest-first cases for guild only, got %+v", list)
+	}
+
+	list, err = store.ListCasesFiltered(ctx, storage.ListCasesParams{GuildID: guildID, TargetDiscordUserID: "target-2", ModeratorDiscordUserID: "moderator-2", TemplateID: template.Template.ID, Status: structs.CaseStatusFailed, Limit: 10})
+	if err != nil {
+		t.Fatalf("list filtered cases with filters: %v", err)
+	}
+	if list.Total != 1 || len(list.Cases) != 1 || list.Cases[0].ID != second.Case.ID {
+		t.Fatalf("expected filtered second case, got %+v", list)
+	}
+
+	byNumber, err := store.GetCaseByIDOrNumber(ctx, guildID, "1")
+	if err != nil {
+		t.Fatalf("get by case number: %v", err)
+	}
+	if byNumber == nil || byNumber.ID != first.Case.ID {
+		t.Fatalf("expected first case by number, got %+v", byNumber)
+	}
+	byID, err := store.GetCaseByIDOrNumber(ctx, guildID, second.Case.ID)
+	if err != nil {
+		t.Fatalf("get by id: %v", err)
+	}
+	if byID == nil || byID.CaseNumber != second.Case.CaseNumber {
+		t.Fatalf("expected second case by id, got %+v", byID)
+	}
+	crossGuild, err := store.GetCaseByIDOrNumber(ctx, otherGuild.ID, second.Case.ID)
+	if err != nil {
+		t.Fatalf("get cross guild: %v", err)
+	}
+	if crossGuild != nil {
+		t.Fatalf("expected cross guild lookup to miss, got %+v", crossGuild)
+	}
+}
+
+func TestListCaseActionAttemptsAndTargetSummary(t *testing.T) {
+	ctx := context.Background()
+	store, guildID := templateTestStore(t)
+
+	created, err := store.CreateCase(ctx, storage.CreateCaseParams{
+		Case:  caseModel(guildID, nil),
+		Event: caseEvent(),
+		ActionExecutions: []structs.CaseActionExecution{
+			{Position: 1, ActionType: structs.ActionSendDM, ConfigSnapshotJSON: `{}`},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	action := created.ActionExecutions[0]
+	if _, err := store.ClaimNextCaseAction(ctx, storage.ClaimCaseActionParams{CaseID: created.Case.ID, WorkerID: "worker-1"}); err != nil {
+		t.Fatalf("claim action: %v", err)
+	}
+	if err := store.CompleteCaseAction(ctx, storage.CompleteCaseActionParams{
+		ExecutionID:         action.ID,
+		AttemptNumber:       1,
+		WorkerID:            "worker-1",
+		AttemptStatus:       structs.ActionAttemptSucceeded,
+		ExecutionStatus:     structs.ActionExecutionSucceeded,
+		RequestPayloadJSON:  `{}`,
+		ResponsePayloadJSON: `{}`,
+	}); err != nil {
+		t.Fatalf("complete action: %v", err)
+	}
+
+	attempts, err := store.ListCaseActionAttempts(ctx, []string{action.ID})
+	if err != nil {
+		t.Fatalf("list attempts: %v", err)
+	}
+	if len(attempts) != 1 || attempts[0].ExecutionID != action.ID || attempts[0].AttemptNumber != 1 {
+		t.Fatalf("unexpected attempts: %+v", attempts)
+	}
+
+	summary, err := store.TargetCaseSummary(ctx, guildID, "target-1")
+	if err != nil {
+		t.Fatalf("target summary: %v", err)
+	}
+	if summary.Total != 1 || summary.ByStatus[structs.CaseStatusCompleted] != 1 {
+		t.Fatalf("unexpected target summary: %+v", summary)
+	}
+}
+
+func TestListAuditLogEntriesFiltered(t *testing.T) {
+	ctx := context.Background()
+	store, guildID := templateTestStore(t)
+	otherGuild, err := store.UpsertGuild(ctx, storage.UpsertGuildParams{
+		DiscordGuildID:     "guild-2",
+		Name:               "Guild Two",
+		OwnerDiscordUserID: "owner-2",
+	})
+	if err != nil {
+		t.Fatalf("upsert other guild: %v", err)
+	}
+
+	entries := []structs.AuditLogEntry{
+		{GuildID: guildID, ActorDiscordUserID: "actor-1", Source: structs.AuditSourceAPI, Action: "case.create", ResourceType: "case", ResourceID: "case-1", Result: structs.AuditResultSuccess, MetadataJSON: "{}"},
+		{GuildID: guildID, ActorDiscordUserID: "actor-2", Source: structs.AuditSourceSystem, Action: "case_action.failed", ResourceType: "case_action_execution", ResourceID: "action-1", Result: structs.AuditResultFailure, MetadataJSON: "{}"},
+		{GuildID: otherGuild.ID, ActorDiscordUserID: "actor-1", Source: structs.AuditSourceAPI, Action: "case.create", ResourceType: "case", ResourceID: "case-2", Result: structs.AuditResultSuccess, MetadataJSON: "{}"},
+	}
+	for i := range entries {
+		if err := store.CreateAuditLogEntry(ctx, &entries[i]); err != nil {
+			t.Fatalf("create audit %d: %v", i, err)
+		}
+	}
+
+	list, err := store.ListAuditLogEntriesFiltered(ctx, storage.ListAuditLogEntriesParams{GuildID: guildID, Limit: 10})
+	if err != nil {
+		t.Fatalf("list filtered audits: %v", err)
+	}
+	if list.Total != 2 || len(list.Entries) != 2 || list.Entries[0].Action != "case_action.failed" {
+		t.Fatalf("expected newest-first guild audits, got %+v", list)
+	}
+
+	list, err = store.ListAuditLogEntriesFiltered(ctx, storage.ListAuditLogEntriesParams{
+		GuildID:            guildID,
+		ActorDiscordUserID: "actor-1",
+		Action:             "case.create",
+		ResourceType:       "case",
+		ResourceID:         "case-1",
+		Result:             structs.AuditResultSuccess,
+		Limit:              10,
+	})
+	if err != nil {
+		t.Fatalf("list filtered audits with filters: %v", err)
+	}
+	if list.Total != 1 || len(list.Entries) != 1 || list.Entries[0].ResourceID != "case-1" {
+		t.Fatalf("expected filtered case audit, got %+v", list)
+	}
+}
+
+func TestActionQueueSnapshot(t *testing.T) {
+	ctx := context.Background()
+	store, guildID := templateTestStore(t)
+	otherGuild, err := store.UpsertGuild(ctx, storage.UpsertGuildParams{
+		DiscordGuildID:     "guild-2",
+		Name:               "Guild Two",
+		OwnerDiscordUserID: "owner-2",
+	})
+	if err != nil {
+		t.Fatalf("upsert other guild: %v", err)
+	}
+
+	created, err := store.CreateCase(ctx, storage.CreateCaseParams{
+		Case:  caseModel(guildID, nil),
+		Event: caseEvent(),
+		ActionExecutions: []structs.CaseActionExecution{
+			{Position: 1, ActionType: structs.ActionSendDM, Status: structs.ActionExecutionPending, ConfigSnapshotJSON: `{}`},
+			{Position: 2, ActionType: structs.ActionBanUser, Status: structs.ActionExecutionFailed, ConfigSnapshotJSON: `{}`, LastErrorCode: "action_not_implemented", LastError: "ban_user action module is not implemented"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+	if _, err := store.CreateCase(ctx, storage.CreateCaseParams{
+		Case:  caseModel(otherGuild.ID, nil),
+		Event: caseEvent(),
+		ActionExecutions: []structs.CaseActionExecution{
+			{Position: 1, ActionType: structs.ActionSendDM, Status: structs.ActionExecutionPending, ConfigSnapshotJSON: `{}`},
+		},
+	}); err != nil {
+		t.Fatalf("create other guild case: %v", err)
+	}
+
+	snapshot, err := store.ActionQueueSnapshot(ctx, guildID, 10)
+	if err != nil {
+		t.Fatalf("action queue snapshot: %v", err)
+	}
+	counts := map[structs.ActionExecutionStatus]int64{}
+	for _, row := range snapshot.StatusCounts {
+		counts[row.Status] = row.Count
+	}
+	if counts[structs.ActionExecutionPending] != 1 || counts[structs.ActionExecutionFailed] != 1 {
+		t.Fatalf("unexpected status counts: %+v", snapshot.StatusCounts)
+	}
+	if snapshot.OldestPendingOrRetry == nil || snapshot.OldestPendingOrRetry.CaseID != created.Case.ID {
+		t.Fatalf("expected oldest pending action for created case, got %+v", snapshot.OldestPendingOrRetry)
+	}
+	if len(snapshot.RecentFailures) != 1 || snapshot.RecentFailures[0].LastErrorCode != "action_not_implemented" {
+		t.Fatalf("expected recent unsupported action failure, got %+v", snapshot.RecentFailures)
+	}
+}
+
 func TestCreateCaseRollsBackOnActionFailure(t *testing.T) {
 	ctx := context.Background()
 	store, guildID := templateTestStore(t)

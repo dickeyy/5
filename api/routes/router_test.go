@@ -11,8 +11,10 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gin-gonic/gin"
+	"github.com/quackdiscord/bot/api/middleware"
 	"github.com/quackdiscord/bot/app"
 	"github.com/quackdiscord/bot/internal/testutil"
+	"github.com/quackdiscord/bot/lib"
 	"github.com/quackdiscord/bot/storage"
 	"github.com/quackdiscord/bot/structs"
 )
@@ -45,6 +47,133 @@ func TestSetupRoutesStatus(t *testing.T) {
 	}
 	if body["database"]["connected"] != false {
 		t.Fatalf("expected database to be disconnected in route smoke test")
+	}
+}
+
+func TestRequestContextMiddlewareEchoesRequestID(t *testing.T) {
+	testutil.SetTestConfig(t)
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.Use(middleware.RequestContext)
+	SetupRoutes(router, app.New(nil))
+
+	request := httptest.NewRequest(http.MethodGet, "/status", nil)
+	request.Header.Set("X-Request-ID", "req-test-1")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, response.Code)
+	}
+	if response.Header().Get("X-Request-ID") != "req-test-1" {
+		t.Fatalf("expected request id header to be echoed, got %q", response.Header().Get("X-Request-ID"))
+	}
+}
+
+func TestOpsStatusRouteRequiresKey(t *testing.T) {
+	testutil.SetTestConfig(t)
+	lib.Config.API.OpsStatusToken = "secret"
+	gin.SetMode(gin.TestMode)
+
+	store := testutil.NewSQLiteRedisStore(t)
+	if err := store.Migrate(); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+	router := gin.New()
+	SetupRoutes(router, app.New(store))
+
+	denied := httptest.NewRequest(http.MethodGet, "/ops/status", nil)
+	deniedResponse := httptest.NewRecorder()
+	router.ServeHTTP(deniedResponse, denied)
+	if deniedResponse.Code != http.StatusForbidden {
+		t.Fatalf("expected denied status %d, got %d body=%s", http.StatusForbidden, deniedResponse.Code, deniedResponse.Body.String())
+	}
+
+	allowed := httptest.NewRequest(http.MethodGet, "/ops/status", nil)
+	allowed.Header.Set("X-Quack-Ops-Key", "secret")
+	allowedResponse := httptest.NewRecorder()
+	router.ServeHTTP(allowedResponse, allowed)
+	if allowedResponse.Code != http.StatusOK {
+		t.Fatalf("expected allowed status %d, got %d body=%s", http.StatusOK, allowedResponse.Code, allowedResponse.Body.String())
+	}
+
+	var body struct {
+		Scope   string `json:"scope"`
+		Actions struct {
+			Capabilities []struct {
+				ActionType string `json:"action_type"`
+				Executable bool   `json:"executable"`
+				Status     string `json:"status"`
+			} `json:"capabilities"`
+		} `json:"actions"`
+	}
+	if err := json.Unmarshal(allowedResponse.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode ops body: %v", err)
+	}
+	if body.Scope != "global" || len(body.Actions.Capabilities) != 4 {
+		t.Fatalf("unexpected ops body: %+v", body)
+	}
+	if body.Actions.Capabilities[1].Executable || body.Actions.Capabilities[1].Status != "not_implemented" {
+		t.Fatalf("expected punitive actions to be visible as unsupported, got %+v", body.Actions.Capabilities)
+	}
+}
+
+func TestOpsStatusDisabledWhenNoKeyConfigured(t *testing.T) {
+	testutil.SetTestConfig(t)
+	gin.SetMode(gin.TestMode)
+
+	store := testutil.NewSQLiteRedisStore(t)
+	if err := store.Migrate(); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+	router := gin.New()
+	SetupRoutes(router, app.New(store))
+
+	request := httptest.NewRequest(http.MethodGet, "/ops/status", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("expected disabled status %d, got %d body=%s", http.StatusNotFound, response.Code, response.Body.String())
+	}
+}
+
+func TestGuildOpsStatusAllowsAdminOrOpsKey(t *testing.T) {
+	modRouter, modSessionID, _ := newCaseRouteHarness(t, uint64(discordgo.PermissionModerateMembers))
+	modRequest := httptest.NewRequest(http.MethodGet, "/guilds/guild-1/ops/status", nil)
+	modRequest.Header.Set("Authorization", "Bearer "+modSessionID)
+	modResponse := httptest.NewRecorder()
+	modRouter.ServeHTTP(modResponse, modRequest)
+	if modResponse.Code != http.StatusForbidden {
+		t.Fatalf("expected moderator status %d, got %d body=%s", http.StatusForbidden, modResponse.Code, modResponse.Body.String())
+	}
+
+	adminRouter, adminSessionID, _ := newCaseRouteHarness(t, uint64(discordgo.PermissionAdministrator))
+	adminRequest := httptest.NewRequest(http.MethodGet, "/guilds/guild-1/ops/status", nil)
+	adminRequest.Header.Set("Authorization", "Bearer "+adminSessionID)
+	adminResponse := httptest.NewRecorder()
+	adminRouter.ServeHTTP(adminResponse, adminRequest)
+	if adminResponse.Code != http.StatusOK {
+		t.Fatalf("expected admin status %d, got %d body=%s", http.StatusOK, adminResponse.Code, adminResponse.Body.String())
+	}
+
+	testutil.SetTestConfig(t)
+	lib.Config.API.OpsStatusToken = "secret"
+	store := testutil.NewSQLiteRedisStore(t)
+	if err := store.Migrate(); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+	if _, err := store.UpsertGuild(context.Background(), storage.UpsertGuildParams{DiscordGuildID: "guild-1", Name: "Guild", OwnerDiscordUserID: "owner-1"}); err != nil {
+		t.Fatalf("upsert guild: %v", err)
+	}
+	keyRouter := gin.New()
+	SetupRoutes(keyRouter, app.New(store))
+	keyRequest := httptest.NewRequest(http.MethodGet, "/guilds/guild-1/ops/status", nil)
+	keyRequest.Header.Set("X-Quack-Ops-Key", "secret")
+	keyResponse := httptest.NewRecorder()
+	keyRouter.ServeHTTP(keyResponse, keyRequest)
+	if keyResponse.Code != http.StatusOK {
+		t.Fatalf("expected ops key status %d, got %d body=%s", http.StatusOK, keyResponse.Code, keyResponse.Body.String())
 	}
 }
 
@@ -348,6 +477,146 @@ func TestCaseRouteCreate(t *testing.T) {
 	}
 	if len(body.Case.Actions) != 0 {
 		t.Fatalf("unexpected actions: %+v", body.Case.Actions)
+	}
+}
+
+func TestCaseReadRoutes(t *testing.T) {
+	router, sessionID, templateID := newCaseRouteHarness(t, uint64(discordgo.PermissionModerateMembers))
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/guilds/guild-1/cases", bytes.NewBufferString(caseRoutePayload(templateID, "target-1")))
+	createRequest.Header.Set("Authorization", "Bearer "+sessionID)
+	createRequest.Header.Set("Content-Type", "application/json")
+	createResponse := httptest.NewRecorder()
+	router.ServeHTTP(createResponse, createRequest)
+	if createResponse.Code != http.StatusCreated {
+		t.Fatalf("expected create status %d, got %d body=%s", http.StatusCreated, createResponse.Code, createResponse.Body.String())
+	}
+
+	listRequest := httptest.NewRequest(http.MethodGet, "/guilds/guild-1/cases?limit=10&target_discord_user_id=target-1", nil)
+	listRequest.Header.Set("Authorization", "Bearer "+sessionID)
+	listResponse := httptest.NewRecorder()
+	router.ServeHTTP(listResponse, listRequest)
+	if listResponse.Code != http.StatusOK {
+		t.Fatalf("expected list status %d, got %d body=%s", http.StatusOK, listResponse.Code, listResponse.Body.String())
+	}
+
+	var listBody struct {
+		Total int `json:"total"`
+		Cases []struct {
+			ID            string `json:"id"`
+			SelectedLevel *struct {
+				ID string `json:"id"`
+			} `json:"selected_level"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(listResponse.Body.Bytes(), &listBody); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if listBody.Total != 1 || len(listBody.Cases) != 1 || listBody.Cases[0].SelectedLevel == nil {
+		t.Fatalf("unexpected case list response: %+v", listBody)
+	}
+
+	detailRequest := httptest.NewRequest(http.MethodGet, "/guilds/guild-1/cases/1", nil)
+	detailRequest.Header.Set("Authorization", "Bearer "+sessionID)
+	detailResponse := httptest.NewRecorder()
+	router.ServeHTTP(detailResponse, detailRequest)
+	if detailResponse.Code != http.StatusOK {
+		t.Fatalf("expected detail status %d, got %d body=%s", http.StatusOK, detailResponse.Code, detailResponse.Body.String())
+	}
+
+	var detailBody struct {
+		Case struct {
+			ID     string `json:"id"`
+			Events []struct {
+				EventType string `json:"event_type"`
+			} `json:"events"`
+			Actions []struct {
+				ID       string `json:"id"`
+				Attempts []struct {
+					ID string `json:"id"`
+				} `json:"attempts"`
+			} `json:"actions"`
+		} `json:"case"`
+	}
+	if err := json.Unmarshal(detailResponse.Body.Bytes(), &detailBody); err != nil {
+		t.Fatalf("decode detail response: %v", err)
+	}
+	if detailBody.Case.ID == "" || len(detailBody.Case.Events) != 1 {
+		t.Fatalf("unexpected case detail response: %+v", detailBody.Case)
+	}
+
+	userRequest := httptest.NewRequest(http.MethodGet, "/guilds/guild-1/users/target-1/cases?limit=10", nil)
+	userRequest.Header.Set("Authorization", "Bearer "+sessionID)
+	userResponse := httptest.NewRecorder()
+	router.ServeHTTP(userResponse, userRequest)
+	if userResponse.Code != http.StatusOK {
+		t.Fatalf("expected user history status %d, got %d body=%s", http.StatusOK, userResponse.Code, userResponse.Body.String())
+	}
+
+	missingRequest := httptest.NewRequest(http.MethodGet, "/guilds/guild-1/cases/missing", nil)
+	missingRequest.Header.Set("Authorization", "Bearer "+sessionID)
+	missingResponse := httptest.NewRecorder()
+	router.ServeHTTP(missingResponse, missingRequest)
+	if missingResponse.Code != http.StatusNotFound {
+		t.Fatalf("expected missing detail status %d, got %d body=%s", http.StatusNotFound, missingResponse.Code, missingResponse.Body.String())
+	}
+
+	invalidRequest := httptest.NewRequest(http.MethodGet, "/guilds/guild-1/cases?limit=0", nil)
+	invalidRequest.Header.Set("Authorization", "Bearer "+sessionID)
+	invalidResponse := httptest.NewRecorder()
+	router.ServeHTTP(invalidResponse, invalidRequest)
+	if invalidResponse.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid query status %d, got %d body=%s", http.StatusBadRequest, invalidResponse.Code, invalidResponse.Body.String())
+	}
+}
+
+func TestAuditLogRoutePermissionsAndFilters(t *testing.T) {
+	modRouter, modSessionID, _ := newCaseRouteHarness(t, uint64(discordgo.PermissionModerateMembers))
+	modRequest := httptest.NewRequest(http.MethodGet, "/guilds/guild-1/audit-log", nil)
+	modRequest.Header.Set("Authorization", "Bearer "+modSessionID)
+	modResponse := httptest.NewRecorder()
+	modRouter.ServeHTTP(modResponse, modRequest)
+	if modResponse.Code != http.StatusForbidden {
+		t.Fatalf("expected moderator audit status %d, got %d body=%s", http.StatusForbidden, modResponse.Code, modResponse.Body.String())
+	}
+
+	adminRouter, adminSessionID, templateID := newCaseRouteHarness(t, uint64(discordgo.PermissionAdministrator))
+	createRequest := httptest.NewRequest(http.MethodPost, "/guilds/guild-1/cases", bytes.NewBufferString(caseRoutePayload(templateID, "target-1")))
+	createRequest.Header.Set("Authorization", "Bearer "+adminSessionID)
+	createRequest.Header.Set("Content-Type", "application/json")
+	createResponse := httptest.NewRecorder()
+	adminRouter.ServeHTTP(createResponse, createRequest)
+	if createResponse.Code != http.StatusCreated {
+		t.Fatalf("expected create status %d, got %d body=%s", http.StatusCreated, createResponse.Code, createResponse.Body.String())
+	}
+
+	auditRequest := httptest.NewRequest(http.MethodGet, "/guilds/guild-1/audit-log?action=case.create&result=success", nil)
+	auditRequest.Header.Set("Authorization", "Bearer "+adminSessionID)
+	auditResponse := httptest.NewRecorder()
+	adminRouter.ServeHTTP(auditResponse, auditRequest)
+	if auditResponse.Code != http.StatusOK {
+		t.Fatalf("expected audit status %d, got %d body=%s", http.StatusOK, auditResponse.Code, auditResponse.Body.String())
+	}
+
+	var auditBody struct {
+		Total   int `json:"total"`
+		Entries []struct {
+			Action string `json:"action"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(auditResponse.Body.Bytes(), &auditBody); err != nil {
+		t.Fatalf("decode audit response: %v", err)
+	}
+	if auditBody.Total != 1 || len(auditBody.Entries) != 1 || auditBody.Entries[0].Action != "case.create" {
+		t.Fatalf("unexpected audit response: %+v", auditBody)
+	}
+
+	invalidRequest := httptest.NewRequest(http.MethodGet, "/guilds/guild-1/audit-log?result=partial", nil)
+	invalidRequest.Header.Set("Authorization", "Bearer "+adminSessionID)
+	invalidResponse := httptest.NewRecorder()
+	adminRouter.ServeHTTP(invalidResponse, invalidRequest)
+	if invalidResponse.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid audit status %d, got %d body=%s", http.StatusBadRequest, invalidResponse.Code, invalidResponse.Body.String())
 	}
 }
 

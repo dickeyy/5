@@ -33,6 +33,7 @@ func NewActionService(store *storage.Store, discord DiscordActionClient) *Action
 }
 
 func (s *ActionService) ProcessCaseActions(ctx context.Context, caseID string) error {
+	ctx = ensureTraceContext(ctx)
 	if s == nil || s.store == nil {
 		return errors.New("action service is not configured")
 	}
@@ -74,6 +75,10 @@ func (s *ActionService) processClaimedAction(ctx context.Context, workerID strin
 		"execution_id": claimed.Execution.ID,
 		"action_type":  claimed.Execution.ActionType,
 		"config":       config,
+	}
+	requestID, correlationID := TraceIDsFromContext(ctx)
+	if correlationID == "" {
+		correlationID = claimed.Case.CorrelationID
 	}
 
 	attemptStatus := structs.ActionAttemptSucceeded
@@ -120,6 +125,8 @@ func (s *ActionService) processClaimedAction(ctx context.Context, workerID strin
 			"action_type":  claimed.Execution.ActionType,
 			"retrying":     executionStatus == structs.ActionExecutionRetrying,
 		}),
+		CorrelationID: correlationID,
+		RequestID:     requestID,
 	})
 	if err != nil {
 		return err
@@ -130,10 +137,12 @@ func (s *ActionService) processClaimedAction(ctx context.Context, workerID strin
 			CaseID:        claimed.Case.ID,
 			AfterPosition: claimed.Execution.Position,
 			Reason:        fmt.Sprintf("previous action %s failed", claimed.Execution.ID),
+			CorrelationID: correlationID,
+			RequestID:     requestID,
 		})
 	}
 	if executionStatus == structs.ActionExecutionRetrying && nextRetryAt != nil {
-		scheduleCaseActions(claimed.Case.ID, time.Until(*nextRetryAt))
+		scheduleCaseActions(ctx, claimed.Case.ID, time.Until(*nextRetryAt))
 	}
 
 	return nil

@@ -22,7 +22,7 @@ const (
 // Accepts bearer token or auth cookie
 func RequireAuth(s *storage.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		sessionID := extractSessionID(c)
+		sessionID := ExtractSessionID(c)
 		if sessionID == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing auth session"})
 			return
@@ -81,7 +81,7 @@ func GetAuthSession(c *gin.Context) *structs.AuthSession {
 }
 
 // extractSessionID extracts the session ID from the Auth header or cookie
-func extractSessionID(c *gin.Context) string {
+func ExtractSessionID(c *gin.Context) string {
 	auth := c.GetHeader("Authorization")
 	if auth != "" {
 		parts := strings.SplitN(auth, " ", 2)

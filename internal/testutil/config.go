@@ -13,6 +13,9 @@ func SetTestConfig(t testing.TB) {
 	previous := lib.Config
 	lib.Config = &structs.Config{
 		Environment: "test",
+		API: structs.APIConfig{
+			Port: "8080",
+		},
 		Auth: structs.AuthConfig{
 			SessionCookieName: "quack_test_session",
 			SessionTTLHours:   1,

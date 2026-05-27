@@ -424,6 +424,138 @@ func TestCaseServiceDisabledLevelsDoNotMatch(t *testing.T) {
 	}
 }
 
+func TestCaseServiceDashboardReads(t *testing.T) {
+	ctx := context.Background()
+	store := newMigratedStore(t)
+	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
+	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
+	service := app.NewCaseService(store)
+	template := createAppTemplate(t, ctx, store, adminContext, validTemplateInput("spam"))
+
+	first, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
+	if err != nil {
+		t.Fatalf("create first case: %v", err)
+	}
+	second, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-2"})
+	if err != nil {
+		t.Fatalf("create second case: %v", err)
+	}
+
+	list, err := service.List(ctx, modContext, app.CaseListInput{Limit: "10"})
+	if err != nil {
+		t.Fatalf("list cases: %v", err)
+	}
+	if list.Total != 2 || len(list.Cases) != 2 || list.Cases[0].ID != second.ID || list.Cases[1].ID != first.ID {
+		t.Fatalf("expected newest-first case list, got %+v", list)
+	}
+	if list.Cases[0].SelectedLevel == nil {
+		t.Fatalf("expected selected level in case list response")
+	}
+
+	detail, err := service.Get(ctx, modContext, "1")
+	if err != nil {
+		t.Fatalf("get case detail: %v", err)
+	}
+	if detail.ID != first.ID || detail.TemplateSnapshot == nil || len(detail.Events) != 1 || len(detail.Actions) != 1 {
+		t.Fatalf("unexpected case detail: %+v", detail)
+	}
+	if detail.Actions[0].ActionType != structs.ActionSendDM || len(detail.Actions[0].Attempts) != 0 {
+		t.Fatalf("unexpected detail actions: %+v", detail.Actions)
+	}
+
+	profile, err := service.UserHistory(ctx, modContext, "target-1", app.CaseListInput{Limit: "10"})
+	if err != nil {
+		t.Fatalf("user history: %v", err)
+	}
+	if profile.Total != 1 || len(profile.Cases) != 1 || profile.Summary.Total != 1 || profile.Summary.ByStatus[string(structs.CaseStatusOpen)] != 1 {
+		t.Fatalf("unexpected profile response: %+v", profile)
+	}
+	if profile.Summary.ByTemplate[template.ID] != 1 {
+		t.Fatalf("expected profile summary by template, got %+v", profile.Summary.ByTemplate)
+	}
+}
+
+func TestCaseServiceReadValidationAndPermissions(t *testing.T) {
+	ctx := context.Background()
+	store := newMigratedStore(t)
+	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
+	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
+	service := app.NewCaseService(store)
+	template := createAppTemplate(t, ctx, store, adminContext, validTemplateInput("spam"))
+	if _, err := service.Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"}); err != nil {
+		t.Fatalf("create case: %v", err)
+	}
+
+	_, err := service.List(ctx, modContext, app.CaseListInput{Limit: "0"})
+	if !errors.Is(err, app.ErrCaseValidation) {
+		t.Fatalf("expected limit validation error, got %v", err)
+	}
+	_, err = service.List(ctx, modContext, app.CaseListInput{Status: "not-a-status"})
+	if !errors.Is(err, app.ErrCaseValidation) {
+		t.Fatalf("expected status validation error, got %v", err)
+	}
+	_, err = service.Get(ctx, modContext, "missing")
+	if !errors.Is(err, app.ErrCaseNotFound) {
+		t.Fatalf("expected not found error, got %v", err)
+	}
+
+	noReadContext := *modContext
+	noReadContext.Permissions = map[structs.PermissionAction]bool{structs.PermissionActionCaseCreate: false}
+	_, err = service.List(ctx, &noReadContext, app.CaseListInput{})
+	if !errors.Is(err, app.ErrCasePermissionDenied) {
+		t.Fatalf("expected permission error, got %v", err)
+	}
+}
+
+func TestCaseServiceTraceIDsPropagateToCaseActionsAndAudit(t *testing.T) {
+	ctx := app.ContextWithTrace(context.Background(), "req-case-1", "corr-case-1")
+	store := newMigratedStore(t)
+	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
+	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
+	template := createAppTemplate(t, ctx, store, adminContext, validTemplateInput("trace-spam"))
+
+	created, err := app.NewCaseService(store).Create(ctx, modContext, app.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
+	if err != nil {
+		t.Fatalf("create traced case: %v", err)
+	}
+	if created.ID == "" {
+		t.Fatalf("expected created case id")
+	}
+
+	caseModel, err := store.GetCaseByIDOrNumber(ctx, modContext.Guild.ID, created.ID)
+	if err != nil {
+		t.Fatalf("get traced case: %v", err)
+	}
+	if caseModel == nil || caseModel.CorrelationID != "corr-case-1" {
+		t.Fatalf("expected case correlation id, got %+v", caseModel)
+	}
+
+	actions, err := store.ListCaseActionExecutions(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("list traced actions: %v", err)
+	}
+	if len(actions) != 1 || actions[0].CorrelationID != "corr-case-1" {
+		t.Fatalf("expected action correlation id, got %+v", actions)
+	}
+
+	audits, err := store.ListAuditLogEntries(ctx, modContext.Guild.ID)
+	if err != nil {
+		t.Fatalf("list audits: %v", err)
+	}
+	var foundCaseAudit bool
+	for _, audit := range audits {
+		if audit.Action == "case.create" {
+			foundCaseAudit = true
+			if audit.RequestID != "req-case-1" || audit.CorrelationID != "corr-case-1" {
+				t.Fatalf("expected traced case audit, got %+v", audit)
+			}
+		}
+	}
+	if !foundCaseAudit {
+		t.Fatalf("expected case.create audit in %+v", audits)
+	}
+}
+
 func createAppTemplate(t *testing.T, ctx context.Context, store *storage.Store, guildContext *app.GuildStaffContext, input app.TemplateInput) *app.TemplateResponse {
 	t.Helper()
 

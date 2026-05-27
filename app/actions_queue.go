@@ -16,21 +16,24 @@ type actionQueuePayload struct {
 	CaseID string
 }
 
-func enqueueCaseActions(caseID string) {
+func enqueueCaseActions(ctx context.Context, caseID string) bool {
 	if services.EQ == nil || !services.EQ.IsActive() || caseID == "" {
-		return
+		return false
 	}
+	requestID, correlationID := TraceIDsFromContext(ctx)
 
-	services.EQ.Enqueue(structs.QueueEvent{
-		Type:    actionQueueEventType,
-		Data:    actionQueuePayload{CaseID: caseID},
-		Handler: processCaseActionQueueEvent,
+	return services.EQ.Enqueue(structs.QueueEvent{
+		Type:          actionQueueEventType,
+		RequestID:     requestID,
+		CorrelationID: correlationID,
+		Data:          actionQueuePayload{CaseID: caseID},
+		Handler:       processCaseActionQueueEvent,
 	})
 }
 
-func scheduleCaseActions(caseID string, delay time.Duration) {
+func scheduleCaseActions(ctx context.Context, caseID string, delay time.Duration) {
 	if delay <= 0 {
-		enqueueCaseActions(caseID)
+		enqueueCaseActions(ctx, caseID)
 		return
 	}
 
@@ -38,38 +41,39 @@ func scheduleCaseActions(caseID string, delay time.Duration) {
 		timer := time.NewTimer(delay)
 		defer timer.Stop()
 		<-timer.C
-		enqueueCaseActions(caseID)
+		enqueueCaseActions(ctx, caseID)
 	}()
 }
 
-func EnqueuePendingCaseActions(ctx context.Context, store *storage.Store, limit int) error {
+func EnqueuePendingCaseActions(ctx context.Context, store *storage.Store, limit int) (int, error) {
 	caseIDs, err := store.ListExecutableCaseIDs(ctx, limit)
 	if err != nil {
-		return err
+		return 0, err
 	}
+	accepted := 0
 	for _, caseID := range caseIDs {
-		enqueueCaseActions(caseID)
+		if enqueueCaseActions(ctx, caseID) {
+			accepted++
+		}
 	}
-	return nil
+	return accepted, nil
 }
 
-func processCaseActionQueueEvent(dataStore structs.DataStore, data any) {
+func processCaseActionQueueEvent(ctx context.Context, dataStore structs.DataStore, data any) error {
 	store, ok := dataStore.(*storage.Store)
 	if !ok || store == nil {
 		log.Error().Msg("Action queue received unsupported datastore")
-		return
+		return nil
 	}
 
 	payload, ok := data.(actionQueuePayload)
 	if !ok || payload.CaseID == "" {
 		log.Error().Interface("payload", data).Msg("Action queue received invalid payload")
-		return
+		return nil
 	}
 
-	if err := NewActionService(store, NewDiscordActionClient()).ProcessCaseActions(context.Background(), payload.CaseID); err != nil {
-		log.Error().
-			Err(err).
-			Str("case_id", payload.CaseID).
-			Msg("Failed to process case actions")
+	if err := NewActionService(store, NewDiscordActionClient()).ProcessCaseActions(ctx, payload.CaseID); err != nil {
+		return err
 	}
+	return nil
 }

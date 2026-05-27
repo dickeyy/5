@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/quackdiscord/bot/api"
 	"github.com/quackdiscord/bot/app"
@@ -21,6 +23,9 @@ func init() {
 }
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	services.DB.Connect()
 	services.Redis.Connect()
 	s := storage.New(services.DB.DB, services.Redis.Client)
@@ -36,8 +41,14 @@ func main() {
 	if err := commands.Register(discord.Session, appServices); err != nil {
 		log.Error().Err(err).Msg("Failed to register Discord commands")
 	}
-	if err := app.EnqueuePendingCaseActions(context.Background(), s, 100); err != nil {
+	if accepted, err := app.EnqueuePendingCaseActions(context.Background(), s, 100); err != nil {
 		log.Error().Err(err).Msg("Failed to enqueue pending case actions")
+	} else {
+		log.Info().Int("accepted", accepted).Msg("Enqueued pending case actions")
 	}
-	api.Start(s)
+	api.StartWithContext(ctx, s)
+	discord.Close()
+	if services.EQ != nil && services.EQ.IsActive() {
+		services.EQ.Stop()
+	}
 }

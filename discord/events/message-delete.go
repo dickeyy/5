@@ -1,6 +1,8 @@
 package events
 
 import (
+	"context"
+
 	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/discord"
 	"github.com/quackdiscord/bot/services"
@@ -21,8 +23,10 @@ func msgDelete(_ *discordgo.Session, data *discordgo.MessageDelete) {
 	})
 }
 
-func msgDeleteHandler(s structs.DataStore, data any) {
+func msgDeleteHandler(ctx context.Context, s structs.DataStore, data any) error {
 	// msg := data.(*discordgo.MessageDelete)
 	// do something here
+	_ = ctx
 	_ = s
+	return nil
 }

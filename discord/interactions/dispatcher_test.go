@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/quackdiscord/bot/app"
 	"github.com/quackdiscord/bot/discord/interactions"
 	"github.com/quackdiscord/bot/discord/ui"
 )
@@ -33,6 +34,30 @@ func TestDispatcherSendsImmediateCommandResponse(t *testing.T) {
 	if len(client.edits) != 0 {
 		t.Fatalf("expected no edits, got %d", len(client.edits))
 	}
+}
+
+func TestDispatcherAddsDiscordTraceContext(t *testing.T) {
+	client := &fakeClient{done: make(chan struct{}, 1)}
+	dispatcher := &interactions.Dispatcher{
+		Commands: fakeCommands{
+			"trace": func(ctx ui.Context) ui.HandlerResult {
+				if app.RequestIDFromContext(ctx.Context) != "discord:interaction-1" || app.CorrelationIDFromContext(ctx.Context) != "discord:interaction-1" {
+					t.Fatalf("expected discord trace context, got request=%q correlation=%q", app.RequestIDFromContext(ctx.Context), app.CorrelationIDFromContext(ctx.Context))
+				}
+				return ui.Async(ui.DeferPublic(), func(ctx context.Context, responder ui.Responder) error {
+					if app.RequestIDFromContext(ctx) != "discord:interaction-1" || app.CorrelationIDFromContext(ctx) != "discord:interaction-1" {
+						t.Fatalf("expected async discord trace context, got request=%q correlation=%q", app.RequestIDFromContext(ctx), app.CorrelationIDFromContext(ctx))
+					}
+					_, err := responder.EditOriginal(ui.EditMessage(ui.Content("traced", false)))
+					return err
+				})
+			},
+		},
+		Client: client,
+	}
+
+	dispatcher.Handle(nil, commandInteraction("trace", discordgo.InteractionApplicationCommand))
+	client.wait(t)
 }
 
 func TestDispatcherDefersThenEditsAsyncCommand(t *testing.T) {

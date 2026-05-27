@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/api/middleware"
@@ -14,6 +16,10 @@ import (
 )
 
 func Start(s *storage.Store) {
+	StartWithContext(context.Background(), s)
+}
+
+func StartWithContext(ctx context.Context, s *storage.Store) {
 	if lib.Config.Environment != "dev" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -24,6 +30,7 @@ func Start(s *storage.Store) {
 	}
 
 	r := gin.New()
+	r.Use(middleware.RequestContext)
 	r.Use(gin.Recovery())
 	r.Use(middleware.Logger)
 	r.Use(func(c *gin.Context) {
@@ -31,7 +38,7 @@ func Start(s *storage.Store) {
 		if _, ok := allowedOrigins[origin]; ok {
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Access-Control-Allow-Credentials", "true")
-			c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID, X-Correlation-ID, X-Quack-Ops-Key")
 			c.Header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 			c.Header("Vary", "Origin")
 		}
@@ -47,7 +54,19 @@ func Start(s *storage.Store) {
 	routes.SetupRoutes(r, app.New(s))
 
 	log.Info().Msg("Starting API on port " + lib.Config.API.Port)
-	if err := r.Run(fmt.Sprintf(":%s", lib.Config.API.Port)); err != nil {
+	server := &http.Server{
+		Addr:    fmt.Sprintf(":%s", lib.Config.API.Port),
+		Handler: r,
+	}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Error().Err(err).Msg("Failed to gracefully shut down API")
+		}
+	}()
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Error().Err(err).Msg("Failed to start server")
 	}
 }

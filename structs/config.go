@@ -10,7 +10,8 @@ type Config struct {
 }
 
 type APIConfig struct {
-	Port string
+	Port           string
+	OpsStatusToken string
 }
 
 type DiscordConfig struct {

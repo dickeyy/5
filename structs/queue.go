@@ -1,6 +1,9 @@
 package structs
 
 import (
+	"context"
+	"time"
+
 	r "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
@@ -11,7 +14,11 @@ type DataStore interface {
 }
 
 type QueueEvent struct {
-	Type    string
-	Data    any
-	Handler func(s DataStore, data any)
+	ID            string
+	Type          string
+	CreatedAt     time.Time
+	RequestID     string
+	CorrelationID string
+	Data          any
+	Handler       func(ctx context.Context, s DataStore, data any) error
 }

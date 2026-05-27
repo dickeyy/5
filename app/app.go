@@ -10,7 +10,9 @@ type Services struct {
 	Guilds    *GuildService
 	Templates *TemplateService
 	Cases     *CaseService
+	Audits    *AuditService
 	Actions   *ActionService
+	Ops       *OpsService
 }
 
 func New(store *storage.Store) *Services {
@@ -22,6 +24,8 @@ func NewWithDiscordClient(store *storage.Store, discord DiscordClient) *Services
 	services.Guilds = NewGuildService(store, discord)
 	services.Templates = NewTemplateService(store)
 	services.Cases = NewCaseService(store)
+	services.Audits = NewAuditService(store)
 	services.Actions = NewActionService(store, NewDiscordActionClient())
+	services.Ops = NewOpsService(store)
 	return services
 }

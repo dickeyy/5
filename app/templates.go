@@ -137,6 +137,7 @@ func (s *TemplateService) Get(ctx context.Context, guildContext *GuildStaffConte
 }
 
 func (s *TemplateService) Create(ctx context.Context, guildContext *GuildStaffContext, input TemplateInput) (*TemplateResponse, error) {
+	ctx = ensureTraceContext(ctx)
 	normalized, err := s.validate(ctx, guildContext, "", input)
 	if err != nil {
 		_ = s.audit(ctx, guildContext, "case_template.create", "case_template", "unknown", structs.AuditResultFailure, err.Error())
@@ -146,7 +147,7 @@ func (s *TemplateService) Create(ctx context.Context, guildContext *GuildStaffCo
 	expanded, err := s.store.CreateCaseTemplate(ctx, storage.CreateCaseTemplateParams{
 		Template: normalized.template,
 		Levels:   normalized.levels,
-		Audit:    s.auditEntry(guildContext, "case_template.create", "case_template", "", structs.AuditResultSuccess, ""),
+		Audit:    s.auditEntry(ctx, guildContext, "case_template.create", "case_template", "", structs.AuditResultSuccess, ""),
 	})
 	if err != nil {
 		return nil, err
@@ -157,6 +158,7 @@ func (s *TemplateService) Create(ctx context.Context, guildContext *GuildStaffCo
 }
 
 func (s *TemplateService) Update(ctx context.Context, guildContext *GuildStaffContext, templateID string, input TemplateInput) (*TemplateResponse, error) {
+	ctx = ensureTraceContext(ctx)
 	existing, err := s.store.GetCaseTemplateExpanded(ctx, guildContext.Guild.ID, templateID)
 	if err != nil {
 		return nil, err
@@ -176,7 +178,7 @@ func (s *TemplateService) Update(ctx context.Context, guildContext *GuildStaffCo
 		TemplateID: templateID,
 		Template:   normalized.template,
 		Levels:     normalized.levels,
-		Audit:      s.auditEntry(guildContext, "case_template.update", "case_template", templateID, structs.AuditResultSuccess, ""),
+		Audit:      s.auditEntry(ctx, guildContext, "case_template.update", "case_template", templateID, structs.AuditResultSuccess, ""),
 	})
 	if err != nil {
 		return nil, err
@@ -190,11 +192,12 @@ func (s *TemplateService) Update(ctx context.Context, guildContext *GuildStaffCo
 }
 
 func (s *TemplateService) Archive(ctx context.Context, guildContext *GuildStaffContext, templateID string) (*TemplateResponse, error) {
+	ctx = ensureTraceContext(ctx)
 	expanded, err := s.store.ArchiveCaseTemplate(
 		ctx,
 		guildContext.Guild.ID,
 		templateID,
-		s.auditEntry(guildContext, "case_template.archive", "case_template", templateID, structs.AuditResultSuccess, ""),
+		s.auditEntry(ctx, guildContext, "case_template.archive", "case_template", templateID, structs.AuditResultSuccess, ""),
 	)
 	if err != nil {
 		return nil, err
@@ -493,17 +496,18 @@ func validationError(message string) error {
 }
 
 func (s *TemplateService) audit(ctx context.Context, guildContext *GuildStaffContext, action, resourceType, resourceID string, result structs.AuditResult, failureReason string) error {
-	entry := s.auditEntry(guildContext, action, resourceType, resourceID, result, failureReason)
+	entry := s.auditEntry(ctx, guildContext, action, resourceType, resourceID, result, failureReason)
 	if entry == nil {
 		return nil
 	}
 	return s.store.CreateAuditLogEntry(ctx, entry)
 }
 
-func (s *TemplateService) auditEntry(guildContext *GuildStaffContext, action, resourceType, resourceID string, result structs.AuditResult, failureReason string) *structs.AuditLogEntry {
+func (s *TemplateService) auditEntry(ctx context.Context, guildContext *GuildStaffContext, action, resourceType, resourceID string, result structs.AuditResult, failureReason string) *structs.AuditLogEntry {
 	if guildContext == nil || guildContext.Guild == nil || guildContext.Staff == nil {
 		return nil
 	}
+	requestID, correlationID := TraceIDsFromContext(ctx)
 
 	entry := &structs.AuditLogEntry{
 		GuildID:             guildContext.Guild.ID,
@@ -515,6 +519,8 @@ func (s *TemplateService) auditEntry(guildContext *GuildStaffContext, action, re
 		ResourceID:          resourceID,
 		Result:              result,
 		FailureReason:       failureReason,
+		CorrelationID:       correlationID,
+		RequestID:           requestID,
 		MetadataJSON:        "{}",
 	}
 	if entry.ResourceID == "" {

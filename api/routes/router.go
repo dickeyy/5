@@ -9,6 +9,8 @@ import (
 
 func SetupRoutes(r *gin.Engine, services *app.Services) {
 	r.GET("/status", func(c *gin.Context) { status(c, services) })
+	r.GET("/ops/status", func(c *gin.Context) { globalOpsStatus(c, services) })
+	r.GET("/guilds/:discordGuildID/ops/status", func(c *gin.Context) { guildOpsStatus(c, services) })
 	setupAuthRoutes(r, services)
 	setupGuildRoutes(r, services)
 }
@@ -34,7 +36,19 @@ func setupGuildRoutes(r *gin.Engine, services *app.Services) {
 	guilds.DELETE("/:discordGuildID/templates/:templateID", middleware.RequireGuildContext(services, structs.PermissionActionCaseTemplateDelete), func(c *gin.Context) {
 		archiveTemplate(c, services)
 	})
+	guilds.GET("/:discordGuildID/cases", middleware.RequireGuildContext(services, structs.PermissionActionCaseCreate), func(c *gin.Context) {
+		listCases(c, services)
+	})
 	guilds.POST("/:discordGuildID/cases", middleware.RequireGuildContext(services, structs.PermissionActionCaseCreate), func(c *gin.Context) {
 		createCase(c, services)
+	})
+	guilds.GET("/:discordGuildID/cases/:caseRef", middleware.RequireGuildContext(services, structs.PermissionActionCaseCreate), func(c *gin.Context) {
+		getCase(c, services)
+	})
+	guilds.GET("/:discordGuildID/users/:targetDiscordUserID/cases", middleware.RequireGuildContext(services, structs.PermissionActionCaseCreate), func(c *gin.Context) {
+		listUserCases(c, services)
+	})
+	guilds.GET("/:discordGuildID/audit-log", middleware.RequireGuildContext(services, structs.PermissionActionAuditRead), func(c *gin.Context) {
+		listAuditLog(c, services)
 	})
 }

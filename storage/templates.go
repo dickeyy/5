@@ -34,6 +34,22 @@ type UpdateCaseTemplateParams struct {
 	Audit      *structs.AuditLogEntry
 }
 
+type ListAuditLogEntriesParams struct {
+	GuildID            string
+	ActorDiscordUserID string
+	Action             string
+	ResourceType       string
+	ResourceID         string
+	Result             structs.AuditResult
+	Limit              int
+	Offset             int
+}
+
+type ListAuditLogEntriesResult struct {
+	Entries []structs.AuditLogEntry
+	Total   int64
+}
+
 func (s *Store) CreateCaseTemplate(ctx context.Context, params CreateCaseTemplateParams) (*ExpandedCaseTemplate, error) {
 	if s == nil || s.db == nil {
 		return nil, errors.New("database not connected")
@@ -250,6 +266,60 @@ func (s *Store) ListAuditLogEntries(ctx context.Context, guildID string) ([]stru
 	}
 
 	return entries, nil
+}
+
+func (s *Store) ListAuditLogEntriesFiltered(ctx context.Context, params ListAuditLogEntriesParams) (*ListAuditLogEntriesResult, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("database not connected")
+	}
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := params.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	var total int64
+	if err := filteredAuditQuery(s.db.WithContext(ctx).Model(&structs.AuditLogEntry{}), params).Count(&total).Error; err != nil {
+		return nil, fmt.Errorf("count audit log entries: %w", err)
+	}
+
+	var entries []structs.AuditLogEntry
+	if err := filteredAuditQuery(s.db.WithContext(ctx).Model(&structs.AuditLogEntry{}), params).
+		Order("created_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&entries).Error; err != nil {
+		return nil, fmt.Errorf("list filtered audit log entries: %w", err)
+	}
+
+	return &ListAuditLogEntriesResult{Entries: entries, Total: total}, nil
+}
+
+func filteredAuditQuery(query *gorm.DB, params ListAuditLogEntriesParams) *gorm.DB {
+	query = query.Where("guild_id = ?", params.GuildID)
+	if params.ActorDiscordUserID != "" {
+		query = query.Where("actor_discord_user_id = ?", params.ActorDiscordUserID)
+	}
+	if params.Action != "" {
+		query = query.Where("action = ?", params.Action)
+	}
+	if params.ResourceType != "" {
+		query = query.Where("resource_type = ?", params.ResourceType)
+	}
+	if params.ResourceID != "" {
+		query = query.Where("resource_id = ?", params.ResourceID)
+	}
+	if params.Result != "" {
+		query = query.Where("result = ?", params.Result)
+	}
+	return query
 }
 
 func getCaseTemplateExpanded(db *gorm.DB, guildID, templateID string) (*ExpandedCaseTemplate, error) {

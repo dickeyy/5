@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/quackdiscord/bot/app"
 	"github.com/rs/zerolog/log"
 )
 
@@ -24,6 +25,8 @@ func Logger(c *gin.Context) {
 	}
 
 	event.
+		Str("request_id", app.RequestIDFromContext(c.Request.Context())).
+		Str("correlation_id", app.CorrelationIDFromContext(c.Request.Context())).
 		Str("method", c.Request.Method).
 		Str("path", path).
 		Int("status", c.Writer.Status()).

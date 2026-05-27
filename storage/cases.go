@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/quackdiscord/bot/structs"
@@ -32,6 +33,27 @@ type CountTemplateCasesForTargetParams struct {
 	Since               *time.Time
 }
 
+type ListCasesParams struct {
+	GuildID                string
+	TargetDiscordUserID    string
+	ModeratorDiscordUserID string
+	TemplateID             string
+	Status                 structs.CaseStatus
+	Limit                  int
+	Offset                 int
+}
+
+type ListCasesResult struct {
+	Cases []structs.Case
+	Total int64
+}
+
+type TargetCaseSummary struct {
+	Total      int64
+	ByStatus   map[structs.CaseStatus]int64
+	ByTemplate map[string]int64
+}
+
 type ClaimedCaseAction struct {
 	Case      structs.Case
 	Execution structs.CaseActionExecution
@@ -56,12 +78,16 @@ type CompleteCaseActionParams struct {
 	EventType           structs.CaseEventType
 	EventBody           string
 	EventMetadataJSON   string
+	CorrelationID       string
+	RequestID           string
 }
 
 type SkipCaseActionsParams struct {
 	CaseID        string
 	AfterPosition int
 	Reason        string
+	CorrelationID string
+	RequestID     string
 }
 
 func (s *Store) CreateCase(ctx context.Context, params CreateCaseParams) (*CreatedCase, error) {
@@ -134,6 +160,9 @@ func (s *Store) CreateCase(ctx context.Context, params CreateCaseParams) (*Creat
 			if actionExecutions[i].IdempotencyKey == "" {
 				actionExecutions[i].IdempotencyKey = fmt.Sprintf("case:%s:action:%d", caseModel.ID, actionExecutions[i].Position)
 			}
+			if actionExecutions[i].CorrelationID == "" {
+				actionExecutions[i].CorrelationID = caseModel.CorrelationID
+			}
 			if err := prepareULIDModel(&actionExecutions[i].ULIDModel, now); err != nil {
 				return fmt.Errorf("prepare case action execution model: %w", err)
 			}
@@ -201,6 +230,107 @@ func (s *Store) ListCases(ctx context.Context, guildID string) ([]structs.Case, 
 	return cases, nil
 }
 
+func (s *Store) ListCasesFiltered(ctx context.Context, params ListCasesParams) (*ListCasesResult, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("database not connected")
+	}
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := params.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	var total int64
+	if err := filteredCasesQuery(s.db.WithContext(ctx).Model(&structs.Case{}), params).Count(&total).Error; err != nil {
+		return nil, fmt.Errorf("count cases: %w", err)
+	}
+
+	var cases []structs.Case
+	if err := filteredCasesQuery(s.db.WithContext(ctx).Model(&structs.Case{}), params).
+		Order("case_number DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&cases).Error; err != nil {
+		return nil, fmt.Errorf("list filtered cases: %w", err)
+	}
+
+	return &ListCasesResult{Cases: cases, Total: total}, nil
+}
+
+func (s *Store) GetCaseByIDOrNumber(ctx context.Context, guildID, caseRef string) (*structs.Case, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("database not connected")
+	}
+
+	query := s.db.WithContext(ctx).Where("guild_id = ?", guildID)
+	if caseNumber, err := strconv.ParseUint(caseRef, 10, 64); err == nil && strconv.FormatUint(caseNumber, 10) == caseRef {
+		query = query.Where("case_number = ?", caseNumber)
+	} else {
+		query = query.Where("id = ?", caseRef)
+	}
+
+	var caseModel structs.Case
+	if err := query.First(&caseModel).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get case by id or number: %w", err)
+	}
+
+	return &caseModel, nil
+}
+
+func (s *Store) TargetCaseSummary(ctx context.Context, guildID, targetDiscordUserID string) (*TargetCaseSummary, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("database not connected")
+	}
+
+	summary := &TargetCaseSummary{
+		ByStatus:   map[structs.CaseStatus]int64{},
+		ByTemplate: map[string]int64{},
+	}
+
+	targetCases := func() *gorm.DB {
+		return s.db.WithContext(ctx).Model(&structs.Case{}).
+			Where("guild_id = ?", guildID).
+			Where("target_discord_user_id = ?", targetDiscordUserID)
+	}
+	if err := targetCases().Count(&summary.Total).Error; err != nil {
+		return nil, fmt.Errorf("count target cases: %w", err)
+	}
+
+	var statusRows []struct {
+		Status structs.CaseStatus
+		Count  int64
+	}
+	if err := targetCases().Select("status, COUNT(*) AS count").Group("status").Scan(&statusRows).Error; err != nil {
+		return nil, fmt.Errorf("count target cases by status: %w", err)
+	}
+	for _, row := range statusRows {
+		summary.ByStatus[row.Status] = row.Count
+	}
+
+	var templateRows []struct {
+		TemplateID string
+		Count      int64
+	}
+	if err := targetCases().Select("COALESCE(template_id, '') AS template_id, COUNT(*) AS count").Group("template_id").Scan(&templateRows).Error; err != nil {
+		return nil, fmt.Errorf("count target cases by template: %w", err)
+	}
+	for _, row := range templateRows {
+		summary.ByTemplate[row.TemplateID] = row.Count
+	}
+
+	return summary, nil
+}
+
 func (s *Store) ListCaseEvents(ctx context.Context, caseID string) ([]structs.CaseEvent, error) {
 	if s == nil || s.db == nil {
 		return nil, errors.New("database not connected")
@@ -225,6 +355,51 @@ func (s *Store) ListCaseActionExecutions(ctx context.Context, caseID string) ([]
 	}
 
 	return executions, nil
+}
+
+func (s *Store) ListCaseActionAttempts(ctx context.Context, executionIDs []string) ([]structs.CaseActionAttempt, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("database not connected")
+	}
+	if len(executionIDs) == 0 {
+		return nil, nil
+	}
+
+	var attempts []structs.CaseActionAttempt
+	if err := s.db.WithContext(ctx).
+		Where("execution_id IN ?", executionIDs).
+		Order("execution_id ASC, attempt_number ASC").
+		Find(&attempts).Error; err != nil {
+		return nil, fmt.Errorf("list case action attempts: %w", err)
+	}
+
+	return attempts, nil
+}
+
+func filteredCasesQuery(query *gorm.DB, params ListCasesParams) *gorm.DB {
+	query = query.Where("guild_id = ?", params.GuildID)
+	if params.TargetDiscordUserID != "" {
+		query = query.Where("target_discord_user_id = ?", params.TargetDiscordUserID)
+	}
+	if params.ModeratorDiscordUserID != "" {
+		query = query.Where("moderator_discord_user_id = ?", params.ModeratorDiscordUserID)
+	}
+	if params.TemplateID != "" {
+		query = query.Where("template_id = ?", params.TemplateID)
+	}
+	if params.Status != "" {
+		query = query.Where("status = ?", params.Status)
+	}
+	return query
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func nextCaseNumber(tx *gorm.DB, guildID string) (uint64, error) {
@@ -475,6 +650,8 @@ func createCaseActionAudit(tx *gorm.DB, execution structs.CaseActionExecution, p
 		ResourceID:    execution.ID,
 		Result:        resultValue,
 		FailureReason: params.ErrorMessage,
+		CorrelationID: firstNonEmpty(params.CorrelationID, execution.CorrelationID, caseModel.CorrelationID),
+		RequestID:     params.RequestID,
 		MetadataJSON: marshalJSONObject(map[string]any{
 			"case_id":        caseModel.ID,
 			"case_number":    caseModel.CaseNumber,
@@ -503,6 +680,8 @@ func createSkippedCaseActionAudit(tx *gorm.DB, execution structs.CaseActionExecu
 		ResourceID:    execution.ID,
 		Result:        structs.AuditResultFailure,
 		FailureReason: params.Reason,
+		CorrelationID: firstNonEmpty(params.CorrelationID, execution.CorrelationID, caseModel.CorrelationID),
+		RequestID:     params.RequestID,
 		MetadataJSON: marshalJSONObject(map[string]any{
 			"case_id":                caseModel.ID,
 			"case_number":            caseModel.CaseNumber,

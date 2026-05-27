@@ -21,7 +21,8 @@ func LoadConfig() {
 	Config = &structs.Config{
 		Environment: env,
 		API: structs.APIConfig{
-			Port: getEnvWithDefault("API_PORT", "8080"),
+			Port:           getEnvWithDefault("API_PORT", "8080"),
+			OpsStatusToken: getEnvWithDefault("OPS_STATUS_TOKEN", ""),
 		},
 		Discord: structs.DiscordConfig{
 			Token:            getEnvWithEnvironmentOverride("DISCORD_TOKEN", env, true),

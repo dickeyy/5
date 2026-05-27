@@ -182,7 +182,7 @@ func TestActionServiceFailureSkipsLaterActionsUnlessContinueOnError(t *testing.T
 }
 
 func TestActionServiceDoesNotNotifyForUnsupportedAction(t *testing.T) {
-	ctx := context.Background()
+	ctx := app.ContextWithTrace(context.Background(), "req-action-1", "corr-action-1")
 	store := newMigratedStore(t)
 	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
 	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
@@ -213,6 +213,30 @@ func TestActionServiceDoesNotNotifyForUnsupportedAction(t *testing.T) {
 	}
 	if actions[0].Status != structs.ActionExecutionFailed {
 		t.Fatalf("expected unsupported action to fail, got %+v", actions[0])
+	}
+	if actions[0].LastErrorCode != "action_not_implemented" || actions[0].NextRetryAt != nil {
+		t.Fatalf("expected visible non-retryable unsupported action, got %+v", actions[0])
+	}
+	attempts, err := store.ListCaseActionAttempts(ctx, []string{actions[0].ID})
+	if err != nil {
+		t.Fatalf("list attempts: %v", err)
+	}
+	if len(attempts) != 1 || attempts[0].ErrorCode != "action_not_implemented" {
+		t.Fatalf("expected failed unsupported attempt, got %+v", attempts)
+	}
+	audits, err := store.ListAuditLogEntries(ctx, modContext.Guild.ID)
+	if err != nil {
+		t.Fatalf("list audits: %v", err)
+	}
+	var failureAudit *structs.AuditLogEntry
+	for i := range audits {
+		if audits[i].Action == "case_action.failed" {
+			failureAudit = &audits[i]
+			break
+		}
+	}
+	if failureAudit == nil || failureAudit.RequestID != "req-action-1" || failureAudit.CorrelationID != "corr-action-1" {
+		t.Fatalf("expected traced action failure audit, got %+v", audits)
 	}
 }
 

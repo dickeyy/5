@@ -1,6 +1,8 @@
 package events
 
 import (
+	"context"
+
 	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/discord"
 	"github.com/quackdiscord/bot/services"
@@ -23,8 +25,10 @@ func msgCreate(_ *discordgo.Session, data *discordgo.MessageCreate) {
 }
 
 // msgCreateHandler is the actual handler that processes the message create event
-func msgCreateHandler(s structs.DataStore, data any) {
+func msgCreateHandler(ctx context.Context, s structs.DataStore, data any) error {
 	// msg := data.(*discordgo.MessageCreate)
 	// do something here
+	_ = ctx
 	_ = s
+	return nil
 }
