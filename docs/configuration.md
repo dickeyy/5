@@ -37,6 +37,44 @@ Configured in `lib/config.go`.
 | `EVENT_QUEUE_SIZE` | no | In-process queue buffer size. Defaults to `1000`. |
 | `EVENT_QUEUE_WORKERS` | no | Number of queue workers. Defaults to `3`. |
 
+`.env.example` mirrors the local Compose workflow and includes the same
+development-oriented defaults used by `compose.yaml`. The app service profile in
+`compose.yaml` also injects container-local values for `DATABASE_DSN` and
+`REDIS_URL`, so those two settings do not need to point at `127.0.0.1` when the
+service runs inside Compose.
+
+## Compose-Specific Notes
+
+The dependency-only workflow and the full app-container workflow use the same
+env names, but with different responsibilities:
+
+- `docker compose up -d` expects your host-side `.env` to point at
+  `127.0.0.1:3306` and `127.0.0.1:6379`
+- `docker compose --profile app up --build` injects container-local
+  `DATABASE_DSN` and `REDIS_URL` values for the app service
+- Discord and auth-related env vars still need to be populated by your local
+  `.env` when the app profile is enabled
+
+In practice, the variables that matter specifically for the app container
+profile are the app runtime settings and Discord/auth credentials from
+`.env.example`, especially:
+
+- `ENVIRONMENT`
+- `API_PORT`
+- `DEV_DISCORD_TOKEN`
+- `DEV_DISCORD_APP_ID`
+- `DEV_DISCORD_CLIENT_SECRET`
+- `DISCORD_OAUTH_REDIRECT_URI`
+- `DISCORD_COMMAND_GUILD_ID`
+- `DISCORD_COMMAND_PRUNE`
+- `AUTH_SESSION_COOKIE_NAME`
+- `AUTH_SESSION_TTL_HOURS`
+- `AUTH_STATE_TTL_MINUTES`
+- `AUTH_POST_LOGIN_REDIRECT`
+- `AUTH_COOKIE_SECURE`
+- `EVENT_QUEUE_SIZE`
+- `EVENT_QUEUE_WORKERS`
+
 ## Local Auth and CORS Notes
 
 The API server only allows credentialed browser requests from
@@ -63,6 +101,8 @@ Relevant files:
 
 - `lib/config.go`
 - `structs/config.go`
+- `.env.example`
+- `compose.yaml`
 - `api/server.go`
 - `services/db.go`
 - `services/redis.go`

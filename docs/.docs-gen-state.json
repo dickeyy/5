@@ -1,5 +1,5 @@
 {
-  "last_successful_update_at": "2026-05-26T22:35:54Z",
-  "last_processed_commit": "9e2d10cf27e5b3fa4b33729cfb970cf9a729eebf",
-  "notes": "Added focused module docs for the action engine, case pipeline, command registry, and event queue, and linked them from the top-level docs index."
+  "last_successful_update_at": "2026-05-27T00:33:56Z",
+  "last_processed_commit": "6bb72ce553a627872ca9d9a02cb150fab0add753",
+  "notes": "Documented the Docker runtime packaging and the Discord interaction dispatcher and UI helper infrastructure."
 }

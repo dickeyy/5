@@ -36,6 +36,9 @@ end-to-end setup:
 - case level selection and snapshotting in `app/cases.go`
 - action retries, notifications, and failure handling in `app/actions.go`
 - route auth and guild-context wiring in `api/routes/router_test.go`
+- interaction dispatch, deferred responses, and component/modal routing in
+  `discord/interactions/dispatcher_test.go`
+- Discord response helper output shape in `discord/ui/responses_test.go`
 
 Relevant files:
 
@@ -45,4 +48,6 @@ Relevant files:
 - `app/templates_test.go`
 - `app/cases_test.go`
 - `app/actions_test.go`
+- `discord/interactions/dispatcher_test.go`
+- `discord/ui/responses_test.go`
 - `storage/migrations_test.go`

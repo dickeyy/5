@@ -4,7 +4,8 @@
 
 Quack v5 currently runs as one Go process that starts the database connection,
 Redis client, schema migrations, in-process event queue, Discord session, slash
-commands, and the HTTP API. The startup path is implemented in `main.go`.
+commands, interaction dispatcher, and the HTTP API. The startup path is
+implemented in `main.go`.
 
 Startup order:
 
@@ -15,7 +16,8 @@ Startup order:
 5. Initialize and start the in-process event queue in `services/event-queue.go`.
 6. Connect the Discord session in `discord/discord.go`.
 7. Build app services in `app/app.go`.
-8. Register slash commands in `discord/commands/registry.go`.
+8. Register slash commands and install the interaction dispatcher in
+   `discord/commands/registry.go`.
 9. Re-enqueue pending case actions with `app.EnqueuePendingCaseActions` in `app/actions_queue.go`.
 10. Start the Gin API in `api/server.go`.
 
@@ -29,6 +31,24 @@ Relevant files:
 - `storage/migrations.go`
 - `app/app.go`
 - `api/server.go`
+
+## Container Packaging
+
+The repository now includes first-party local container packaging:
+
+- `compose.yaml` defines MySQL and Redis for the normal local workflow.
+- The optional `app` profile builds the Go service from `Dockerfile`.
+- The `app` service waits for healthy MySQL and Redis containers before it
+  starts.
+
+This packaging is for local runtime convenience and smoke testing. The core
+runtime architecture is still the single Go process described above.
+
+Relevant files:
+
+- `compose.yaml`
+- `Dockerfile`
+- `.env.example`
 
 ## Layering
 
@@ -83,6 +103,32 @@ Discord is currently both an operator surface and an execution surface.
 Commands are registered during startup, and `/case add` is implemented against
 the same application services used by the API. See `discord/commands/case.go`.
 
+The current Discord stack has three layers:
+
+- `discord/commands/`: command definitions, command sync, and command lookup
+- `discord/interactions/`: runtime dispatch for commands, autocomplete,
+  components, and modal submits
+- `discord/ui/`: message, edit, response, embed, and custom-ID helpers
+
+`commands.Register(...)` wires the dispatcher into the Discord session through
+`interactions.NewDispatcher(...)`. Incoming application commands are resolved by
+name through the command registry. Components and modals are resolved through
+`ComponentRegistry` using decoded custom IDs.
+
+Handler execution has two paths:
+
+- immediate responses return a `discordgo.InteractionResponse` directly
+- async responses first defer, then run a task that edits the original
+  interaction response through the responder abstraction
+
+The dispatcher also recovers from panics and converts task failures into a
+standard error edit, which keeps the transport layer consistent across
+commands.
+
+Component and modal infrastructure exists now, but current production
+registration is still command-centric. `/case` remains the only registered
+command, and broad component/modal handler registration has not been added yet.
+
 The working rule for current backend design is that Discord permissions are the
 foundation for guild authorization, while templates and cases remain backend
 records. The product-level rationale is described in `v5.md`.
@@ -92,6 +138,11 @@ Relevant files:
 - `discord/discord.go`
 - `discord/commands/registry.go`
 - `discord/commands/case.go`
+- `discord/interactions/dispatcher.go`
+- `discord/interactions/components.go`
+- `discord/ui/message.go`
+- `discord/ui/responses.go`
+- `discord/ui/views/case.go`
 - `app/guilds.go`
 - `v5.md`
 
@@ -173,6 +224,7 @@ Module docs for this area:
 - `docs/modules/action-engine.md`
 - `docs/modules/event-queue.md`
 - `docs/modules/case-pipeline.md`
+- `docs/modules/discord-interactions.md`
 
 ## Data Model
 
@@ -206,4 +258,5 @@ For subsystem-level notes, use:
 - `docs/modules/action-engine.md`
 - `docs/modules/case-pipeline.md`
 - `docs/modules/command-registry.md`
+- `docs/modules/discord-interactions.md`
 - `docs/modules/event-queue.md`

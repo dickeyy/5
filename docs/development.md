@@ -38,6 +38,22 @@ waits for both health checks before starting.
 There is no Makefile or task runner in this checkout. The repo is driven
 directly through `go` commands and environment variables.
 
+## Docker Assets
+
+The container assets are intentionally small:
+
+- `compose.yaml` defines the default local MySQL and Redis services
+- `Dockerfile` builds a single static `quack` binary into an Alpine runtime
+  image
+- `.env.example` provides the env names expected by the Compose workflow
+
+Use `docker compose up -d` when you only want the local data services and plan
+to run `go run .` on the host.
+
+Use `docker compose --profile app up --build` when you want Compose to run the
+Quack process as well. In that mode, the app container uses `mysql` and `redis`
+service hostnames instead of `127.0.0.1`.
+
 ## Common Commands
 
 Start the app:
@@ -102,5 +118,8 @@ Relevant files:
 - `app/app.go`
 - `api/routes/router.go`
 - `discord/commands/case.go`
+- `compose.yaml`
+- `Dockerfile`
+- `.env.example`
 - `website-agent-plan.md`
 - `v5.md`
