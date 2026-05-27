@@ -1,5 +1,5 @@
 {
-  "last_successful_update_at": "2026-05-27T00:33:56Z",
-  "last_processed_commit": "6bb72ce553a627872ca9d9a02cb150fab0add753",
-  "notes": "Documented the Docker runtime packaging and the Discord interaction dispatcher and UI helper infrastructure."
+  "last_successful_update_at": "2026-05-27T06:38:33Z",
+  "last_processed_commit": "de350993bb2a431e4d89ccbf93084edf43ab165c",
+  "notes": "Reviewed 6bb72ce553a627872ca9d9a02cb150fab0add753..de350993bb2a431e4d89ccbf93084edf43ab165c and documented phase 8 ops status, request tracing, and case read surfaces."
 }

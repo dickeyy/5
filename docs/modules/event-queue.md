@@ -35,7 +35,8 @@ Behavior by method:
 
 - `Init`: allocates the queue with `lib.Config.EventQueue.Size`
 - `Start`: flips `active` and launches `workers` goroutines
-- `Enqueue`: drops the event if the queue is inactive or the buffer is full
+- `Enqueue`: returns whether the event was accepted and records a drop counter
+  if the queue is inactive or the buffer is full
 - `Process`: executes the handler and recovers panics
 - `Stop`: closes the channel and waits for workers to exit
 - `IsActive` and `QueueSize`: read-only helpers
@@ -49,10 +50,15 @@ The queue is best-effort, in-process delivery:
 - no blocking backpressure for producers
 - no dead-letter handling
 
-When the buffer is full, `Enqueue` logs and drops the event. When the process
-restarts, pending actions are recovered separately by
+When the buffer is full, `Enqueue` logs and drops the event. Queue events carry
+an event ID, creation timestamp, request ID, and correlation ID. When the
+process restarts, pending actions are recovered separately by
 `app.EnqueuePendingCaseActions`, which queries storage for executable cases and
 re-enqueues them.
+
+Queue stats are exposed through guarded ops status responses and include buffer
+size, worker count, active state, queue depth, accepted events, dropped events,
+processed events, failed events, and panics.
 
 ## Current Workload
 

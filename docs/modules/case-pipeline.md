@@ -14,6 +14,17 @@ Case creation is exposed through two entrypoints:
 Both entrypoints eventually call `CaseService.Create(...)` through
 `app.Services`.
 
+Staff dashboard case reads are exposed through the HTTP API:
+
+- `GET /guilds/:discordGuildID/cases`
+- `GET /guilds/:discordGuildID/cases/:caseRef`
+- `GET /guilds/:discordGuildID/users/:targetDiscordUserID/cases`
+
+These routes require the same foundation staff permission used for case
+creation. `caseRef` resolves to a per-guild case number when it is numeric and
+to a case ULID otherwise. List routes use offset pagination and return newest
+cases first.
+
 ## Creation Flow
 
 1. Validate guild context, permission, template ID, target user, source, and
@@ -61,6 +72,18 @@ Current consumers include:
 Changing the snapshot shape needs migration discipline because old cases keep
 their stored JSON.
 
+## Dashboard Read Contract
+
+Case list responses include the selected level snapshot and current action
+summary for each case. Case detail responses include the case fields, template
+snapshot, action executions, action attempts grouped under each execution, and
+timeline events ordered oldest first.
+
+Target user history is the case list scoped to one Discord user plus summary
+counts by status and template. Audit log reads are exposed separately through
+`GET /guilds/:discordGuildID/audit-log`, require `audit.read`, and support
+offset pagination plus filters for actor, action, resource, and result.
+
 ## Action Execution Rows
 
 For each selected template action, `CaseService.Create` snapshots:
@@ -105,6 +128,7 @@ Resolved timestamps are currently written automatically when the case reaches
 Relevant files:
 
 - `app/cases.go`
+- `app/audit.go`
 - `app/templates.go`
 - `api/routes/cases.go`
 - `discord/commands/case.go`

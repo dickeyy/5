@@ -20,6 +20,7 @@ Configured in `lib/config.go`.
 | --- | --- | --- |
 | `ENVIRONMENT` | no | Runtime mode. Defaults to `dev`. |
 | `API_PORT` | no | API listen port. Defaults to `8080`. |
+| `OPS_STATUS_TOKEN` | no | Enables global `GET /ops/status` when supplied and matched by `X-Quack-Ops-Key`. |
 | `DATABASE_DSN` | yes | MySQL DSN for GORM. |
 | `REDIS_URL` | yes | Redis connection URL. |
 | `DISCORD_TOKEN` or `DEV_DISCORD_TOKEN` | yes | Discord bot token. `DEV_` override is used when `ENVIRONMENT=dev`. |
@@ -61,6 +62,7 @@ profile are the app runtime settings and Discord/auth credentials from
 
 - `ENVIRONMENT`
 - `API_PORT`
+- `OPS_STATUS_TOKEN`
 - `DEV_DISCORD_TOKEN`
 - `DEV_DISCORD_APP_ID`
 - `DEV_DISCORD_CLIENT_SECRET`

@@ -11,6 +11,7 @@ remain the higher-level planning references.
 - `architecture.md`: service layout, startup flow, request flow, Discord interaction flow, and action execution.
 - `configuration.md`: environment variables and runtime dependencies.
 - `development.md`: local workflow, Docker usage, commands, and where to make common changes.
+- `release-readiness.md`: phase 8 ops status, tracing, coexistence, and release checklist.
 - `modules/README.md`: focused notes for core runtime modules and pipelines.
 - `testing.md`: current test harness and scope limits.
 
@@ -19,7 +20,7 @@ remain the higher-level planning references.
 The live backend currently has four main runtime surfaces:
 
 - Discord bot startup, slash-command registration, and interaction dispatch in `main.go`, `discord/commands/`, and `discord/interactions/`.
-- HTTP API routes for status, auth, guild context, templates, and case creation in `api/server.go` and `api/routes/`.
+- HTTP API routes for status, ops status, auth, guild context, templates, case reads and creation, and guild audit reads in `api/server.go` and `api/routes/`.
 - Case-action queue processing in `services/event-queue.go` and `app/actions_queue.go`.
 - Local container packaging for MySQL, Redis, and the app profile in `compose.yaml` and `Dockerfile`.
 

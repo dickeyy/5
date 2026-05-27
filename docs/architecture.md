@@ -73,6 +73,7 @@ for those origins.
 `api/routes/router.go` wires the live routes:
 
 - `GET /status`
+- `GET /ops/status`
 - `GET /auth/discord/login`
 - `GET /auth/discord/callback`
 - `GET /auth/me`
@@ -80,22 +81,36 @@ for those origins.
 - `GET /guilds`
 - `GET /guilds/:discordGuildID/me`
 - Template CRUD under `/guilds/:discordGuildID/templates`
+- `GET /guilds/:discordGuildID/cases`
 - `POST /guilds/:discordGuildID/cases`
+- `GET /guilds/:discordGuildID/cases/:caseRef`
+- `GET /guilds/:discordGuildID/users/:targetDiscordUserID/cases`
+- `GET /guilds/:discordGuildID/audit-log`
+- `GET /guilds/:discordGuildID/ops/status`
 
 Auth sessions are loaded by `api/middleware/auth.go`. Guild-scoped access is
 resolved by `api/middleware/guild.go`, which builds `GuildStaffContext` through
 the app layer and checks permission actions before handlers run.
+Request and correlation IDs are installed by `api/middleware/request.go` and
+are echoed through response headers, logs, case records, queued action events,
+and audit rows.
+
+`GET /ops/status` is guarded by `X-Quack-Ops-Key` plus `OPS_STATUS_TOKEN`.
+Guild-scoped ops status also allows Discord guild owners and Administrators.
 
 Relevant files:
 
 - `api/server.go`
 - `api/routes/router.go`
+- `api/routes/ops.go`
 - `api/routes/auth.go`
 - `api/routes/guilds.go`
 - `api/routes/templates.go`
 - `api/routes/cases.go`
+- `app/ops.go`
 - `api/middleware/auth.go`
 - `api/middleware/guild.go`
+- `api/middleware/request.go`
 
 ## Discord Surface
 
@@ -209,6 +224,11 @@ Notification behavior: `CaseTemplateLevel`, `CaseTemplateLevelAction`, and
 `CaseActionExecution` persist notification metadata. Warning notification comes
 from the selected level; moderation-action notification comes from the action.
 This is part of the current schema applied by `storage/migrations.go`.
+
+The event queue tracks accepted, dropped, processed, failed, and panicked event
+counters. Queue events carry request and correlation IDs into action processing
+so system audit rows can be tied back to the case creation request or Discord
+interaction.
 
 Relevant files:
 
