@@ -1,109 +1,87 @@
-# TODO
-
-## Discord Actions
-
-- Implement real Discord API execution for `timeout_user`.
-- Implement real Discord API execution for `kick_user`.
-- Implement real Discord API execution for `ban_user`.
-- Add tests for real timeout, kick, and ban Discord action behavior with mocked Discord responses.
-- Add rate-limit handling tests for Discord API failures.
-- Add permission and hierarchy checks for real moderation actions before executing timeout, kick, or ban.
-- Add dashboard warnings when a configured action type is not executable yet.
-
-## Guild Settings
-
-- Add guild settings storage and API endpoints.
-- Add guild-wide mod-log channel configuration.
-- Add Discord mod-log mirroring from audit/case events.
-- Add guild-wide notification settings.
-- Add bot customization settings for guilds.
-
-## Cases
-
-- Add case edit endpoints.
-- Add case void endpoints.
-- Add audit entries for case edits and case voids.
-- Add dashboard API support for member-facing case views.
-- Add member-facing dashboard permissions and route behavior.
-- Add private staff-only case notes.
-- Add public/member-visible case notes if needed.
-- Add support for Discord source message links in `/case add` when available.
-- Add attachment or evidence metadata support for cases.
-- Add case search/filter improvements beyond current basic filters.
-
-## Templates
-
-- Add template context field definitions.
-- Add validation for required template context fields during case creation.
-- Add Discord prompts or modal flow for required template context fields.
-- Add reason override policy so templates can control whether moderators may override reasons.
-- Add template archive/restore behavior if archived templates need to be reactivated.
-
-## Discord Commands
-
-- Add Discord case lookup command.
-- Add Discord case list/history command.
-- Add Discord target-user case history command.
-- Add Discord staff review helper commands.
-- Add pagination helpers for Discord case/history views.
-- Add Discord appeal commands.
-- Add Discord ticket commands.
-
-## Appeals
-
-- Add appeal workflow APIs.
-- Add appeal event/timeline behavior.
-- Add configurable appeal forms per guild or template.
-- Add staff appeal review APIs.
-- Add member appeal submission APIs.
-- Add dashboard appeal management support.
-
-## Tickets
-
-- Add ticket workflow APIs.
-- Add ticket event/timeline behavior.
-- Add configurable ticket settings.
-- Add member ticket creation APIs.
-- Add staff ticket review and resolution APIs.
-- Add dashboard ticket management support.
-
-## Migration And Compatibility
-
-- Add v4/v5 import tooling if historical v4 data needs to move into v5.
-- Add a dry-run import report for legacy v4 data.
-- Add a v4-to-v5 case/template mapping document before any real import.
-- Replace or supplement `AutoMigrate` with managed production migrations.
-
-## Queue And Reliability
-
-- Add durable delayed retry handling for action retries.
-- Add dead-letter or replay handling for dropped/failed queue work.
-- Add a persistent queue or external worker option if in-process queue limits become a problem.
-- Add ops visibility for delayed retry timers that are only in memory.
-- Add tests for graceful shutdown behavior.
-
-## API And Observability
-
-- Add generated or maintained API contract documentation for dashboard consumers.
-- Add structured error response shape across all API routes.
-- Add request/correlation ID fields to API error responses.
-- Add metrics or logs for API auth failures and permission denials.
-- Add operational guidance for rotating `OPS_STATUS_TOKEN`.
-
-## Testing And Deployment
-
-- Add MySQL-backed integration tests for schema, locking, JSON behavior, and transaction isolation.
-- Add smoke tests for Docker Compose app startup.
-- Add smoke tests for `/status` and guarded ops status in a running app container.
-- Add production deployment documentation.
-- Add backup and restore documentation for MySQL and Redis state.
-
-## Notifications
-
-- Add user-facing dashboard links in DM notifications.
-- Add configurable DM notification text beyond the current default behavior.
-
-## Docs
-
-- Update the dashboard handoff doc now that case list, detail, history, audit, ops status, and trace behavior exist.
-- Remove stale roadmap notes from docs when completed features make them inaccurate.
+- [ ] Implement real Discord timeout execution for `timeout_user`.
+- [ ] Implement real Discord kick execution for `kick_user`.
+- [ ] Implement real Discord ban execution for `ban_user`.
+- [ ] Add Discord action config validation for timeout duration, ban delete-message days, and audit reasons.
+- [ ] Add Discord permission and role hierarchy checks before timeout, kick, ban, unban, or purge actions.
+- [ ] Add Discord rate-limit and retry handling for moderation action failures.
+- [ ] Add mocked Discord tests for timeout, kick, ban, DM, and retry behavior.
+- [ ] Add `remove_timeout` action support for ending active timeouts.
+- [ ] Add `unban_user` action support for reversing bans.
+- [ ] Add optional temporary ban support with scheduled unban.
+- [ ] Add source-message context support for creating cases from Discord messages.
+- [ ] Add template context field definitions.
+- [ ] Add required context validation during case creation.
+- [ ] Add reason override policy to templates.
+- [ ] Add Discord modal prompts for template-required context fields.
+- [ ] Add template restore behavior for archived templates.
+- [ ] Add case edit service, storage, audit, and API behavior.
+- [ ] Add case void service, storage, audit, and escalation exclusion behavior.
+- [ ] Add case status transition rules for appealed, voided, reopened, and manually resolved cases.
+- [ ] Add member case read service and permissions for users to see their own cases.
+- [ ] Add staff-only case notes service, storage, audit, and Discord views.
+- [ ] Add member-visible case notes if v5 needs public notes.
+- [ ] Add case attachment and evidence metadata support for message links and uploaded files.
+- [ ] Add case search by user, moderator, template, status, date, and text.
+- [ ] Add real Discord `/case view` command.
+- [ ] Add real Discord `/case list` command.
+- [ ] Add real Discord `/case user` history command.
+- [ ] Add real Discord case pagination buttons.
+- [ ] Add real Discord case detail embeds.
+- [ ] Add real Discord user profile embeds with cases, notes, appeals, and tickets.
+- [ ] Replace placeholder Discord component routing with registered case, user, notes, appeals, and ticket handlers.
+- [ ] Replace placeholder Discord modal routing with real context, appeal, ticket, and note submit handlers.
+- [ ] Add Discord command aliases or migration paths for legacy `/warn`, `/ban`, `/kick`, `/timeout`, and `/unban`.
+- [ ] Add Discord purge commands for all, user, bots, attachments, embeds, contains, emoji, and Quack messages.
+- [ ] Add Discord lockdown and unlock commands.
+- [ ] Add Discord ping, help, stats, and server info commands if they remain part of v5.
+- [ ] Add guild settings storage for logging, notifications, appeals, tickets, and bot customization.
+- [ ] Add guild mod-log channel settings.
+- [ ] Add Discord mod-log mirroring from case and audit events.
+- [ ] Add guild notification defaults and custom DM message templates.
+- [ ] Add bot install and guild bootstrap behavior for first-time guild setup.
+- [ ] Add guild lifecycle handling for create, update, and delete events.
+- [ ] Add message cache support for delete and edit logs.
+- [ ] Add message delete, edit, and bulk-delete logging.
+- [ ] Add member join and leave logging.
+- [ ] Add ban and unban event logging.
+- [ ] Add channel delete cleanup for guild settings and honeypots.
+- [ ] Add honeypot storage, setup command, message handling, and action counting.
+- [ ] Add appeal settings storage and validation.
+- [ ] Add appeal creation service for case-linked member submissions.
+- [ ] Add appeal event timeline behavior.
+- [ ] Add appeal review service for accept, reject, and close decisions.
+- [ ] Add appeal decision audit and user notification behavior.
+- [ ] Add Discord appeal open buttons and submit modals.
+- [ ] Add Discord appeal queue and review views.
+- [ ] Add ticket settings storage and validation.
+- [ ] Add ticket creation service for private thread creation.
+- [ ] Add ticket close service with transcript capture.
+- [ ] Add ticket event timeline behavior.
+- [ ] Add ticket queue service and Discord views.
+- [ ] Add ticket create and close Discord buttons.
+- [ ] Add ticket message transcript storage from message events.
+- [ ] Add user notes storage, service, and Discord commands.
+- [ ] Add staff admin notes storage, service, and Discord commands.
+- [ ] Add staff activity and moderation statistics services.
+- [ ] Add staff list, staff view, staff timeline, and staff target Discord commands.
+- [ ] Add bot stats collection for uptime, guild counts, queue stats, storage health, and command usage.
+- [ ] Add owner-only operational commands or remove legacy owner command expectations.
+- [ ] Add v4-to-v5 import mapping for cases, templates, guilds, notes, appeals, tickets, logs, and honeypots.
+- [ ] Add dry-run import reports before writing migrated data.
+- [ ] Add import idempotency so legacy data can be retried safely.
+- [ ] Add command coexistence checks so v4 and v5 slash commands do not collide during rollout.
+- [ ] Add production migration strategy beyond startup `AutoMigrate`.
+- [ ] Add MySQL integration tests for JSON fields, indexes, locking, and transactions.
+- [ ] Add Docker Compose smoke tests for startup, `/status`, command sync, and `/ops/status`.
+- [ ] Add full Discord interaction tests for commands, components, modals, and deferred edits.
+- [ ] Add end-to-end tests for template creation, case creation, action execution, audit rows, and Discord response updates.
+- [ ] Add durable delayed retry handling for case actions.
+- [ ] Add dead-letter or replay handling for failed queue events.
+- [ ] Add queue recovery tests for restart and graceful shutdown.
+- [ ] Add structured API error responses with request and correlation IDs.
+- [ ] Add auth failure and permission denial logs with trace IDs.
+- [ ] Add configurable CORS origins for non-local environments.
+- [ ] Add Discord OAuth token refresh or forced reauth handling.
+- [ ] Add production backup and restore checks for MySQL and Redis.
+- [ ] Add deployment health checks for DB, Redis, Discord, queues, and action capability.
+- [ ] Add release smoke checklist that can run against a real test guild.
