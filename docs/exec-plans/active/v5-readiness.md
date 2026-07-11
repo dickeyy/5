@@ -145,14 +145,24 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 
 #### V5-001M - Versioned migration foundation
 
-- Status: REVIEW_WAIT
+- Status: FIXING
 - Assignment: implementation subagent using `v5-implementation-slice`
 - Branch: `slice/v5-001m-versioned-migrations`
 - Worktree: `/tmp/quack-v5-worktrees/v5-001m`
 - Base branch: `orchestrator/v5-readiness`
 - Commit: `e67e99a`
 - PR/review: [PR #1](https://github.com/dickeyy/5/pull/1); standalone
-  `@codex review` posted 2026-07-11; awaiting actual review
+  `@codex review` posted 2026-07-11; Codex round 1 reviewed `e67e99a` with no
+  findings. Orchestrator validation round 1 REJECTED and returned to owner:
+  - Real MySQL preservation test fails because the fixture compares source JSON
+    text to MySQL's already-normalized stored JSON instead of comparing the
+    pre-migration persisted value.
+  - P1: the ledger checksum covers only hand-maintained prose, so executable
+    migration/schema changes can occur without a checksum mismatch.
+  - P1: MySQL DDL implicitly commits, so current Down-plus-ledger-delete
+    transaction can leave a partially rolled-back schema recorded as applied;
+    no durable rollback-in-progress state or recovery test protects startup.
+  Fixes, real MySQL validation, push, and Codex round 2 are required.
 - Requirements: history must remain understandable; important records are not
   hard-deleted; TODO Database and Storage Reliability.
 - Acceptance criteria:
@@ -701,7 +711,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 | Slice | Status | Branch | PR | Codex rounds | Orchestrator validation |
 | --- | --- | --- | --- | --- | --- |
 | V5-000 | ACCEPTED | orchestration worktree | n/a | n/a | passed |
-| V5-001M | REVIEW_WAIT | `slice/v5-001m-versioned-migrations` | [#1](https://github.com/dickeyy/5/pull/1) | 0 | pending |
+| V5-001M | FIXING | `slice/v5-001m-versioned-migrations` | [#1](https://github.com/dickeyy/5/pull/1) | 1 | rejected round 1 |
 | V5-001 | PLANNED | pending | pending | 0 | pending |
 | V5-002 | PLANNED | pending | pending | 0 | pending |
 | V5-003 | PLANNED | pending | pending | 0 | pending |
@@ -781,8 +791,10 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
   and authorization for external moderation/channel changes.
 - BLOCKER: representative v4 import, production backup/restore, and rollback
   evidence require sanitized v4 data and operator-provided MySQL/Redis targets.
-- BLOCKER: real MySQL migration/locking coverage requires
-  `QUACK_TEST_MYSQL_DSN`; tests must report a skip as missing evidence, not pass.
+- RESOLVED/FAILED 2026-07-11: the existing healthy Compose MySQL can run
+  isolated migration databases through its documented development root account.
+  V5-001M real-MySQL execution is no longer blocked, but orchestrator validation
+  round 1 found one failing MySQL preservation test and returned the slice.
 - RISK: 473 TODO items include manual infrastructure, backup/restore, real-guild,
   and outage rehearsals that require external environments or credentials.
   These remain planned; inability to execute them cannot be silently called a
@@ -817,6 +829,9 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 - 2026-07-11: Existing Discord case tests require the rejected reason override,
   and action tests validate pre-enforcement/generated `send_dm` behavior. Green
   baseline tests therefore prove regression stability, not v5 conformance.
+- 2026-07-11: V5-001M Codex round 1 found no issues, but independent validation
+  caught a failing real-MySQL test plus checksum-integrity and partial-rollback
+  recovery gaps. Review success is not substituted for orchestrator acceptance.
 - 2026-07-11: `TODO.md` is supporting inventory, not proof of incompleteness by
   itself. Items are checked only after implementation and evidence agree with
   `v5.md`; stale or duplicate items will be corrected during owning slices.
