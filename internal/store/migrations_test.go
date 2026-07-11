@@ -75,6 +75,12 @@ func TestRegisteredMigrationsProduceEveryCurrentSchemaFieldAndIndex(t *testing.T
 	}
 }
 
+func TestMigration0001SourceDoesNotDependOnLiveDomainModels(t *testing.T) {
+	if strings.Contains(migration0001Source, "internal/quack/model") {
+		t.Fatal("frozen migration source must use primitive storage types, not live domain aliases")
+	}
+}
+
 func TestMigrateAdoptsCurrentSchemaWithoutLosingHistory(t *testing.T) {
 	db := openSQLiteMigrationDB(t)
 	if err := applyInitialV5Schema(db); err != nil {

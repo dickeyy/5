@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/quackdiscord/bot/internal/quack/model"
 	"gorm.io/gorm"
 )
 
@@ -101,19 +100,19 @@ type migration0001StaffMember struct {
 // migration0001CaseTemplate freezes the template table shape adopted by migration 0001.
 type migration0001CaseTemplate struct {
 	Migration0001ULIDModel
-	GuildID                string             `gorm:"type:char(26);not null;uniqueIndex:idx_case_template_guild_slug,priority:1;index:idx_case_template_guild_enabled,priority:1"`
-	Slug                   string             `gorm:"size:64;not null;uniqueIndex:idx_case_template_guild_slug,priority:2"`
-	Name                   string             `gorm:"size:191;not null"`
-	Description            string             `gorm:"type:text;not null"`
-	ReasonTemplate         string             `gorm:"type:text;not null"`
-	DefaultSeverity        model.CaseSeverity `gorm:"size:32;not null;default:'medium'"`
-	Appealable             bool               `gorm:"not null;default:false"`
-	Enabled                bool               `gorm:"not null;default:true;index:idx_case_template_guild_enabled,priority:2"`
-	Version                uint               `gorm:"not null;default:1"`
-	CreatedByDiscordUserID string             `gorm:"size:32;not null"`
-	UpdatedByDiscordUserID string             `gorm:"size:32;not null"`
-	ArchivedAt             *time.Time         `gorm:"index"`
-	DeletedAt              gorm.DeletedAt     `gorm:"index"`
+	GuildID                string         `gorm:"type:char(26);not null;uniqueIndex:idx_case_template_guild_slug,priority:1;index:idx_case_template_guild_enabled,priority:1"`
+	Slug                   string         `gorm:"size:64;not null;uniqueIndex:idx_case_template_guild_slug,priority:2"`
+	Name                   string         `gorm:"size:191;not null"`
+	Description            string         `gorm:"type:text;not null"`
+	ReasonTemplate         string         `gorm:"type:text;not null"`
+	DefaultSeverity        string         `gorm:"size:32;not null;default:'medium'"`
+	Appealable             bool           `gorm:"not null;default:false"`
+	Enabled                bool           `gorm:"not null;default:true;index:idx_case_template_guild_enabled,priority:2"`
+	Version                uint           `gorm:"not null;default:1"`
+	CreatedByDiscordUserID string         `gorm:"size:32;not null"`
+	UpdatedByDiscordUserID string         `gorm:"size:32;not null"`
+	ArchivedAt             *time.Time     `gorm:"index"`
+	DeletedAt              gorm.DeletedAt `gorm:"index"`
 }
 
 // migration0001CaseTemplateLevel freezes the escalation level shape adopted by migration 0001.
@@ -133,63 +132,63 @@ type migration0001CaseTemplateLevel struct {
 // migration0001CaseTemplateLevelAction freezes the configured action shape adopted by migration 0001.
 type migration0001CaseTemplateLevelAction struct {
 	Migration0001ULIDModel
-	LevelID          string           `gorm:"type:char(26);not null;uniqueIndex:idx_level_action_position,priority:1;index"`
-	Position         int              `gorm:"not null;uniqueIndex:idx_level_action_position,priority:2"`
-	ActionType       model.ActionType `gorm:"size:64;not null;index"`
-	ConfigJSON       string           `gorm:"type:json;not null"`
-	NotifyUser       bool             `gorm:"not null;default:false"`
-	NotificationType string           `gorm:"size:64"`
-	ContinueOnError  bool             `gorm:"not null;default:false"`
-	MaxRetries       uint8            `gorm:"not null;default:0"`
-	RetryBackoffMS   int              `gorm:"not null;default:0"`
-	TimeoutMS        int              `gorm:"not null;default:0"`
-	IdempotencyScope string           `gorm:"size:32;not null;default:'case'"`
-	Enabled          bool             `gorm:"not null;default:true"`
+	LevelID          string `gorm:"type:char(26);not null;uniqueIndex:idx_level_action_position,priority:1;index"`
+	Position         int    `gorm:"not null;uniqueIndex:idx_level_action_position,priority:2"`
+	ActionType       string `gorm:"size:64;not null;index"`
+	ConfigJSON       string `gorm:"type:json;not null"`
+	NotifyUser       bool   `gorm:"not null;default:false"`
+	NotificationType string `gorm:"size:64"`
+	ContinueOnError  bool   `gorm:"not null;default:false"`
+	MaxRetries       uint8  `gorm:"not null;default:0"`
+	RetryBackoffMS   int    `gorm:"not null;default:0"`
+	TimeoutMS        int    `gorm:"not null;default:0"`
+	IdempotencyScope string `gorm:"size:32;not null;default:'case'"`
+	Enabled          bool   `gorm:"not null;default:true"`
 }
 
 // migration0001Case freezes the case history shape adopted by migration 0001.
 type migration0001Case struct {
 	Migration0001ULIDModel
-	GuildID                 string             `gorm:"type:char(26);not null;index:idx_case_guild_case_number,priority:1,unique;index:idx_case_guild_target,priority:1;index:idx_case_guild_mod,priority:1;index:idx_case_guild_status,priority:1"`
-	CaseNumber              uint64             `gorm:"type:bigint unsigned;not null;index:idx_case_guild_case_number,priority:2,unique"`
-	TemplateID              *string            `gorm:"type:char(26);index"`
-	TemplateVersion         uint               `gorm:"not null;default:1"`
-	TemplateSnapshotJSON    string             `gorm:"type:json;not null"`
-	TargetDiscordUserID     string             `gorm:"size:32;not null;index:idx_case_guild_target,priority:2"`
-	ModeratorDiscordUserID  string             `gorm:"size:32;not null;index:idx_case_guild_mod,priority:2"`
-	Reason                  string             `gorm:"type:text;not null"`
-	Severity                model.CaseSeverity `gorm:"size:32;not null;default:'medium'"`
-	Weight                  int                `gorm:"not null;default:1"`
-	Status                  model.CaseStatus   `gorm:"size:32;not null;default:'open';index:idx_case_guild_status,priority:2"`
-	Source                  model.CaseSource   `gorm:"size:32;not null;default:'discord_command';index"`
-	CorrelationID           string             `gorm:"size:128;index"`
-	ContextChannelDiscordID string             `gorm:"size:32"`
-	ContextMessageDiscordID string             `gorm:"size:32"`
-	ContextURL              string             `gorm:"size:1024"`
-	ResolvedAt              *time.Time         `gorm:"index"`
-	ResolvedByDiscordUserID string             `gorm:"size:32"`
-	MetadataJSON            string             `gorm:"type:json;not null"`
+	GuildID                 string     `gorm:"type:char(26);not null;index:idx_case_guild_case_number,priority:1,unique;index:idx_case_guild_target,priority:1;index:idx_case_guild_mod,priority:1;index:idx_case_guild_status,priority:1"`
+	CaseNumber              uint64     `gorm:"type:bigint unsigned;not null;index:idx_case_guild_case_number,priority:2,unique"`
+	TemplateID              *string    `gorm:"type:char(26);index"`
+	TemplateVersion         uint       `gorm:"not null;default:1"`
+	TemplateSnapshotJSON    string     `gorm:"type:json;not null"`
+	TargetDiscordUserID     string     `gorm:"size:32;not null;index:idx_case_guild_target,priority:2"`
+	ModeratorDiscordUserID  string     `gorm:"size:32;not null;index:idx_case_guild_mod,priority:2"`
+	Reason                  string     `gorm:"type:text;not null"`
+	Severity                string     `gorm:"size:32;not null;default:'medium'"`
+	Weight                  int        `gorm:"not null;default:1"`
+	Status                  string     `gorm:"size:32;not null;default:'open';index:idx_case_guild_status,priority:2"`
+	Source                  string     `gorm:"size:32;not null;default:'discord_command';index"`
+	CorrelationID           string     `gorm:"size:128;index"`
+	ContextChannelDiscordID string     `gorm:"size:32"`
+	ContextMessageDiscordID string     `gorm:"size:32"`
+	ContextURL              string     `gorm:"size:1024"`
+	ResolvedAt              *time.Time `gorm:"index"`
+	ResolvedByDiscordUserID string     `gorm:"size:32"`
+	MetadataJSON            string     `gorm:"type:json;not null"`
 }
 
 // migration0001CaseActionExecution freezes the durable action shape adopted by migration 0001.
 type migration0001CaseActionExecution struct {
 	Migration0001ULIDModel
-	CaseID             string                      `gorm:"type:char(26);not null;index:idx_action_execution_case_position,priority:1;index"`
-	TemplateActionID   *string                     `gorm:"type:char(26);index"`
-	Position           int                         `gorm:"not null;index:idx_action_execution_case_position,priority:2"`
-	ActionType         model.ActionType            `gorm:"size:64;not null;index"`
-	Status             model.ActionExecutionStatus `gorm:"size:32;not null;default:'pending';index:idx_action_execution_status_retry,priority:1"`
-	IdempotencyKey     string                      `gorm:"size:191;not null;uniqueIndex"`
-	ConfigSnapshotJSON string                      `gorm:"type:json;not null"`
-	NotifyUser         bool                        `gorm:"not null;default:false"`
-	NotificationType   string                      `gorm:"size:64"`
-	AttemptCount       uint8                       `gorm:"not null;default:0"`
-	MaxRetries         uint8                       `gorm:"not null;default:0"`
-	RetryBackoffMS     int                         `gorm:"not null;default:0"`
-	SafeForRetry       bool                        `gorm:"not null;default:true"`
-	Irreversible       bool                        `gorm:"not null;default:false"`
-	LastErrorCode      string                      `gorm:"size:64"`
-	LastError          string                      `gorm:"type:text"`
+	CaseID             string  `gorm:"type:char(26);not null;index:idx_action_execution_case_position,priority:1;index"`
+	TemplateActionID   *string `gorm:"type:char(26);index"`
+	Position           int     `gorm:"not null;index:idx_action_execution_case_position,priority:2"`
+	ActionType         string  `gorm:"size:64;not null;index"`
+	Status             string  `gorm:"size:32;not null;default:'pending';index:idx_action_execution_status_retry,priority:1"`
+	IdempotencyKey     string  `gorm:"size:191;not null;uniqueIndex"`
+	ConfigSnapshotJSON string  `gorm:"type:json;not null"`
+	NotifyUser         bool    `gorm:"not null;default:false"`
+	NotificationType   string  `gorm:"size:64"`
+	AttemptCount       uint8   `gorm:"not null;default:0"`
+	MaxRetries         uint8   `gorm:"not null;default:0"`
+	RetryBackoffMS     int     `gorm:"not null;default:0"`
+	SafeForRetry       bool    `gorm:"not null;default:true"`
+	Irreversible       bool    `gorm:"not null;default:false"`
+	LastErrorCode      string  `gorm:"size:64"`
+	LastError          string  `gorm:"type:text"`
 	StartedAt          *time.Time
 	FinishedAt         *time.Time
 	NextRetryAt        *time.Time `gorm:"index:idx_action_execution_status_retry,priority:2"`
@@ -199,11 +198,11 @@ type migration0001CaseActionExecution struct {
 // migration0001CaseActionAttempt freezes the action-attempt history shape adopted by migration 0001.
 type migration0001CaseActionAttempt struct {
 	Migration0001ULIDModel
-	ExecutionID         string                    `gorm:"type:char(26);not null;uniqueIndex:idx_action_attempt_execution_number,priority:1;index"`
-	AttemptNumber       uint8                     `gorm:"not null;uniqueIndex:idx_action_attempt_execution_number,priority:2"`
-	Status              model.ActionAttemptStatus `gorm:"size:32;not null;index"`
-	WorkerID            string                    `gorm:"size:64"`
-	StartedAt           time.Time                 `gorm:"not null"`
+	ExecutionID         string    `gorm:"type:char(26);not null;uniqueIndex:idx_action_attempt_execution_number,priority:1;index"`
+	AttemptNumber       uint8     `gorm:"not null;uniqueIndex:idx_action_attempt_execution_number,priority:2"`
+	Status              string    `gorm:"size:32;not null;index"`
+	WorkerID            string    `gorm:"size:64"`
+	StartedAt           time.Time `gorm:"not null"`
 	FinishedAt          *time.Time
 	DurationMS          int64  `gorm:"not null;default:0"`
 	ErrorCode           string `gorm:"size:64"`
@@ -215,14 +214,14 @@ type migration0001CaseActionAttempt struct {
 // migration0001CaseEvent freezes the case-event history shape adopted by migration 0001.
 type migration0001CaseEvent struct {
 	Migration0001ULIDModel
-	CaseID             string                `gorm:"type:char(26);not null;index:idx_case_event_case_created,priority:1"`
-	GuildID            string                `gorm:"type:char(26);not null;index"`
-	EventType          model.CaseEventType   `gorm:"size:64;not null;index"`
-	ActorDiscordUserID string                `gorm:"size:32;index"`
-	ActorType          string                `gorm:"size:32;not null;default:'system'"`
-	Visibility         model.EventVisibility `gorm:"size:32;not null;default:'staff'"`
-	Body               string                `gorm:"type:text;not null"`
-	MetadataJSON       string                `gorm:"type:json;not null"`
+	CaseID             string `gorm:"type:char(26);not null;index:idx_case_event_case_created,priority:1"`
+	GuildID            string `gorm:"type:char(26);not null;index"`
+	EventType          string `gorm:"size:64;not null;index"`
+	ActorDiscordUserID string `gorm:"size:32;index"`
+	ActorType          string `gorm:"size:32;not null;default:'system'"`
+	Visibility         string `gorm:"size:32;not null;default:'staff'"`
+	Body               string `gorm:"type:text;not null"`
+	MetadataJSON       string `gorm:"type:json;not null"`
 	EditedAt           *time.Time
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
@@ -230,16 +229,16 @@ type migration0001CaseEvent struct {
 // migration0001Appeal freezes the appeal table shape adopted by migration 0001.
 type migration0001Appeal struct {
 	Migration0001ULIDModel
-	GuildID                 string             `gorm:"type:char(26);not null;index:idx_appeal_guild_status,priority:1;index:idx_appeal_guild_user,priority:1"`
-	CaseID                  *string            `gorm:"type:char(26);index"`
-	TargetDiscordUserID     string             `gorm:"size:32;not null;index:idx_appeal_guild_user,priority:2"`
-	Status                  model.AppealStatus `gorm:"size:32;not null;default:'pending';index:idx_appeal_guild_status,priority:2"`
-	Content                 string             `gorm:"type:text;not null"`
-	DecisionReason          string             `gorm:"type:text"`
-	ReviewedByDiscordUserID string             `gorm:"size:32"`
-	ReviewedAt              *time.Time         `gorm:"index"`
-	ReviewMessageDiscordID  string             `gorm:"size:32"`
-	MetadataJSON            string             `gorm:"type:json;not null"`
+	GuildID                 string     `gorm:"type:char(26);not null;index:idx_appeal_guild_status,priority:1;index:idx_appeal_guild_user,priority:1"`
+	CaseID                  *string    `gorm:"type:char(26);index"`
+	TargetDiscordUserID     string     `gorm:"size:32;not null;index:idx_appeal_guild_user,priority:2"`
+	Status                  string     `gorm:"size:32;not null;default:'pending';index:idx_appeal_guild_status,priority:2"`
+	Content                 string     `gorm:"type:text;not null"`
+	DecisionReason          string     `gorm:"type:text"`
+	ReviewedByDiscordUserID string     `gorm:"size:32"`
+	ReviewedAt              *time.Time `gorm:"index"`
+	ReviewMessageDiscordID  string     `gorm:"size:32"`
+	MetadataJSON            string     `gorm:"type:json;not null"`
 }
 
 // migration0001AppealEvent freezes the appeal-event history shape adopted by migration 0001.
@@ -256,15 +255,15 @@ type migration0001AppealEvent struct {
 // migration0001Ticket freezes the existing optional ticket shape adopted by migration 0001.
 type migration0001Ticket struct {
 	Migration0001ULIDModel
-	GuildID                 string             `gorm:"type:char(26);not null;index:idx_ticket_guild_status,priority:1;index:idx_ticket_guild_owner,priority:1"`
-	OwnerDiscordUserID      string             `gorm:"size:32;not null;index:idx_ticket_guild_owner,priority:2"`
-	ThreadDiscordChannelID  string             `gorm:"size:32;uniqueIndex"`
-	Status                  model.TicketStatus `gorm:"size:32;not null;default:'open';index:idx_ticket_guild_status,priority:2"`
-	LogMessageDiscordID     string             `gorm:"size:32"`
-	ResolvedByDiscordUserID string             `gorm:"size:32"`
-	ResolvedAt              *time.Time         `gorm:"index"`
-	TranscriptURL           string             `gorm:"size:1024"`
-	MetadataJSON            string             `gorm:"type:json;not null"`
+	GuildID                 string     `gorm:"type:char(26);not null;index:idx_ticket_guild_status,priority:1;index:idx_ticket_guild_owner,priority:1"`
+	OwnerDiscordUserID      string     `gorm:"size:32;not null;index:idx_ticket_guild_owner,priority:2"`
+	ThreadDiscordChannelID  string     `gorm:"size:32;uniqueIndex"`
+	Status                  string     `gorm:"size:32;not null;default:'open';index:idx_ticket_guild_status,priority:2"`
+	LogMessageDiscordID     string     `gorm:"size:32"`
+	ResolvedByDiscordUserID string     `gorm:"size:32"`
+	ResolvedAt              *time.Time `gorm:"index"`
+	TranscriptURL           string     `gorm:"size:1024"`
+	MetadataJSON            string     `gorm:"type:json;not null"`
 }
 
 // migration0001TicketEvent freezes the existing ticket-event shape adopted by migration 0001.
@@ -281,18 +280,18 @@ type migration0001TicketEvent struct {
 // migration0001AuditLogEntry freezes the audit-history shape adopted by migration 0001.
 type migration0001AuditLogEntry struct {
 	Migration0001ULIDModel
-	GuildID             string            `gorm:"type:char(26);not null;index:idx_audit_guild_action,priority:1;index"`
-	ActorDiscordUserID  string            `gorm:"size:32;index"`
-	ActorPermissionBits uint64            `gorm:"type:bigint unsigned;not null;default:0"`
-	Source              model.AuditSource `gorm:"size:32;not null;index"`
-	Action              string            `gorm:"size:96;not null;index:idx_audit_guild_action,priority:2"`
-	ResourceType        string            `gorm:"size:64;not null;index:idx_audit_resource,priority:1"`
-	ResourceID          string            `gorm:"size:64;not null;index:idx_audit_resource,priority:2"`
-	Result              model.AuditResult `gorm:"size:32;not null;index"`
-	FailureReason       string            `gorm:"type:text"`
-	CorrelationID       string            `gorm:"size:128;index"`
-	RequestID           string            `gorm:"size:128;index"`
-	MetadataJSON        string            `gorm:"type:json;not null"`
+	GuildID             string `gorm:"type:char(26);not null;index:idx_audit_guild_action,priority:1;index"`
+	ActorDiscordUserID  string `gorm:"size:32;index"`
+	ActorPermissionBits uint64 `gorm:"type:bigint unsigned;not null;default:0"`
+	Source              string `gorm:"size:32;not null;index"`
+	Action              string `gorm:"size:96;not null;index:idx_audit_guild_action,priority:2"`
+	ResourceType        string `gorm:"size:64;not null;index:idx_audit_resource,priority:1"`
+	ResourceID          string `gorm:"size:64;not null;index:idx_audit_resource,priority:2"`
+	Result              string `gorm:"size:32;not null;index"`
+	FailureReason       string `gorm:"type:text"`
+	CorrelationID       string `gorm:"size:128;index"`
+	RequestID           string `gorm:"size:128;index"`
+	MetadataJSON        string `gorm:"type:json;not null"`
 }
 
 // migration0001SchemaModels returns the immutable storage snapshot owned by the baseline migration.
