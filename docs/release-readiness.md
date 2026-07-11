@@ -1,7 +1,8 @@
 # Release Readiness
 
-Phase 8 prepares v5 for real-guild testing without adding appeals, tickets, or
-v4 data import.
+This document describes the current backend's readiness for controlled
+real-guild testing. It records implementation status rather than defining v5
+product scope; the product definition lives in [`v5.md`](../v5.md).
 
 ## Ops Status
 

@@ -106,8 +106,9 @@ Discord commands.
 
 - The `Legacy/` tree is still present but separate from the v5 runtime. The
   current process entrypoint is `cmd/quack/main.go`, not `Legacy/main.go`.
-- The dashboard-facing product handoff lives in `website-agent-plan.md`.
-- The product roadmap and policy model live in `v5.md`.
+- The authoritative product definition lives in `v5.md`.
+- High-level differences between that definition and the current backend live
+  in `docs/v5-scope-drift.md`.
 - CORS is currently fixed to localhost port `3000`, which matters whenever the
   dashboard moves ports.
 - Action execution is in-process, not an external worker service.
@@ -121,5 +122,5 @@ Relevant files:
 - `compose.yaml`
 - `Dockerfile`
 - `.env.example`
-- `website-agent-plan.md`
 - `v5.md`
+- `docs/v5-scope-drift.md`

@@ -1,11 +1,16 @@
 # Quack v5
 
-Quack is a configurable moderation policy engine for Discord. Administrators
-define templates and escalation levels; moderators apply a template; the
-backend selects the matching level, records the case, and executes its actions.
+Quack v5 is a customizable moderation system for Discord. Administrators
+define templates and escalation levels; moderators apply a template; Quack
+selects the matching level, records the case, and carries out its configured
+outcome.
 
 The dashboard and Discord bot are delivery adapters over the same application
 core.
+
+The authoritative product definition is [`v5.md`](v5.md). The current backend
+does not yet implement every rule in that document; the high-level differences
+are tracked in [`docs/v5-scope-drift.md`](docs/v5-scope-drift.md).
 
 ## Layout
 

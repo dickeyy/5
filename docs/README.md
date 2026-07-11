@@ -2,16 +2,18 @@
 
 Internal maintainer docs for the Quack v5 backend.
 
-This directory covers the code that exists in this checkout today. Product-roadmap
-documents such as `v5.md` and the dashboard handoff in `website-agent-plan.md`
-remain the higher-level planning references.
+This directory covers the code that exists in this checkout today. The
+authoritative product definition lives in [`v5.md`](../v5.md). When current code
+differs from that definition, [`v5-scope-drift.md`](v5-scope-drift.md) records
+the high-level mismatch without making the technical docs inaccurate.
 
 ## Index
 
 - `architecture.md`: service layout, startup flow, request flow, Discord interaction flow, and action execution.
 - `configuration.md`: environment variables and runtime dependencies.
 - `development.md`: local workflow, Docker usage, commands, and where to make common changes.
-- `release-readiness.md`: phase 8 ops status, tracing, coexistence, and release checklist.
+- `release-readiness.md`: current ops status, tracing, coexistence, and release checklist.
+- `v5-scope-drift.md`: high-level differences between the current backend and the intended v5 product.
 - `modules/README.md`: focused notes for core runtime modules and pipelines.
 - `testing.md`: current test harness and scope limits.
 
