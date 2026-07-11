@@ -17,6 +17,8 @@ The current backend already supports important parts of the intended v5 directio
 - Action rows are persisted so work can recover after queue saturation or process restart.
 - Discord interactions support deferred work, public case results, template autocomplete, and reusable UI components.
 - Template and case reads are available for staff dashboard workflows.
+- Production schema changes use an ordered, checksum-tracked migration ledger
+  that adopts current v5 data additively without startup `AutoMigrate`.
 
 ## Behavior That Must Change
 

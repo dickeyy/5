@@ -12,6 +12,7 @@ the high-level mismatch without making the technical docs inaccurate.
 - `architecture.md`: service layout, startup flow, request flow, Discord interaction flow, and action execution.
 - `configuration.md`: environment variables and runtime dependencies.
 - `development.md`: local workflow, Docker usage, commands, and where to make common changes.
+- `migrations.md`: production migration ledger, forward, rerun, failure recovery, and rollback procedures.
 - `release-readiness.md`: current ops status, tracing, coexistence, and release checklist.
 - `v5-scope-drift.md`: high-level differences between the current backend and the intended v5 product.
 - `modules/README.md`: focused notes for core runtime modules and pipelines.

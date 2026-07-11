@@ -65,10 +65,12 @@ Current action capability remains unchanged:
 
 ## Persistence compatibility
 
-Store-owned migration records preserve the existing table names, columns,
-indexes, JSON columns, and AutoMigrate behavior. Plain domain models do not
-contain GORM tags. Redis authentication and Discord command-cache key formats
-are unchanged.
+Store-owned schema records preserve the existing table names, columns, indexes,
+and JSON columns. Production startup runs an ordered, checksum-tracked migration
+registry under a MySQL advisory lock; it does not call `AutoMigrate`. The
+initial additive migration adopts a current pre-ledger v5 database without
+rewriting its records. Plain domain models do not contain GORM tags. Redis
+authentication and Discord command-cache key formats are unchanged.
 
 ## Delivery adapters
 
