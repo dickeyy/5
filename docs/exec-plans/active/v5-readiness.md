@@ -145,7 +145,12 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 
 #### V5-001M - Versioned migration foundation
 
-- Status: PLANNED
+- Status: IN_PROGRESS
+- Assignment: implementation subagent using `v5-implementation-slice`
+- Branch: `slice/v5-001m-versioned-migrations`
+- Worktree: `/tmp/quack-v5-worktrees/v5-001m`
+- Base branch: `orchestrator/v5-readiness`
+- PR/review: pending implementation
 - Requirements: history must remain understandable; important records are not
   hard-deleted; TODO Database and Storage Reliability.
 - Acceptance criteria:
@@ -694,7 +699,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 | Slice | Status | Branch | PR | Codex rounds | Orchestrator validation |
 | --- | --- | --- | --- | --- | --- |
 | V5-000 | ACCEPTED | orchestration worktree | n/a | n/a | passed |
-| V5-001M | PLANNED | pending | pending | 0 | pending |
+| V5-001M | IN_PROGRESS | `slice/v5-001m-versioned-migrations` | pending | 0 | pending |
 | V5-001 | PLANNED | pending | pending | 0 | pending |
 | V5-002 | PLANNED | pending | pending | 0 | pending |
 | V5-003 | PLANNED | pending | pending | 0 | pending |
