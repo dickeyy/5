@@ -145,7 +145,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 
 #### V5-001M - Versioned migration foundation
 
-- Status: FIXING
+- Status: REVIEW_WAIT
 - Assignment: implementation subagent using `v5-implementation-slice`
 - Branch: `slice/v5-001m-versioned-migrations`
 - Worktree: `/tmp/quack-v5-worktrees/v5-001m`
@@ -162,7 +162,8 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
   - P1: MySQL DDL implicitly commits, so current Down-plus-ledger-delete
     transaction can leave a partially rolled-back schema recorded as applied;
     no durable rollback-in-progress state or recovery test protects startup.
-  Fixes, real MySQL validation, push, and Codex round 2 are required.
+  Fix commit `99c018a` is pushed with real MySQL validation reported passing;
+  standalone Codex round 2 requested 2026-07-11 and awaiting actual review.
 - Requirements: history must remain understandable; important records are not
   hard-deleted; TODO Database and Storage Reliability.
 - Acceptance criteria:
@@ -711,7 +712,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 | Slice | Status | Branch | PR | Codex rounds | Orchestrator validation |
 | --- | --- | --- | --- | --- | --- |
 | V5-000 | ACCEPTED | orchestration worktree | n/a | n/a | passed |
-| V5-001M | FIXING | `slice/v5-001m-versioned-migrations` | [#1](https://github.com/dickeyy/5/pull/1) | 1 | rejected round 1 |
+| V5-001M | REVIEW_WAIT | `slice/v5-001m-versioned-migrations` | [#1](https://github.com/dickeyy/5/pull/1) | 1 complete, 2 pending | rejected round 1 |
 | V5-001 | PLANNED | pending | pending | 0 | pending |
 | V5-002 | PLANNED | pending | pending | 0 | pending |
 | V5-003 | PLANNED | pending | pending | 0 | pending |
