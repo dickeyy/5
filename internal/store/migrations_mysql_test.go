@@ -38,17 +38,28 @@ func TestMySQLMigrateForwardRerunPreservationAndRollbackBoundary(t *testing.T) {
 func TestMySQLMigrationRecoversFromPartialDDLAndRunsReviewedRollback(t *testing.T) {
 	db := openMySQLMigrationDB(t)
 	baseline := migration0001InitialV5Schema()
+	failDownOnce := true
 	failed := []migration{
 		baseline,
 		{
 			Version: 2, Name: "mysql_recovery_probe", Definition: "create migration_recovery_probe; down drops only the probe table",
+			Source: "up: create migration_recovery_probe if absent; down: drop migration_recovery_probe if present",
 			Up: func(tx *gorm.DB) error {
 				if err := tx.Exec("CREATE TABLE IF NOT EXISTS migration_recovery_probe (id bigint primary key)").Error; err != nil {
 					return err
 				}
 				return errors.New("injected post-DDL failure")
 			},
-			Down: func(tx *gorm.DB) error { return tx.Exec("DROP TABLE migration_recovery_probe").Error },
+			Down: func(tx *gorm.DB) error {
+				if err := tx.Exec("DROP TABLE IF EXISTS migration_recovery_probe").Error; err != nil {
+					return err
+				}
+				if failDownOnce {
+					failDownOnce = false
+					return errors.New("injected failure after MySQL DDL")
+				}
+				return nil
+			},
 		},
 	}
 	if err := runMigrations(db, failed); err == nil {
@@ -72,11 +83,28 @@ func TestMySQLMigrationRecoversFromPartialDDLAndRunsReviewedRollback(t *testing.
 	if err := runMigrations(db, recovered); err != nil {
 		t.Fatalf("recover partial MySQL migration: %v", err)
 	}
-	if err := rollbackLastMigration(db, recovered); err != nil {
-		t.Fatalf("roll back recovered MySQL migration: %v", err)
+	if err := rollbackLastMigration(db, recovered); err == nil {
+		t.Fatal("expected injected partial MySQL rollback failure")
 	}
 	if db.Migrator().HasTable("migration_recovery_probe") {
-		t.Fatal("expected reviewed MySQL rollback to remove probe table")
+		t.Fatal("expected partial MySQL rollback to have committed the probe-table drop")
+	}
+	if err := runMigrations(db, recovered); !errors.Is(err, ErrMigrationDirty) {
+		t.Fatalf("expected MySQL startup to refuse dirty rollback, got %v", err)
+	}
+	var dirty schemaMigration
+	if err := db.First(&dirty, "version = ?", 2).Error; err != nil {
+		t.Fatalf("load dirty MySQL migration row: %v", err)
+	}
+	if dirty.State != migrationStateRollingBack || dirty.RollbackStartedAt == nil {
+		t.Fatalf("expected durable MySQL rolling_back state, got state=%q started=%v", dirty.State, dirty.RollbackStartedAt)
+	}
+
+	if err := rollbackLastMigration(db, recovered); err != nil {
+		t.Fatalf("recover partial MySQL rollback: %v", err)
+	}
+	if err := runMigrations(db, recovered); err != nil {
+		t.Fatalf("reapply MySQL migration after recovered rollback: %v", err)
 	}
 }
 

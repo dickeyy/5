@@ -22,6 +22,7 @@ func migration0001InitialV5Schema() migration {
 		Version:    1,
 		Name:       "initial_v5_schema",
 		Definition: migration0001Definition,
+		Source:     migration0001Source,
 		Up:         applyInitialV5Schema,
 		Down:       nil,
 	}

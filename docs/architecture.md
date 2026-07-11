@@ -67,7 +67,10 @@ Current action capability remains unchanged:
 
 Store-owned schema records preserve the existing table names, columns, indexes,
 and JSON columns. Production startup runs an ordered, checksum-tracked migration
-registry under a MySQL advisory lock; it does not call `AutoMigrate`. The
+registry under a MySQL advisory lock; checksums bind embedded executable
+migration source and frozen schema records. It does not call `AutoMigrate`.
+Rollback intent is durably recorded before MySQL DDL, and normal startup refuses
+an incomplete rollback until the operator reruns its idempotent inverse. The
 initial additive migration adopts a current pre-ledger v5 database without
 rewriting its records. Plain domain models do not contain GORM tags. Redis
 authentication and Discord command-cache key formats are unchanged.

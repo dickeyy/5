@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,7 +149,8 @@ func TestMigrationFailureCanRerunAndDoesNotRecordSuccessEarly(t *testing.T) {
 	db := openSQLiteMigrationDB(t)
 	failed := []migration{{
 		Version: 1, Name: "recoverable", Definition: "create recoverable_table",
-		Up: func(tx *gorm.DB) error { return errors.New("injected failure") },
+		Source: "up: injected failure; schema: recoverable_table(id integer primary key)",
+		Up:     func(tx *gorm.DB) error { return errors.New("injected failure") },
 	}}
 	if err := runMigrations(db, failed); err == nil {
 		t.Fatal("expected injected migration failure")
@@ -163,6 +165,7 @@ func TestMigrationFailureCanRerunAndDoesNotRecordSuccessEarly(t *testing.T) {
 
 	recovered := []migration{{
 		Version: 1, Name: "recoverable", Definition: "create recoverable_table",
+		Source: "up: injected failure; schema: recoverable_table(id integer primary key)",
 		Up: func(tx *gorm.DB) error {
 			return tx.Exec("CREATE TABLE IF NOT EXISTS recoverable_table (id integer primary key)").Error
 		},
@@ -179,10 +182,11 @@ func TestRollbackLastMigrationRunsReviewedInverse(t *testing.T) {
 	db := openSQLiteMigrationDB(t)
 	migrations := []migration{{
 		Version: 1, Name: "reversible", Definition: "create reversible_table; down drops only that empty table",
+		Source: "up: create reversible_table; down: drop reversible_table if exists",
 		Up: func(tx *gorm.DB) error {
 			return tx.Exec("CREATE TABLE reversible_table (id integer primary key)").Error
 		},
-		Down: func(tx *gorm.DB) error { return tx.Exec("DROP TABLE reversible_table").Error },
+		Down: func(tx *gorm.DB) error { return tx.Exec("DROP TABLE IF EXISTS reversible_table").Error },
 	}}
 	if err := runMigrations(db, migrations); err != nil {
 		t.Fatalf("apply reversible migration: %v", err)
@@ -217,6 +221,85 @@ func TestRollbackRefusesForwardOnlyBaselineWithoutChangingHistory(t *testing.T) 
 	assertRepresentativeHistory(t, db, want)
 }
 
+func TestMigrationChecksumRejectsExecutableOrSchemaMutationWithoutIdentityChange(t *testing.T) {
+	db := openSQLiteMigrationDB(t)
+	original := migration0001InitialV5Schema()
+	if err := runMigrations(db, []migration{original}); err != nil {
+		t.Fatalf("apply source-bound migration: %v", err)
+	}
+
+	schemaMutation := strings.Replace(original.Source, "NotifyUser       bool", "NotifyUser       string", 1)
+	if schemaMutation == original.Source {
+		t.Fatal("schema mutation fixture did not change embedded migration source")
+	}
+	for label, source := range map[string]string{
+		"schema":     schemaMutation,
+		"executable": original.Source + "\n// changed executable behavior",
+	} {
+		t.Run(label, func(t *testing.T) {
+			ran := false
+			mutated := original
+			mutated.Source = source
+			mutated.Up = func(*gorm.DB) error {
+				ran = true
+				return nil
+			}
+			err := runMigrations(db, []migration{mutated})
+			if !errors.Is(err, ErrMigrationChecksumMismatch) {
+				t.Fatalf("expected embedded-source checksum mismatch, got %v", err)
+			}
+			if ran {
+				t.Fatal("mutated executable ran before checksum rejection")
+			}
+		})
+	}
+}
+
+func TestRollbackDirtyStateBlocksStartupAndRecoversIdempotently(t *testing.T) {
+	db := openSQLiteMigrationDB(t)
+	failDownOnce := true
+	migrations := []migration{{
+		Version: 1, Name: "dirty_recovery", Definition: "create and reversibly drop dirty_recovery",
+		Source: "up: create dirty_recovery; down: drop dirty_recovery if exists",
+		Up: func(tx *gorm.DB) error {
+			return tx.Exec("CREATE TABLE dirty_recovery (id integer primary key)").Error
+		},
+		Down: func(tx *gorm.DB) error {
+			if err := tx.Exec("DROP TABLE IF EXISTS dirty_recovery").Error; err != nil {
+				return err
+			}
+			if failDownOnce {
+				failDownOnce = false
+				return errors.New("injected failure after DDL")
+			}
+			return nil
+		},
+	}}
+	if err := runMigrations(db, migrations); err != nil {
+		t.Fatalf("apply dirty-state fixture: %v", err)
+	}
+	if err := rollbackLastMigration(db, migrations); err == nil {
+		t.Fatal("expected injected partial rollback failure")
+	}
+	var entry schemaMigration
+	if err := db.First(&entry, "version = ?", 1).Error; err != nil {
+		t.Fatalf("load dirty migration ledger row: %v", err)
+	}
+	if entry.State != migrationStateRollingBack || entry.RollbackStartedAt == nil {
+		t.Fatalf("expected durable rolling_back state, got state=%q started=%v", entry.State, entry.RollbackStartedAt)
+	}
+	if err := runMigrations(db, migrations); !errors.Is(err, ErrMigrationDirty) {
+		t.Fatalf("expected normal startup to refuse dirty migration, got %v", err)
+	}
+
+	if err := rollbackLastMigration(db, migrations); err != nil {
+		t.Fatalf("recover dirty rollback idempotently: %v", err)
+	}
+	if err := runMigrations(db, migrations); err != nil {
+		t.Fatalf("reapply migration after completed rollback: %v", err)
+	}
+}
+
 // representativeHistory identifies immutable moderation records expected to survive migration operations.
 type representativeHistory struct {
 	GuildID, CaseID, AttemptID, EventID, AuditID string
@@ -246,6 +329,11 @@ func insertRepresentativeHistory(t *testing.T, db *gorm.DB) representativeHistor
 			t.Fatalf("insert representative history %T: %v", record, err)
 		}
 	}
+	var persisted CaseRecord
+	if err := db.First(&persisted, "id = ?", want.CaseID).Error; err != nil {
+		t.Fatalf("capture persisted representative case: %v", err)
+	}
+	want.TemplateSnapshot = persisted.TemplateSnapshotJSON
 	return want
 }
 

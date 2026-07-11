@@ -3,8 +3,10 @@
 Production startup applies an ordered migration registry from `internal/store`.
 Each successful migration is recorded in `quack_schema_migrations` with its
 version, name, checksum, and application time. Startup verifies every existing
-ledger checksum before it runs new work. There is no production or development
-`AutoMigrate` path.
+ledger checksum before it runs new work. The checksum includes an embedded copy
+of the migration's Go source, including its frozen schema records and `Up`/`Down`
+logic, so executable edits cannot retain the old identity. There is no
+production or development `AutoMigrate` path.
 
 Migration definitions are additive by default and must preserve table names,
 identifiers, guild case numbers, snapshots, action attempts, events, and audit
@@ -14,8 +16,8 @@ on a clean database. It never drops or renames an application table or column.
 ## Forward procedure
 
 1. Back up MySQL and verify the backup before deploying schema-changing code.
-2. Review the ordered migration definition, checksum material, `Up` operation,
-   and, when safe, its `Down` operation in the pull request.
+2. Review the ordered migration definition, embedded source, `Up` operation,
+   and, when safe, its idempotent `Down` operation in the pull request.
 3. Stop additional Quack processes or leave them waiting on the MySQL migration
    lock. Run `go run ./cmd/quack-migrate up` with the production
    `DATABASE_DSN`, or start one new Quack process and let startup run the same
@@ -44,9 +46,13 @@ already-applied additive work and safely resume on the next run.
 ## Rollback procedure
 
 Run `go run ./cmd/quack-migrate down` only after reviewing the newest applied
-migration and confirming its `Down` operation preserves v5 history. The runner
-executes that inverse and removes its ledger row in one migration operation.
-Tests cover a reversible migration on SQLite and MySQL.
+migration and confirming its idempotent `Down` operation preserves v5 history.
+Before executing MySQL DDL, the runner durably marks the ledger row
+`rolling_back`. Normal `up` and application startup refuse that dirty state.
+After `Down` succeeds, the runner removes the ledger row. If the process or DDL
+fails before removal, rerun the same reviewed `down`; it resumes the idempotent
+inverse and completes ledger cleanup. Never clear `rolling_back` by hand. Tests
+cover partial-DDL recovery and reversible rollback on SQLite and MySQL.
 
 Migrations without a safe inverse are explicitly forward-only. The initial v5
 baseline is forward-only because reversing it would hard-delete moderation and
@@ -55,7 +61,8 @@ the schema nor ledger. For an additive forward-only release, roll back the
 application binary while retaining the compatible schema, then ship a new
 forward migration for any database correction.
 
-Every future schema change must be a new registry entry. Do not edit an applied
-migration. Its focused tests must cover forward execution, rerun behavior,
-failure recovery, preservation of representative data, and either the reviewed
-inverse or the explicit forward-only refusal boundary.
+Every future schema change must live in a new source file embedded by its new
+registry entry. Do not edit an applied migration. Its focused tests must cover
+forward execution, rerun behavior, failure recovery, preservation of
+representative data, and either an idempotent reviewed inverse with dirty-state
+recovery or the explicit forward-only refusal boundary.
