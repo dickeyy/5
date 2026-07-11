@@ -43,10 +43,10 @@ matrix in `docs/v5-readiness.md`.
   binary was removed).
 - GitHub connector: authenticated as `dickeyy`, admin/push access to
   `dickeyy/5`, no open pull requests at baseline.
-- Local `gh`: BLOCKED because its configured token is invalid; local API access
-  also failed. The connector provides authenticated PR metadata and comment
-  operations, but branch push and any lifecycle step that strictly requires
-  `gh` must be revalidated before the first slice is accepted.
+- Local `gh`: default-sandbox status initially appeared invalid because GitHub
+  was unreachable. Escalated `gh auth status` confirmed healthy keyring auth as
+  `dickeyy` with `repo` and `workflow` scopes; CLI PR/review operations are
+  available outside the restricted network sandbox.
 
 ## Integration strategy
 
@@ -768,9 +768,9 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 
 ## Blockers and risks
 
-- BLOCKER: local `gh` authentication is invalid. Connector access is healthy,
-  but the mandated branch push and review polling path must be proven before an
-  implementation slice can complete its lifecycle.
+- RESOLVED 2026-07-11: GitHub CLI authentication and branch push both succeed
+  outside the restricted network sandbox. The connector remains an independent
+  structured metadata path, while slice PR/review lifecycle uses `gh`.
 - BLOCKER: changes to CI workflows, deployment resource limits, and release
   infrastructure are explicitly unauthorized. V5-025 may implement code,
   tests, local checks, and runbooks, but infrastructure edits require explicit
