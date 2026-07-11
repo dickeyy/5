@@ -2,30 +2,10 @@ package testutil
 
 import (
 	"testing"
-
-	"github.com/quackdiscord/bot/lib"
-	"github.com/quackdiscord/bot/structs"
 )
 
+// SetTestConfig encapsulates the set test config rule so callers share one consistent package implementation.
 func SetTestConfig(t testing.TB) {
 	t.Helper()
 
-	previous := lib.Config
-	lib.Config = &structs.Config{
-		Environment: "test",
-		API: structs.APIConfig{
-			Port: "8080",
-		},
-		Auth: structs.AuthConfig{
-			SessionCookieName: "quack_test_session",
-			SessionTTLHours:   1,
-			StateTTLMinutes:   10,
-			PostLoginRedirect: "/",
-			CookieSecure:      false,
-		},
-	}
-
-	t.Cleanup(func() {
-		lib.Config = previous
-	})
 }

@@ -1,12 +1,12 @@
 # Discord Interactions
 
 The Discord interaction stack handles more than slash commands now. Runtime
-dispatch lives in `discord/interactions/dispatcher.go`, while shared message,
-embed, response, and custom-ID helpers live under `discord/ui/`.
+dispatch lives in `internal/discordbot/interactions/dispatcher.go`, while shared message,
+embed, response, and custom-ID helpers live under `internal/discordbot/ui/`.
 
 This module is infrastructure for commands, message components, and modal
 submits. The current production registration path is still command-centric:
-`discord/commands/registry.go` installs the dispatcher, and `/case` is the only
+`internal/discordbot/commands/registry.go` installs the dispatcher, and `/case` is the only
 registered command today.
 
 ## Dispatch Model
@@ -28,7 +28,7 @@ original interaction response through the responder abstraction.
 
 ## Component And Modal Registration
 
-`ComponentRegistry` in `discord/interactions/components.go` stores handlers by
+`ComponentRegistry` in `internal/discordbot/interactions/components.go` stores handlers by
 `namespace:action`.
 
 Lookup flow:
@@ -41,7 +41,7 @@ Custom IDs are versioned and use the four-part format:
 
 `namespace:action:version:payload`
 
-Validation rules enforced by `discord/ui/components.go`:
+Validation rules enforced by `internal/discordbot/ui/components.go`:
 
 - namespace, action, and version are required
 - those fields cannot contain `:`
@@ -49,7 +49,7 @@ Validation rules enforced by `discord/ui/components.go`:
 
 ## UI And Response Helpers
 
-`discord/ui/message.go` defines the shared message and edit model used by
+`internal/discordbot/ui/message.go` defines the shared message and edit model used by
 interaction handlers:
 
 - `Message` for content, embeds, components, files, and allowed mentions
@@ -57,7 +57,7 @@ interaction handlers:
 - embed helpers such as `SuccessEmbed`, `ErrorEmbed`, and the fluent `Embed`
   builder
 
-`discord/ui/responses.go` wraps Discord interaction response types:
+`internal/discordbot/ui/responses.go` wraps Discord interaction response types:
 
 - immediate public or ephemeral messages
 - deferred public or ephemeral responses
@@ -66,7 +66,7 @@ interaction handlers:
 - modal responses
 
 The `/case add` command uses this layer to defer publicly and then replace the
-deferred placeholder with a case-created embed from `discord/ui/views/case.go`.
+deferred placeholder with a case-created embed from `internal/discordbot/ui/views/case.go`.
 
 ## Error And Panic Behavior
 
@@ -84,8 +84,8 @@ transport edge cases.
 
 ## Test Coverage
 
-The current interaction tests in `discord/interactions/dispatcher_test.go` and
-`discord/ui/responses_test.go` cover:
+The current interaction tests in `internal/discordbot/interactions/dispatcher_test.go` and
+`internal/discordbot/ui/responses_test.go` cover:
 
 - immediate command responses
 - deferred async command responses
@@ -95,12 +95,12 @@ The current interaction tests in `discord/interactions/dispatcher_test.go` and
 
 Relevant files:
 
-- `discord/commands/registry.go`
-- `discord/interactions/dispatcher.go`
-- `discord/interactions/components.go`
-- `discord/ui/components.go`
-- `discord/ui/message.go`
-- `discord/ui/responses.go`
-- `discord/ui/views/case.go`
-- `discord/interactions/dispatcher_test.go`
-- `discord/ui/responses_test.go`
+- `internal/discordbot/commands/registry.go`
+- `internal/discordbot/interactions/dispatcher.go`
+- `internal/discordbot/interactions/components.go`
+- `internal/discordbot/ui/components.go`
+- `internal/discordbot/ui/message.go`
+- `internal/discordbot/ui/responses.go`
+- `internal/discordbot/ui/views/case.go`
+- `internal/discordbot/interactions/dispatcher_test.go`
+- `internal/discordbot/ui/responses_test.go`

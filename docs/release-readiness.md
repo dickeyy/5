@@ -83,9 +83,9 @@ counts from v4 in this phase, so v5 escalation starts with v5-created cases.
 
 Relevant files:
 
-- `api/middleware/request.go`
-- `api/routes/ops.go`
-- `app/actions.go`
-- `app/ops.go`
+- `internal/httpapi/middleware/request.go`
+- `internal/httpapi/routes/ops.go`
+- `internal/quack/actions.go`
+- `internal/quack/ops.go`
 - `lib/trace.go`
-- `storage/ops.go`
+- `internal/store/ops.go`

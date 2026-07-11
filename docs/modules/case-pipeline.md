@@ -2,17 +2,17 @@
 
 The case pipeline connects templates, permission-checked case creation, action
 row generation, and later queued execution. The creation logic starts in
-`app/cases.go`, while persistence lives in `storage/cases.go`.
+`internal/quack/cases.go`, while persistence lives in `internal/store/cases.go`.
 
 ## Inputs And Boundaries
 
 Case creation is exposed through two entrypoints:
 
-- HTTP: `POST /guilds/:discordGuildID/cases` in `api/routes/cases.go`
-- Discord: `/case add` in `discord/commands/case.go`
+- HTTP: `POST /guilds/:discordGuildID/cases` in `internal/httpapi/routes/cases.go`
+- Discord: `/case add` in `internal/discordbot/commands/case.go`
 
 Both entrypoints eventually call `CaseService.Create(...)` through
-`app.Services`.
+`quack.Services`.
 
 Staff dashboard case reads are exposed through the HTTP API:
 
@@ -58,7 +58,7 @@ target user. Matching uses the current stored case history, not transient queue
 state.
 
 The default level acts as fallback when no escalation level matches. Validation
-in `app/templates.go` expects exactly one enabled default level.
+in `internal/quack/templates.go` expects exactly one enabled default level.
 
 ## Snapshot Contract
 
@@ -66,7 +66,7 @@ in `app/templates.go` expects exactly one enabled default level.
 
 Current consumers include:
 
-- `continueOnError` in `app/actions.go`
+- `continueOnError` in `internal/quack/actions.go`
 - API and Discord responses that expose selected level and action details
 
 Changing the snapshot shape needs migration discipline because old cases keep
@@ -107,7 +107,7 @@ transaction.
 ## Status Progression
 
 Initial case status is `open`. Later updates come from the action engine in
-`storage/updateCaseStatusFromActions`:
+`internal/store/updateCaseStatusFromActions`:
 
 - `action_running` while any execution is pending, running, or retrying
 - `completed` when all executions succeed or are otherwise terminal without failure
@@ -127,11 +127,11 @@ Resolved timestamps are currently written automatically when the case reaches
 
 Relevant files:
 
-- `app/cases.go`
-- `app/audit.go`
-- `app/templates.go`
-- `api/routes/cases.go`
-- `discord/commands/case.go`
-- `storage/cases.go`
-- `storage/templates.go`
-- `structs/schema.go`
+- `internal/quack/cases.go`
+- `internal/quack/audit.go`
+- `internal/quack/templates.go`
+- `internal/httpapi/routes/cases.go`
+- `internal/discordbot/commands/case.go`
+- `internal/store/cases.go`
+- `internal/store/templates.go`
+- `internal/quack/model/schema.go`

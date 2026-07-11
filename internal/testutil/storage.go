@@ -4,13 +4,14 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/quackdiscord/bot/storage"
+	"github.com/quackdiscord/bot/internal/store"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
-func NewSQLiteStore(t testing.TB) *storage.Store {
+// NewSQLiteStore constructs sqlite store with required dependencies explicit so callers control lifecycle and substitution.
+func NewSQLiteStore(t testing.TB) *store.Store {
 	t.Helper()
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -18,10 +19,11 @@ func NewSQLiteStore(t testing.TB) *storage.Store {
 		t.Fatalf("open sqlite test database: %v", err)
 	}
 
-	return storage.New(db, nil)
+	return store.New(db, nil)
 }
 
-func NewSQLiteRedisStore(t testing.TB) *storage.Store {
+// NewSQLiteRedisStore constructs sqlite redis store with required dependencies explicit so callers control lifecycle and substitution.
+func NewSQLiteRedisStore(t testing.TB) *store.Store {
 	t.Helper()
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -35,5 +37,5 @@ func NewSQLiteRedisStore(t testing.TB) *storage.Store {
 		_ = redisClient.Close()
 	})
 
-	return storage.New(db, redisClient)
+	return store.New(db, redisClient)
 }

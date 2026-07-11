@@ -32,22 +32,22 @@ integration test.
 The current backend has a few areas where targeted tests matter more than broad
 end-to-end setup:
 
-- template validation and level normalization in `app/templates.go`
-- case level selection and snapshotting in `app/cases.go`
-- action retries, notifications, and failure handling in `app/actions.go`
-- route auth and guild-context wiring in `api/routes/router_test.go`
+- template validation and level normalization in `internal/quack/templates.go`
+- case level selection and snapshotting in `internal/quack/cases.go`
+- action retries, notifications, and failure handling in `internal/quack/actions.go`
+- route auth and guild-context wiring in `internal/httpapi/routes/router_test.go`
 - interaction dispatch, deferred responses, and component/modal routing in
-  `discord/interactions/dispatcher_test.go`
-- Discord response helper output shape in `discord/ui/responses_test.go`
+  `internal/discordbot/interactions/dispatcher_test.go`
+- Discord response helper output shape in `internal/discordbot/ui/responses_test.go`
 
 Relevant files:
 
 - `internal/testutil/storage.go`
 - `internal/testutil/config.go`
-- `api/routes/router_test.go`
-- `app/templates_test.go`
-- `app/cases_test.go`
-- `app/actions_test.go`
-- `discord/interactions/dispatcher_test.go`
-- `discord/ui/responses_test.go`
-- `storage/migrations_test.go`
+- `internal/httpapi/routes/router_test.go`
+- `internal/quack/templates_test.go`
+- `internal/quack/cases_test.go`
+- `internal/quack/actions_test.go`
+- `internal/discordbot/interactions/dispatcher_test.go`
+- `internal/discordbot/ui/responses_test.go`
+- `internal/store/migrations_test.go`

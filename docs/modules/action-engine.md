@@ -3,7 +3,7 @@
 The action engine is the asynchronous execution path for case actions. It starts
 after case creation persists `CaseActionExecution` rows and keeps pulling the
 next executable action for a case until none remain. The main orchestration
-lives in `app/actions.go`.
+lives in `internal/quack/actions.go`.
 
 ## Responsibilities
 
@@ -17,10 +17,9 @@ lives in `app/actions.go`.
 ## Execution Flow
 
 1. `CaseService.Create` persists the case, initial event, and action execution
-   rows, then calls `enqueueCaseActions` in `app/actions_queue.go`.
-2. The queue handler builds a fresh `ActionService` and calls
-   `ProcessCaseActions(caseID)`.
-3. `ProcessCaseActions` loops on `storage.Store.ClaimNextCaseAction`, which
+   rows, then submits a case-ID wake-up hint through `CaseWorkScheduler`.
+2. The injected queue calls the existing `ActionService.ProcessCaseActions`.
+3. `ProcessCaseActions` loops on `Repository.ClaimNextCaseAction`, which
    locks the case and next eligible execution row for that case.
 4. `processClaimedAction` looks up the executor by `ActionType`, falls back to
    `actions.Unsupported`, and runs it.
@@ -30,13 +29,13 @@ lives in `app/actions.go`.
 6. If the action failed and the template snapshot does not allow
    `continue_on_error`, `SkipCaseActions` marks later rows as skipped.
 7. If the failure is retryable and the execution allows retries,
-   `scheduleCaseActions` re-enqueues the case after `next_retry_at`.
+   the persisted `next_retry_at` makes the case discoverable when due.
 
 ## Executor Map
 
 `NewActionService` wires action types to executor modules:
 
-- `send_dm`: implemented in `app/actions/send_dm.go`
+- `send_dm`: implemented in `internal/quack/actionmods/send_dm.go`
 - `timeout_user`: stubbed, currently returns `action_not_implemented`
 - `kick_user`: stubbed, currently returns `action_not_implemented`
 - `ban_user`: stubbed, currently returns `action_not_implemented`
@@ -71,7 +70,7 @@ actions do not send the follow-up DM.
 
 ## Storage Contract
 
-The action engine depends on these repository methods in `storage/cases.go`:
+The action engine depends on these repository methods in `internal/store/cases.go`:
 
 - `ClaimNextCaseAction`
 - `CompleteCaseAction`
@@ -83,23 +82,21 @@ another row while one execution for the same case is already `running`.
 
 ## Maintainability Notes
 
-- `processCaseActionQueueEvent` constructs a new `ActionService` per queue
-  event. Shared executor state does not currently exist.
-- `scheduleCaseActions` uses an in-process timer goroutine. Delayed retries are
-  not durable across process restarts; startup recovery relies on
-  `EnqueuePendingCaseActions`.
+- The queue is injected through a core-owned interface; the application core
+  does not import the worker implementation.
+- Delayed retries are durable because timing is stored in MySQL and discovered
+  by the scheduler rather than owned by a goroutine.
 - Because `continue_on_error` is read from `TemplateSnapshotJSON`, any change to
   snapshot shape must stay backward compatible with `continueOnError`.
 
 Relevant files:
 
-- `app/actions.go`
-- `app/actions_queue.go`
-- `app/actions/types.go`
-- `app/actions/send_dm.go`
-- `app/actions/timeout.go`
-- `app/actions/kick.go`
-- `app/actions/ban.go`
-- `app/discord_actions.go`
-- `storage/cases.go`
-- `app/actions_test.go`
+- `internal/quack/actions.go`
+- `internal/workqueue/queue.go`
+- `internal/quack/actionmods/types.go`
+- `internal/quack/actionmods/send_dm.go`
+- `internal/quack/actionmods/timeout.go`
+- `internal/quack/actionmods/kick.go`
+- `internal/quack/actionmods/ban.go`
+- `internal/store/cases.go`
+- `internal/quack/actions_test.go`

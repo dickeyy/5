@@ -1,86 +1,50 @@
-# Event Queue
+# Work Queue
 
-The event queue is the process-local worker pool used for asynchronous work.
-Right now its only live workload is case-action execution. The implementation is
-in `services/event-queue.go`.
+`internal/workqueue` is an injected in-process worker pool for case-action
+execution. It contains no datastore or configuration globals.
 
-## Structure
+## Source of truth
 
-`EventQueue` contains:
+The queue channel is a wake-up mechanism, not durable storage. Pending and
+retrying work lives in `case_action_executions`.
 
-- a buffered `chan structs.QueueEvent`
-- a worker count
-- a wait group for worker shutdown
-- an `active` flag guarded by `mu`
+The scheduler:
 
-Queue event shape, from `structs/queue.go`:
+- accepts immediate case-ID hints after case creation;
+- discovers executable cases at startup and every second;
+- reads at most 100 case IDs per discovery pass;
+- lets database claim locks prevent duplicate execution;
+- records accepted, dropped, processed, and failed hint counters.
 
-- `Type`: log-friendly event name
-- `Data`: opaque payload
-- `Handler`: function accepting `structs.DataStore` and the payload
+A full channel may drop an immediate hint without losing the action because the
+next discovery pass reads it from MySQL.
 
-The queue stores the shared `*storage.Store` in a package-global variable during
-`Init`, and passes it to every handler.
+## Retries
+
+Action completion writes `next_retry_at`. No delayed goroutine owns retry
+state. Once the timestamp becomes due, normal discovery submits the case again.
+This makes delayed retry behavior recover after process restarts.
 
 ## Lifecycle
 
-Startup order from `main.go` matters:
+`internal/runtime` constructs the queue from `EVENT_QUEUE_SIZE` and
+`EVENT_QUEUE_WORKERS`, injects it into the application services, and starts it
+with the action processor and repository due-work source.
 
-1. create the storage store
-2. call `EventQueue.Init(store)`
-3. call `EventQueue.Start()`
-4. let producers enqueue work
+Shutdown marks the queue inactive, cancels polling, closes the job channel
+outside the queue mutex, and waits for polling and workers to drain. New
+submissions are rejected after shutdown begins.
 
-Behavior by method:
+## Limits
 
-- `Init`: allocates the queue with `lib.Config.EventQueue.Size`
-- `Start`: flips `active` and launches `workers` goroutines
-- `Enqueue`: returns whether the event was accepted and records a drop counter
-  if the queue is inactive or the buffer is full
-- `Process`: executes the handler and recovers panics
-- `Stop`: closes the channel and waits for workers to exit
-- `IsActive` and `QueueSize`: read-only helpers
-
-## Delivery Guarantees
-
-The queue is best-effort, in-process delivery:
-
-- no persistence
-- no acknowledgement or replay log
-- no blocking backpressure for producers
-- no dead-letter handling
-
-When the buffer is full, `Enqueue` logs and drops the event. Queue events carry
-an event ID, creation timestamp, request ID, and correlation ID. When the
-process restarts, pending actions are recovered separately by
-`app.EnqueuePendingCaseActions`, which queries storage for executable cases and
-re-enqueues them.
-
-Queue stats are exposed through guarded ops status responses and include buffer
-size, worker count, active state, queue depth, accepted events, dropped events,
-processed events, failed events, and panics.
-
-## Current Workload
-
-`app/actions_queue.go` publishes `case_action_execution` events with a payload
-containing `CaseID`. The handler type-asserts the shared datastore back to
-`*storage.Store` and runs the action engine.
-
-That means queue concurrency is global, but actual action ordering is still
-serialized per case by `storage.ClaimNextCaseAction`.
-
-## Maintainability Notes
-
-- The package-global `EQ` and package-global datastore pointer make the queue
-  easy to access, but they also hard-code a single process-wide queue instance.
-- Handler execution is synchronous inside each worker goroutine. Long-running
-  handlers consume a worker until they finish.
-- Because full buffers drop work, increasing `EventQueue.Size` and worker count
-  is currently the only built-in tuning path.
+- Workers still run in the API/bot process.
+- There is no dead-letter or manual replay interface yet.
+- A repeatedly failing queue handler is logged and rediscovered from persisted
+  state according to its execution status.
 
 Relevant files:
 
-- `services/event-queue.go`
-- `structs/queue.go`
-- `app/actions_queue.go`
-- `main.go`
+- `internal/workqueue/queue.go`
+- `internal/quack/actions.go`
+- `internal/store/cases.go`
+- `internal/runtime/runtime.go`

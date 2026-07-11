@@ -4,13 +4,13 @@
 
 The default process starts everything in one binary: API, Discord session, DB
 migrations, Redis-backed storage, and the in-process action queue. See
-`main.go`.
+`cmd/quack/main.go`.
 
 Typical loop:
 
 1. Set the required env vars in `.env`.
 2. Start MySQL and Redis with `docker compose up -d`.
-3. Run the app with `go run .`.
+3. Run the app with `go run ./cmd/quack`.
 4. Exercise API routes on `http://localhost:8080` unless `API_PORT` is changed.
 
 The Compose defaults expose:
@@ -48,7 +48,7 @@ The container assets are intentionally small:
 - `.env.example` provides the env names expected by the Compose workflow
 
 Use `docker compose up -d` when you only want the local data services and plan
-to run `go run .` on the host.
+to run `go run ./cmd/quack` on the host.
 
 Use `docker compose --profile app up --build` when you want Compose to run the
 Quack process as well. In that mode, the app container uses `mysql` and `redis`
@@ -59,7 +59,7 @@ service hostnames instead of `127.0.0.1`.
 Start the app:
 
 ```sh
-go run .
+go run ./cmd/quack
 ```
 
 Start dependencies:
@@ -91,21 +91,21 @@ That cache override is a local convenience, not a code requirement.
 
 ## Where To Change Things
 
-- Add or change API endpoints in `api/routes/` and `api/middleware/`.
-- Add or change business rules in `app/`.
-- Add or change persistence behavior in `storage/`.
-- Add or change schema records and enums in `structs/schema.go`.
-- Add or change Discord command behavior in `discord/commands/`.
-- Add or change process-level infrastructure in `services/`.
+- Add or change API endpoints in `internal/httpapi/routes/` and `internal/httpapi/middleware/`.
+- Add or change business rules in `internal/quack/`.
+- Add or change persistence behavior in `internal/store/`.
+- Add or change schema records and enums in `internal/quack/model/schema.go`.
+- Add or change Discord command behavior in `internal/discordbot/commands/`.
+- Add or change process-level infrastructure in `internal/runtime/` and `internal/workqueue/`.
 
-The main shared service boundary is `app.Services` in `app/app.go`. Prefer
+The main shared service boundary is `quack.Services` in `internal/quack/app.go`. Prefer
 putting business behavior there rather than duplicating it in route handlers or
 Discord commands.
 
 ## Current Maintainability Notes
 
 - The `Legacy/` tree is still present but separate from the v5 runtime. The
-  current process entrypoint is `main.go`, not `Legacy/main.go`.
+  current process entrypoint is `cmd/quack/main.go`, not `Legacy/main.go`.
 - The dashboard-facing product handoff lives in `website-agent-plan.md`.
 - The product roadmap and policy model live in `v5.md`.
 - CORS is currently fixed to localhost port `3000`, which matters whenever the
@@ -114,10 +114,10 @@ Discord commands.
 
 Relevant files:
 
-- `main.go`
-- `app/app.go`
-- `api/routes/router.go`
-- `discord/commands/case.go`
+- `cmd/quack/main.go`
+- `internal/quack/app.go`
+- `internal/httpapi/routes/router.go`
+- `internal/discordbot/commands/case.go`
 - `compose.yaml`
 - `Dockerfile`
 - `.env.example`

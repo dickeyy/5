@@ -75,9 +75,9 @@
 - [ ] Add Docker Compose smoke tests for startup, `/status`, command sync, and `/ops/status`.
 - [ ] Add full Discord interaction tests for commands, components, modals, and deferred edits.
 - [ ] Add end-to-end tests for template creation, case creation, action execution, audit rows, and Discord response updates.
-- [ ] Add durable delayed retry handling for case actions.
+- [x] Add durable delayed retry handling for case actions.
 - [ ] Add dead-letter or replay handling for failed queue events.
-- [ ] Add queue recovery tests for restart and graceful shutdown.
+- [x] Add queue recovery tests for restart and graceful shutdown.
 - [ ] Add structured API error responses with request and correlation IDs.
 - [ ] Add auth failure and permission denial logs with trace IDs.
 - [ ] Add configurable CORS origins for non-local environments.

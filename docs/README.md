@@ -19,18 +19,18 @@ remain the higher-level planning references.
 
 The live backend currently has four main runtime surfaces:
 
-- Discord bot startup, slash-command registration, and interaction dispatch in `main.go`, `discord/commands/`, and `discord/interactions/`.
-- HTTP API routes for status, ops status, auth, guild context, templates, case reads and creation, and guild audit reads in `api/server.go` and `api/routes/`.
-- Case-action queue processing in `services/event-queue.go` and `app/actions_queue.go`.
+- Discord bot startup, slash-command registration, and interaction dispatch in `cmd/quack/main.go`, `internal/discordbot/commands/`, and `internal/discordbot/interactions/`.
+- HTTP API routes for status, ops status, auth, guild context, templates, case reads and creation, and guild audit reads in `internal/httpapi/server.go` and `internal/httpapi/routes/`.
+- Case-action queue processing in `internal/workqueue/queue.go` and `internal/workqueue/queue.go`.
 - Local container packaging for MySQL, Redis, and the app profile in `compose.yaml` and `Dockerfile`.
 
 Relevant files:
 
-- `main.go`
-- `api/server.go`
-- `api/routes/router.go`
-- `discord/commands/case.go`
-- `discord/interactions/dispatcher.go`
-- `discord/ui/message.go`
-- `app/actions_queue.go`
+- `cmd/quack/main.go`
+- `internal/httpapi/server.go`
+- `internal/httpapi/routes/router.go`
+- `internal/discordbot/commands/case.go`
+- `internal/discordbot/interactions/dispatcher.go`
+- `internal/discordbot/ui/message.go`
+- `internal/workqueue/queue.go`
 - `compose.yaml`
