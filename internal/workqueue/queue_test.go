@@ -79,12 +79,20 @@ func TestQueueStopDrainsWithoutDeadlock(t *testing.T) {
 func TestQueueSaturationLeavesWorkDiscoverable(t *testing.T) {
 	q := New(1, 1)
 	block := make(chan struct{})
+	started := make(chan struct{})
+	var startedOnce sync.Once
 	q.Start(context.Background(), func(context.Context, string) error {
+		startedOnce.Do(func() { close(started) })
 		<-block
 		return nil
 	}, nil)
-	q.Submit(context.Background(), "one")
-	q.Submit(context.Background(), "two")
+	if !q.Submit(context.Background(), "one") {
+		t.Fatal("expected first immediate hint to be accepted")
+	}
+	<-started
+	if !q.Submit(context.Background(), "two") {
+		t.Fatal("expected second immediate hint to fill the queue")
+	}
 	if q.Submit(context.Background(), "three") {
 		t.Fatal("expected saturated queue to reject immediate hint")
 	}

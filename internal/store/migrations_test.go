@@ -366,7 +366,7 @@ func TestMigration0003RollbackDowngradesPostMigrationCases(t *testing.T) {
 		TargetDiscordUserID: "target", ModeratorDiscordUserID: "moderator", Reason: "reason",
 		Validity: model.CaseValidityValid, Source: model.CaseSourceDashboard, MetadataJSON: `{}`,
 	}
-	if err := db.Select("*").Create(&postMigration).Error; err != nil {
+	if err := db.Omit("ContextValuesJSON", "VoidedReason", "VoidedByDiscordUserID", "VoidedAt", "ReplacementCaseID", "ReplacesCaseID", "IdempotencyKey").Create(&postMigration).Error; err != nil {
 		t.Fatalf("create post-migration case: %v", err)
 	}
 
@@ -686,7 +686,7 @@ func TestRollbackLastMigrationRunsReviewedInverse(t *testing.T) {
 	}
 }
 
-func TestRollbackRefusesForwardOnlyBaselineWithoutChangingHistory(t *testing.T) {
+func TestRollbackRefusesForwardOnlyModuleMigrationWithoutChangingHistory(t *testing.T) {
 	db := openSQLiteMigrationDB(t)
 	repositories := New(db, nil)
 	if err := repositories.Migrate(); err != nil {
@@ -698,18 +698,9 @@ func TestRollbackRefusesForwardOnlyBaselineWithoutChangingHistory(t *testing.T) 
 		t.Fatalf("make post-migration history canonical: %v", err)
 	}
 
-	if err := repositories.RollbackLastMigration(); err != nil {
-		t.Fatalf("roll back reversible guild settings migration: %v", err)
-	}
-	if err := repositories.RollbackLastMigration(); err != nil {
-		t.Fatalf("roll back reversible case validity migration: %v", err)
-	}
-	if err := repositories.RollbackLastMigration(); err != nil {
-		t.Fatalf("roll back reversible template compatibility migration: %v", err)
-	}
 	err := repositories.RollbackLastMigration()
 	if !errors.Is(err, ErrMigrationNotReversible) {
-		t.Fatalf("expected forward-only refusal, got %v", err)
+		t.Fatalf("expected module migration forward-only refusal, got %v", err)
 	}
 	assertRepresentativeHistory(t, db, want)
 }
@@ -721,10 +712,11 @@ func TestMigration0004SeedsSettingsRerunsAndRollsBackWithoutHistoryLoss(t *testi
 		t.Fatalf("apply migrations through 0003: %v", err)
 	}
 	want := insertRepresentativeHistory(t, db)
-	if err := runMigrations(db, registeredMigrations()); err != nil {
+	through0004 := registeredMigrations()[:4]
+	if err := runMigrations(db, through0004); err != nil {
 		t.Fatalf("apply migration 0004: %v", err)
 	}
-	if err := runMigrations(db, registeredMigrations()); err != nil {
+	if err := runMigrations(db, through0004); err != nil {
 		t.Fatalf("rerun migration 0004: %v", err)
 	}
 	var settings []migration0004GuildSettingsRecord
@@ -735,14 +727,14 @@ func TestMigration0004SeedsSettingsRerunsAndRollsBackWithoutHistoryLoss(t *testi
 		t.Fatalf("unexpected migration 0004 seed: %+v", settings)
 	}
 	assertRepresentativeHistory(t, db, want)
-	if err := rollbackLastMigration(db, registeredMigrations()); err != nil {
+	if err := rollbackLastMigration(db, through0004); err != nil {
 		t.Fatalf("roll back migration 0004: %v", err)
 	}
 	if db.Migrator().HasTable(&migration0004GuildSettingsRecord{}) {
 		t.Fatal("guild settings table remained after rollback")
 	}
 	assertRepresentativeHistory(t, db, want)
-	if err := runMigrations(db, registeredMigrations()); err != nil {
+	if err := runMigrations(db, through0004); err != nil {
 		t.Fatalf("reapply migration 0004: %v", err)
 	}
 	var count int64
@@ -916,7 +908,11 @@ func insertRepresentativeHistory(t *testing.T, db *gorm.DB) representativeHistor
 		&AuditLogEntryRecord{ULIDModelRecord: ULIDModelRecord{ID: want.AuditID, CreatedAt: now, UpdatedAt: now}, GuildID: want.GuildID, Source: model.AuditSource("dashboard"), Action: "case.create", ResourceType: "case", ResourceID: want.CaseID, Result: model.AuditResult("success"), MetadataJSON: "{}"},
 	}
 	for _, record := range records {
-		if err := db.Create(record).Error; err != nil {
+		query := db
+		if _, ok := record.(*CaseActionExecutionRecord); ok && !db.Migrator().HasColumn(&CaseActionExecutionRecord{}, "LeaseToken") {
+			query = query.Omit("LeaseToken", "LeaseExpiresAt", "DismissedAt", "DismissedByDiscordUserID", "ReversalOfExecutionID", "ReversalAppealID")
+		}
+		if err := query.Create(record).Error; err != nil {
 			t.Fatalf("insert representative history %T: %v", record, err)
 		}
 	}

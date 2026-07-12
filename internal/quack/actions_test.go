@@ -2,8 +2,9 @@ package quack_test
 
 import (
 	"context"
+	"strconv"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/internal/quack"
@@ -52,15 +53,19 @@ func TestActionServiceProcessesSafeActions(t *testing.T) {
 		t.Fatalf("process actions: %v", err)
 	}
 
-	if len(fakeDiscord.dms) != 1 || fakeDiscord.dms[0].TargetID != "target-1" || fakeDiscord.dms[0].Message != "You received a warning in this server: No spam" {
+	if len(fakeDiscord.dms) != 1 || fakeDiscord.dms[0].TargetID != "target-1" || !strings.Contains(fakeDiscord.dms[0].Message, "Reason: No spam") {
 		t.Fatalf("unexpected DMs: %+v", fakeDiscord.dms)
 	}
 	actions, err := store.ListCaseActionExecutions(ctx, created.ID)
 	if err != nil {
 		t.Fatalf("list actions: %v", err)
 	}
-	if len(actions) != 1 || actions[0].ActionType != model.ActionSendDM || actions[0].Status != model.ActionExecutionSucceeded {
-		t.Fatalf("expected generated warning notification to succeed, got %+v", actions)
+	if len(actions) != 0 {
+		t.Fatalf("expected no enforcement action for the default warning, got %+v", actions)
+	}
+	notification, err := store.GetCaseNotification(ctx, created.ID)
+	if err != nil || notification == nil || notification.Status != model.NotificationSent {
+		t.Fatalf("expected sent case notification, got %+v err=%v", notification, err)
 	}
 	cases, err := store.ListCases(ctx, modContext.Guild.ID)
 	if err != nil {
@@ -71,7 +76,7 @@ func TestActionServiceProcessesSafeActions(t *testing.T) {
 	}
 }
 
-func TestActionServiceRetriesTransientFailure(t *testing.T) {
+func TestActionServiceDoesNotAutomaticallyRetryNotificationFailure(t *testing.T) {
 	ctx := context.Background()
 	store := newMigratedStore(t)
 	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
@@ -85,13 +90,6 @@ func TestActionServiceRetriesTransientFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create case: %v", err)
 	}
-	if err := store.DB().Model(&model.CaseActionExecution{}).Where("case_id = ?", created.ID).Updates(map[string]any{
-		"max_retries":      1,
-		"retry_backoff_ms": 1000,
-	}).Error; err != nil {
-		t.Fatalf("configure retry: %v", err)
-	}
-
 	fakeDiscord := &fakeActionClient{dmFailures: []error{
 		quack.DiscordActionError{Code: "rate_limited", Message: "rate limited", Retryable: true},
 		nil,
@@ -99,27 +97,15 @@ func TestActionServiceRetriesTransientFailure(t *testing.T) {
 	if err := quack.NewActionService(store, fakeDiscord).ProcessCaseActions(ctx, created.ID); err != nil {
 		t.Fatalf("process first attempt: %v", err)
 	}
-	actions, err := store.ListCaseActionExecutions(ctx, created.ID)
-	if err != nil {
-		t.Fatalf("list actions: %v", err)
-	}
-	if actions[0].Status != model.ActionExecutionRetrying || actions[0].NextRetryAt == nil {
-		t.Fatalf("expected retrying action, got %+v", actions[0])
-	}
-
-	past := time.Now().UTC().Add(-time.Minute)
-	if err := store.DB().Model(&model.CaseActionExecution{}).Where("id = ?", actions[0].ID).Update("next_retry_at", past).Error; err != nil {
-		t.Fatalf("make retry eligible: %v", err)
+	notification, err := store.GetCaseNotification(ctx, created.ID)
+	if err != nil || notification == nil || notification.Status != model.NotificationFailed {
+		t.Fatalf("expected terminal notification failure, got %+v err=%v", notification, err)
 	}
 	if err := quack.NewActionService(store, fakeDiscord).ProcessCaseActions(ctx, created.ID); err != nil {
-		t.Fatalf("process second attempt: %v", err)
+		t.Fatalf("process duplicate request: %v", err)
 	}
-	actions, err = store.ListCaseActionExecutions(ctx, created.ID)
-	if err != nil {
-		t.Fatalf("list actions: %v", err)
-	}
-	if actions[0].Status != model.ActionExecutionSucceeded || actions[0].AttemptCount != 2 {
-		t.Fatalf("expected successful retry, got %+v", actions[0])
+	if len(fakeDiscord.dms) != 0 {
+		t.Fatalf("notification retry sent a duplicate: %+v", fakeDiscord.dms)
 	}
 }
 
@@ -156,14 +142,14 @@ func TestActionServiceDoesNotNotifyForUnsupportedAction(t *testing.T) {
 	if actions[0].Status != model.ActionExecutionFailed {
 		t.Fatalf("expected unsupported action to fail, got %+v", actions[0])
 	}
-	if actions[0].LastErrorCode != "action_not_implemented" || actions[0].NextRetryAt != nil {
+	if actions[0].LastErrorCode != "discord_unavailable" || actions[0].NextRetryAt != nil {
 		t.Fatalf("expected visible non-retryable unsupported action, got %+v", actions[0])
 	}
 	attempts, err := store.ListCaseActionAttempts(ctx, []string{actions[0].ID})
 	if err != nil {
 		t.Fatalf("list attempts: %v", err)
 	}
-	if len(attempts) != 1 || attempts[0].ErrorCode != "action_not_implemented" {
+	if len(attempts) != 1 || attempts[0].ErrorCode != "discord_unavailable" {
 		t.Fatalf("expected failed unsupported attempt, got %+v", attempts)
 	}
 	audits, err := store.ListAuditLogEntries(ctx, modContext.Guild.ID)
@@ -179,6 +165,40 @@ func TestActionServiceDoesNotNotifyForUnsupportedAction(t *testing.T) {
 	}
 	if failureAudit == nil || failureAudit.RequestID != "req-action-1" || failureAudit.CorrelationID != "corr-action-1" {
 		t.Fatalf("expected traced action failure audit, got %+v", audits)
+	}
+}
+
+func TestActionServiceReversalResolvesCaseNumber(t *testing.T) {
+	ctx := context.Background()
+	store := newMigratedStore(t)
+	admin := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
+	moderator := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
+	template := createAppTemplate(t, ctx, store, admin, actionTemplateInput("numbered-reversal", []quack.TemplateActionInput{{ActionType: model.ActionTimeoutUser, TimeoutDurationSeconds: 60}}))
+	created, err := quack.NewCaseService(store).Create(ctx, moderator, quack.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
+	if err != nil {
+		t.Fatalf("create reversal case: %v", err)
+	}
+	actions, err := store.ListCaseActionExecutions(ctx, created.ID)
+	if err != nil || len(actions) != 1 {
+		t.Fatalf("load original action: actions=%+v err=%v", actions, err)
+	}
+	if err := store.DB().Model(&model.CaseActionExecution{}).Where("id = ?", actions[0].ID).Update("status", model.ActionExecutionSucceeded).Error; err != nil {
+		t.Fatalf("mark original action succeeded: %v", err)
+	}
+	authorizer := quack.NewGuildService(store, fakeDiscordClient{authorization: &quack.DiscordGuildAuthorization{
+		Guild:  quack.DiscordBotGuild{ID: "guild-1", OwnerID: "owner-1"},
+		Actor:  quack.DiscordMemberAuthorization{DiscordUserID: "mod-1", Present: true, PermissionBits: uint64(discordgo.PermissionModerateMembers), TopRolePosition: 10},
+		Bot:    quack.DiscordMemberAuthorization{DiscordUserID: "quack", Present: true, PermissionBits: ^uint64(0), TopRolePosition: 100, Bot: true},
+		Target: &quack.DiscordMemberAuthorization{DiscordUserID: "target-1", Present: true, TopRolePosition: 1},
+	}})
+	reversal, err := quack.NewActionService(store, nil).
+		WithRecoveryControls(authorizer, nil).
+		ReverseForAppeal(ctx, moderator, strconv.FormatUint(created.CaseNumber, 10), actions[0].ID, model.ActionRemoveTimeout, nil)
+	if err != nil || reversal == nil {
+		t.Fatalf("reverse case by number: reversal=%+v err=%v", reversal, err)
+	}
+	if reversal.CaseID != created.ID || reversal.ActionType != model.ActionRemoveTimeout {
+		t.Fatalf("reversal targeted wrong case: %+v", reversal)
 	}
 }
 

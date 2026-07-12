@@ -11,13 +11,14 @@ type OAuthState struct {
 
 // AuthSession groups the auth session state used to keep this package's responsibilities explicit.
 type AuthSession struct {
-	ID               string    `json:"id"`
+	ID               string    `json:"-"`
 	DiscordUserID    string    `json:"discord_user_id"`
 	Username         string    `json:"username"`
 	GlobalName       string    `json:"global_name"`
 	Avatar           string    `json:"avatar"`
-	AccessToken      string    `json:"access_token"`
-	RefreshToken     string    `json:"refresh_token"`
+	AccessToken      string    `json:"-"`
+	RefreshToken     string    `json:"-"`
+	CSRFToken        string    `json:"-"`
 	TokenType        string    `json:"token_type"`
 	Scope            string    `json:"scope"`
 	TokenExpiresAt   time.Time `json:"token_expires_at"`

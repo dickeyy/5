@@ -35,14 +35,24 @@ The current backend already supports important parts of the intended v5 directio
   editable starter policy, and its one-time dashboard review notice. Guild
   update, leave, rejoin, and channel-deletion events preserve history while
   refreshing identity and clearing stale configured references.
+- Templates now own validated ordered context definitions, reversible archive
+  and restore, and confirmed policy-only import/export. Case snapshots preserve
+  definitions and submitted member-visible values across versions.
+- Case creation now atomically stores immutable evidence, correction links,
+  optional enforcement, and exactly-one notification work. All-time escalation
+  excludes voided and imported-v4 history.
+- Discord timeout, kick, ban, timeout removal, and unban use classified,
+  redacted outcomes. Action leases/fencing recover crashes; staff can review,
+  retry, dismiss, void, or reverse without deleting history.
+- Member notification is a case-level post-outcome workflow rather than a
+  `send_dm` action. Evidence capture and managed attachment copies share one
+  bounded HTTP/Discord service.
 
 ## Behavior That Must Change
 
 The current implementation differs from the v5 definition in several core rules:
 
-- The current level-owned notification is still represented as a pre-enforcement `send_dm` action. V5 sends one structured notification after the action outcome is known.
 - The current dashboard guild flow is staff-focused and does not yet provide case-owner access for members who left or were banned.
-- Template import, export, and restore are not yet defined in the running product.
 
 ## Rejected Concepts to Remove
 
@@ -58,14 +68,7 @@ Historical database compatibility may require a later migration rather than imme
 
 The intended v5 core still requires product behavior that is not complete today:
 
-- Real Discord timeout, kick, and ban execution.
-- Safe automatic retry classification and staff-controlled retry, dismiss, and void actions.
-- One structured member notification sent after the action outcome is known.
-- Structured template context fields shared by Discord and the dashboard.
-- Discord message context actions and pasted-link evidence capture.
-- Permanent message snapshots and attachment preservation through a managed evidence channel.
 - Member-facing case access with the agreed transparency and staff-identity rules.
-- Case voiding and replacement behavior.
 - A complete case-linked appeal flow.
 - Searchable audit views and optional Discord audit mirroring for all moderators.
 - Derived staff statistics.
@@ -74,11 +77,9 @@ The intended v5 core still requires product behavior that is not complete today:
 
 ## Optional Modules Must Stay Separate
 
-Some v4 features remain part of Quack v5 as optional guild modules, not as extensions of the case model:
+Some v4 features remain part of Quack v5 as optional guild modules, not as extensions of the case model. Tickets and general logging now implement this boundary through the isolated module registry, lifecycle, Discord adapter, route, migration, and privacy contracts documented in `docs/modules/optional-tickets-and-logging.md`.
 
-- Tickets remain private Discord support threads with their own lifecycle and transcripts.
-- General logging sends selected Discord events to staff log channels and remains separate from the audit log.
-- Honeypots may invoke a configured template automatically, but the resulting moderation still uses the normal case, action, notification, and audit flow.
+- Honeypots still need to invoke a configured template automatically while keeping the resulting moderation on the normal case, action, notification, and audit flow.
 
 Purge, lockdown, ping, server information, and similar utilities may be considered later. They should not add fields, permissions, or special cases to the core moderation system.
 

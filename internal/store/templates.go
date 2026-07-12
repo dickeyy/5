@@ -50,6 +50,9 @@ func (s *Store) CreateCaseTemplate(ctx context.Context, params CreateCaseTemplat
 		if err := createTemplateLevels(tx, template.ID, params.Levels, now); err != nil {
 			return err
 		}
+		if err := createTemplateContextFields(tx, template.ID, params.ContextFields, now); err != nil {
+			return err
+		}
 
 		if params.Audit != nil {
 			audit := *params.Audit
@@ -76,7 +79,7 @@ func (s *Store) ListCaseTemplates(ctx context.Context, guildID string) ([]Expand
 
 	var records []CaseTemplateRecord
 	if err := s.db.WithContext(ctx).Unscoped().
-		Where("guild_id = ? AND archived_at IS NULL", guildID).
+		Where("guild_id = ?", guildID).
 		Order("slug ASC").
 		Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("list case templates: %w", err)
@@ -163,6 +166,12 @@ func (s *Store) UpdateCaseTemplate(ctx context.Context, params UpdateCaseTemplat
 		if err := createTemplateLevels(tx, record.ID, params.Levels, now); err != nil {
 			return err
 		}
+		if err := tx.Where("template_id = ?", record.ID).Delete(&CaseTemplateContextFieldRecord{}).Error; err != nil {
+			return fmt.Errorf("replace case template context fields: %w", err)
+		}
+		if err := createTemplateContextFields(tx, record.ID, params.ContextFields, now); err != nil {
+			return err
+		}
 
 		if params.Audit != nil {
 			audit := *params.Audit
@@ -182,6 +191,44 @@ func (s *Store) UpdateCaseTemplate(ctx context.Context, params UpdateCaseTemplat
 	}
 
 	return s.GetCaseTemplateExpanded(ctx, params.GuildID, record.ID)
+}
+
+// RestoreCaseTemplate makes an archived template available again without changing its identity or version.
+func (s *Store) RestoreCaseTemplate(ctx context.Context, guildID, templateID string, audit *model.AuditLogEntry) (*ExpandedCaseTemplate, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("database not connected")
+	}
+	now := time.Now().UTC()
+	var record CaseTemplateRecord
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Unscoped().Where("id = ? AND guild_id = ?", templateID, guildID).First(&record)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return gorm.ErrRecordNotFound
+		}
+		if result.Error != nil {
+			return fmt.Errorf("get case template for restore: %w", result.Error)
+		}
+		record.ArchivedAt = nil
+		record.UpdatedAt = now
+		if err := tx.Save(&record).Error; err != nil {
+			return fmt.Errorf("restore case template: %w", err)
+		}
+		if audit != nil {
+			entry := *audit
+			entry.ResourceID = record.ID
+			if err := createAuditLogEntry(tx, &entry, now); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.GetCaseTemplateExpanded(ctx, guildID, templateID)
 }
 
 // ArchiveCaseTemplate archives case template without deleting historical moderation references.
@@ -328,6 +375,10 @@ func getCaseTemplateExpanded(db *gorm.DB, guildID, templateID string) (*Expanded
 	}
 
 	template := caseTemplateModelFromRecord(templateRecord)
+	var contextFields []model.CaseTemplateContextField
+	if err := db.Where("template_id = ?", template.ID).Order("position ASC").Find(&contextFields).Error; err != nil {
+		return nil, fmt.Errorf("get case template context fields: %w", err)
+	}
 	var levelRecords []CaseTemplateLevelRecord
 	if err := db.Where("template_id = ?", template.ID).Order("position ASC").Find(&levelRecords).Error; err != nil {
 		return nil, fmt.Errorf("get case template levels: %w", err)
@@ -351,9 +402,23 @@ func getCaseTemplateExpanded(db *gorm.DB, guildID, templateID string) (*Expanded
 	}
 
 	return &ExpandedCaseTemplate{
-		Template: template,
-		Levels:   expandedLevels,
+		Template: template, ContextFields: contextFields, Levels: expandedLevels,
 	}, nil
+}
+
+// createTemplateContextFields persists validated definitions in their stable display order.
+func createTemplateContextFields(tx *gorm.DB, templateID string, fields []model.CaseTemplateContextField, now time.Time) error {
+	for i := range fields {
+		field := fields[i]
+		field.TemplateID = templateID
+		if err := prepareULIDModel(&field.ULIDModel, now); err != nil {
+			return fmt.Errorf("prepare template context field: %w", err)
+		}
+		if err := tx.Select("*").Create(&field).Error; err != nil {
+			return fmt.Errorf("create template context field: %w", err)
+		}
+	}
+	return nil
 }
 
 // createTemplateLevels creates template levels while preserving validation, authorization, and persistence invariants.

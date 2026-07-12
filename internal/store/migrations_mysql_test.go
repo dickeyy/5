@@ -82,37 +82,32 @@ func TestMySQLMigrateForwardRerunPreservationAndRollbackBoundary(t *testing.T) {
 		t.Fatalf("expected pending starter review notice, got %+v", guildSettings)
 	}
 
-	if err := repositories.RollbackLastMigration(); err != nil {
-		t.Fatalf("roll back guild settings migration: %v", err)
-	}
-	if db.Migrator().HasTable(&migration0004GuildSettingsRecord{}) {
-		t.Fatal("MySQL guild settings table remained after rollback")
-	}
-	assertRepresentativeHistory(t, db, want)
-	if err := repositories.RollbackLastMigration(); err != nil {
-		t.Fatalf("roll back case validity migration: %v", err)
-	}
-	if err := db.First(&mapped, "id = ?", want.CaseID).Error; err != nil {
-		t.Fatalf("load rolled-back representative case: %v", err)
-	}
-	if mapped.Status != "open" || mapped.Source != "discord_command" {
-		t.Fatalf("unexpected MySQL case rollback: %+v", mapped)
-	}
-	var preservedEvent migration0003LegacyEvent
-	if err := db.First(&preservedEvent, "id = ?", legacyEventID).Error; err != nil {
-		t.Fatalf("load preserved MySQL retired event after rollback: %v", err)
-	}
-	assertMigration0003LegacyEventEqual(t, preservedEvent, legacyEventBefore)
-	if err := repositories.RollbackLastMigration(); err != nil {
-		t.Fatalf("roll back template compatibility migration: %v", err)
-	}
-	assertTemplateArchiveState(t, db, disabledTemplateID, false)
-	assertTemplateArchiveState(t, db, windowTemplateID, false)
-	assertTemplateArchiveState(t, db, deletedTemplateID, false)
-	assertTemplateDeletedState(t, db, deletedTemplateID, true)
 	err = repositories.RollbackLastMigration()
 	if !errors.Is(err, ErrMigrationNotReversible) {
-		t.Fatalf("expected baseline rollback refusal, got %v", err)
+		t.Fatalf("expected module migration rollback refusal, got %v", err)
+	}
+	assertRepresentativeHistory(t, db, want)
+}
+
+func TestMySQLCoreModerationRollbackBeforeForwardOnlyModules(t *testing.T) {
+	db := openMySQLMigrationDB(t)
+	through0004 := registeredMigrations()[:4]
+	if err := runMigrations(db, through0004); err != nil {
+		t.Fatalf("apply MySQL migrations through 0004: %v", err)
+	}
+	want := insertRepresentativeHistory(t, db)
+	through0005 := registeredMigrations()[:5]
+	if err := runMigrations(db, through0005); err != nil {
+		t.Fatalf("apply MySQL core moderation migration: %v", err)
+	}
+	if !db.Migrator().HasTable(&migration0005Notification{}) || !db.Migrator().HasColumn(&migration0005CaseColumns{}, "IdempotencyKey") {
+		t.Fatal("MySQL core moderation schema was not created")
+	}
+	if err := rollbackLastMigration(db, through0005); err != nil {
+		t.Fatalf("roll back MySQL core moderation migration: %v", err)
+	}
+	if db.Migrator().HasTable(&migration0005Notification{}) || db.Migrator().HasColumn(&migration0005CaseColumns{}, "IdempotencyKey") {
+		t.Fatal("MySQL core moderation schema remained after rollback")
 	}
 	assertRepresentativeHistory(t, db, want)
 }

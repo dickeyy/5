@@ -50,6 +50,45 @@ func TestSetupRoutesStatus(t *testing.T) {
 	}
 }
 
+func TestSetupRoutesMountsCoreModerationRegistrarsInProductionRouter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	SetupRoutes(router, quack.New(nil))
+
+	routes := map[string]bool{}
+	for _, route := range router.Routes() {
+		routes[route.Method+" "+route.Path] = true
+	}
+	want := []struct {
+		method string
+		path   string
+		call   string
+	}{
+		{http.MethodPost, "/guilds/:discordGuildID/templates/:templateID/restore", "/guilds/guild/templates/template/restore"},
+		{http.MethodGet, "/guilds/:discordGuildID/templates/:templateID/export", "/guilds/guild/templates/template/export"},
+		{http.MethodPost, "/guilds/:discordGuildID/templates/import", "/guilds/guild/templates/import"},
+		{http.MethodPost, "/guilds/:discordGuildID/cases/:caseRef/void", "/guilds/guild/cases/1/void"},
+		{http.MethodGet, "/guilds/:discordGuildID/action-failures", "/guilds/guild/action-failures"},
+		{http.MethodPost, "/guilds/:discordGuildID/action-failures/:executionID/retry", "/guilds/guild/action-failures/execution/retry"},
+		{http.MethodPost, "/guilds/:discordGuildID/action-failures/:executionID/dismiss", "/guilds/guild/action-failures/execution/dismiss"},
+		{http.MethodPost, "/guilds/:discordGuildID/cases/:caseRef/reversals", "/guilds/guild/cases/1/reversals"},
+		{http.MethodGet, "/members/me/guilds/:guildID/cases", "/members/me/guilds/guild/cases"},
+		{http.MethodGet, "/members/me/cases/:caseID", "/members/me/cases/case"},
+	}
+	for _, route := range want {
+		if !routes[route.method+" "+route.path] {
+			t.Errorf("production router is missing %s %s", route.method, route.path)
+			continue
+		}
+		request := httptest.NewRequest(route.method, route.call, nil)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusUnauthorized {
+			t.Errorf("mounted route %s %s bypassed authentication or fell through: status=%d body=%s", route.method, route.call, response.Code, response.Body.String())
+		}
+	}
+}
+
 func TestRequestContextMiddlewareEchoesRequestID(t *testing.T) {
 	testutil.SetTestConfig(t)
 	gin.SetMode(gin.TestMode)
@@ -113,11 +152,18 @@ func TestOpsStatusRouteRequiresKey(t *testing.T) {
 	if err := json.Unmarshal(allowedResponse.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode ops body: %v", err)
 	}
-	if body.Scope != "global" || len(body.Actions.Capabilities) != 4 {
+	if body.Scope != "global" || len(body.Actions.Capabilities) != 5 {
 		t.Fatalf("unexpected ops body: %+v", body)
 	}
-	if body.Actions.Capabilities[1].Executable || body.Actions.Capabilities[1].Status != "not_implemented" {
-		t.Fatalf("expected punitive actions to be visible as unsupported, got %+v", body.Actions.Capabilities)
+	for _, capability := range body.Actions.Capabilities[:3] {
+		if !capability.Executable || capability.Status != "implemented" {
+			t.Fatalf("expected punitive actions to be executable, got %+v", body.Actions.Capabilities)
+		}
+	}
+	for _, capability := range body.Actions.Capabilities[3:] {
+		if !capability.Executable || capability.Status != "staff_confirmed_reversal" {
+			t.Fatalf("expected reversals to require staff confirmation, got %+v", body.Actions.Capabilities)
+		}
 	}
 }
 

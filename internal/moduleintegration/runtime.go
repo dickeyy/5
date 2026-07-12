@@ -1,0 +1,217 @@
+// Package moduleintegration composes optional v5 modules at process boundaries
+// without allowing their storage or delivery lifecycles into the moderation core.
+package moduleintegration
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"time"
+
+	"github.com/bwmarrin/discordgo"
+	"github.com/quackdiscord/bot/internal/modules"
+	"github.com/quackdiscord/bot/internal/modules/generallogging"
+	"github.com/quackdiscord/bot/internal/modules/tickets"
+	"github.com/quackdiscord/bot/internal/quack"
+	"github.com/quackdiscord/bot/internal/quack/model"
+	"github.com/quackdiscord/bot/internal/store"
+	"github.com/rs/zerolog/log"
+	"gorm.io/gorm"
+)
+
+const (
+	transcriptSweepInterval = time.Hour
+	loggingQueueCapacity    = 1000
+	loggingQueueWorkers     = 2
+)
+
+// Runtime owns the optional-module services and their process-scoped workers.
+type Runtime struct {
+	Tickets       *tickets.Service
+	TicketDiscord *tickets.DiscordAdapter
+	Logging       *generallogging.Service
+	LoggingQueue  *generallogging.DeliveryQueue
+
+	db      *gorm.DB
+	cancel  context.CancelFunc
+	bulk    chan bulkDeleteEvent
+	bulkMu  sync.RWMutex
+	bulkWG  sync.WaitGroup
+	sweepWG sync.WaitGroup
+	closed  bool
+}
+
+// bulkDeleteEvent carries one bounded cache-aware bulk deletion job.
+type bulkDeleteEvent struct {
+	guildID, channelID string
+	messageIDs         []string
+}
+
+// New constructs the shared registry, immutable audit adapter, module stores,
+// Discord adapters, and bounded general-logging delivery workers.
+func New(_ context.Context, repositories *store.Store, session *discordgo.Session) (*Runtime, error) {
+	if repositories == nil || repositories.DB() == nil {
+		return nil, errors.New("optional module database is not configured")
+	}
+	if session == nil {
+		return nil, errors.New("optional module Discord session is not configured")
+	}
+
+	registry, err := modules.NewRegistry(
+		modules.NewSQLSettingsStore(repositories.DB()),
+		tickets.Descriptor(),
+		generallogging.Descriptor(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	auditor := moduleAuditor{repository: repositories}
+	ticketService := tickets.NewService(registry, tickets.NewStore(repositories.DB()), auditor)
+	resolver := guildResolver{db: repositories.DB()}
+	ticketClient := ticketDiscordClient{session: session, resolver: resolver}
+	loggingClient := loggingDiscordClient{session: session, resolver: resolver}
+	loggingService := generallogging.NewService(registry, auditor, loggingClient, nil)
+	workerCtx, cancel := context.WithCancel(context.Background())
+
+	runtime := &Runtime{
+		Tickets:       ticketService,
+		TicketDiscord: tickets.NewDiscordAdapter(ticketService, ticketClient),
+		Logging:       loggingService,
+		LoggingQueue:  generallogging.NewDeliveryQueue(workerCtx, loggingService, loggingQueueCapacity, loggingQueueWorkers),
+		db:            repositories.DB(),
+		cancel:        cancel,
+		bulk:          make(chan bulkDeleteEvent, loggingQueueCapacity),
+	}
+	for range loggingQueueWorkers {
+		runtime.bulkWG.Add(1)
+		go runtime.runBulkDeletes(workerCtx)
+	}
+	runtime.sweepWG.Add(1)
+	go func() {
+		defer runtime.sweepWG.Done()
+		runtime.runTranscriptSweep(workerCtx)
+	}()
+	return runtime, nil
+}
+
+// Close cancels periodic work and drains already accepted logging deliveries.
+func (r *Runtime) Close() {
+	if r == nil {
+		return
+	}
+	r.bulkMu.Lock()
+	if !r.closed {
+		r.closed = true
+		close(r.bulk)
+	}
+	r.bulkMu.Unlock()
+	r.bulkWG.Wait()
+	if r.LoggingQueue != nil {
+		r.LoggingQueue.Close()
+	}
+	if r.cancel != nil {
+		r.cancel()
+	}
+	r.sweepWG.Wait()
+}
+
+// runBulkDeletes drains cache-aware bulk deletion work independently of case actions.
+func (r *Runtime) runBulkDeletes(ctx context.Context) {
+	defer r.bulkWG.Done()
+	for event := range r.bulk {
+		_ = r.Logging.HandleBulkDelete(ctx, event.guildID, event.channelID, event.messageIDs)
+	}
+}
+
+// submitBulkDelete sheds work when the isolated logging queue is saturated.
+func (r *Runtime) submitBulkDelete(event bulkDeleteEvent) {
+	r.bulkMu.RLock()
+	defer r.bulkMu.RUnlock()
+	if r.closed {
+		return
+	}
+	select {
+	case r.bulk <- event:
+	default:
+		// General logging is explicitly shed rather than delaying moderation.
+	}
+}
+
+// runTranscriptSweep purges expired private content promptly at startup and on
+// a bounded interval while leaving ticket timelines intact.
+func (r *Runtime) runTranscriptSweep(ctx context.Context) {
+	r.purgeTranscripts(ctx)
+	ticker := time.NewTicker(transcriptSweepInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			r.purgeTranscripts(ctx)
+		}
+	}
+}
+
+// purgeTranscripts reports cleanup failure operationally without terminating
+// unrelated moderation or logging workers.
+func (r *Runtime) purgeTranscripts(ctx context.Context) {
+	if _, err := r.Tickets.PurgeExpiredTranscripts(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		log.Error().Err(err).Msg("Failed to purge expired ticket transcripts")
+	}
+}
+
+// moduleAuditor adapts module outcomes into the append-only core audit store.
+type moduleAuditor struct{ repository quack.Repository }
+
+// RecordModuleAudit appends one module event and never routes general-log
+// payload delivery into audit history.
+func (a moduleAuditor) RecordModuleAudit(ctx context.Context, event modules.AuditEvent) error {
+	if a.repository == nil {
+		return errors.New("module audit repository is not configured")
+	}
+	result := model.AuditResult(event.Result)
+	switch result {
+	case model.AuditResultSuccess, model.AuditResultFailure, model.AuditResultDenied:
+	default:
+		return errors.New("module audit result is invalid")
+	}
+	requestID, correlationID := quack.TraceIDsFromContext(ctx)
+	return a.repository.CreateAuditLogEntry(ctx, &model.AuditLogEntry{
+		GuildID: event.GuildID, ActorDiscordUserID: event.ActorDiscordUserID,
+		Source: model.AuditSourceSystem, Action: event.Action,
+		ResourceType: event.ResourceType, ResourceID: event.ResourceID,
+		Result: result, FailureReason: event.FailureReason,
+		RequestID: requestID, CorrelationID: correlationID, MetadataJSON: event.MetadataJSON,
+	})
+}
+
+// guildResolver translates Discord transport identities into Quack's internal
+// guild key without exposing persistence to feature modules.
+type guildResolver struct{ db *gorm.DB }
+
+// internalID returns the active internal guild identity for a Discord guild.
+func (r guildResolver) internalID(ctx context.Context, discordGuildID string) (string, error) {
+	var guild model.Guild
+	result := r.db.WithContext(ctx).Where("discord_guild_id = ? AND is_active = ?", discordGuildID, true).Limit(1).Find(&guild)
+	if result.Error != nil {
+		return "", result.Error
+	}
+	if result.RowsAffected == 0 {
+		return "", errors.New("active guild is not registered")
+	}
+	return guild.ID, nil
+}
+
+// discordID returns the Discord guild identity for an internal module key.
+func (r guildResolver) discordID(ctx context.Context, guildID string) (string, error) {
+	var guild model.Guild
+	result := r.db.WithContext(ctx).Where("id = ? AND is_active = ?", guildID, true).Limit(1).Find(&guild)
+	if result.Error != nil {
+		return "", result.Error
+	}
+	if result.RowsAffected == 0 {
+		return "", errors.New("active guild is not registered")
+	}
+	return guild.DiscordGuildID, nil
+}

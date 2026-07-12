@@ -8,52 +8,34 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/internal/config"
-	"github.com/quackdiscord/bot/internal/httpapi/middleware"
 	"github.com/quackdiscord/bot/internal/httpapi/routes"
+	"github.com/quackdiscord/bot/internal/moduleintegration"
 	"github.com/quackdiscord/bot/internal/quack"
 	"github.com/rs/zerolog/log"
 )
 
 // Run serves the configured HTTP API until the context is canceled, then performs a bounded graceful shutdown.
-func Run(ctx context.Context, cfg config.Config, services *quack.Services, discord routes.DiscordStatusProvider) error {
+func Run(ctx context.Context, cfg config.Config, services *quack.Services, moduleRuntime *moduleintegration.Runtime, discord routes.DiscordStatusProvider) error {
 	if cfg.Environment != "dev" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	allowedOrigins := map[string]struct{}{
-		"http://localhost:3000": {},
-		"http://127.0.0.1:3000": {},
+	registrar, err := NewPlatformRegistrar(cfg)
+	if err != nil {
+		return fmt.Errorf("validate HTTP platform configuration: %w", err)
 	}
 
 	r := gin.New()
-	r.Use(middleware.RequestContext)
-	r.Use(gin.Recovery())
-	r.Use(middleware.Logger)
-	r.Use(func(c *gin.Context) {
-		origin := c.GetHeader("Origin")
-		if _, ok := allowedOrigins[origin]; ok {
-			c.Header("Access-Control-Allow-Origin", origin)
-			c.Header("Access-Control-Allow-Credentials", "true")
-			c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID, X-Correlation-ID, X-Quack-Ops-Key")
-			c.Header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-			c.Header("Vary", "Origin")
-		}
+	if err := registrar.Register(r); err != nil {
+		return fmt.Errorf("configure trusted HTTP proxies: %w", err)
+	}
 
-		if c.Request.Method == http.MethodOptions {
-			c.AbortWithStatus(http.StatusNoContent)
-			return
-		}
-
-		c.Next()
-	})
-
-	routes.SetupRoutes(r, services, discord)
+	if err := routes.SetupRoutesWithModules(r, services, moduleRuntime, discord); err != nil {
+		return fmt.Errorf("register HTTP routes: %w", err)
+	}
 
 	log.Info().Msg("Starting API on port " + cfg.API.Port)
-	server := &http.Server{
-		Addr:    fmt.Sprintf(":%s", cfg.API.Port),
-		Handler: r,
-	}
+	server := newHTTPServer(cfg, r)
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -66,4 +48,16 @@ func Run(ctx context.Context, cfg config.Config, services *quack.Services, disco
 		return err
 	}
 	return nil
+}
+
+// newHTTPServer constructs the bounded standard-library server used by Run.
+func newHTTPServer(cfg config.Config, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              fmt.Sprintf(":%s", cfg.API.Port),
+		Handler:           handler,
+		ReadHeaderTimeout: time.Duration(cfg.API.ReadHeaderTimeoutSeconds) * time.Second,
+		ReadTimeout:       time.Duration(cfg.API.ReadTimeoutSeconds) * time.Second,
+		WriteTimeout:      time.Duration(cfg.API.WriteTimeoutSeconds) * time.Second,
+		IdleTimeout:       time.Duration(cfg.API.IdleTimeoutSeconds) * time.Second,
+	}
 }
