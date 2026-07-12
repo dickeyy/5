@@ -203,7 +203,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 
 #### V5-001 - Simplify the template, level, and action product model
 
-- Status: REVIEW_WAIT
+- Status: FIXING
 - Assignment: implementation subagent using `v5-implementation-slice`
 - Branch: `slice/v5-001-template-model`
 - Worktree: `/tmp/quack-v5-worktrees/v5-001`
@@ -218,8 +218,13 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
   - `go vet -buildvcs=false ./...`: PASS;
   - both application builds and staged `git diff --check`: PASS.
 - PR/review: [PR #2](https://github.com/dickeyy/5/pull/2); exactly one
-  standalone `@codex review` posted 2026-07-11, acknowledgement received,
-  awaiting the actual review.
+  standalone `@codex review` posted 2026-07-11. Codex reviewed `bf9f204` with
+  no findings. Orchestrator validation round 1 REJECTED: migration 0002 archives
+  invalid legacy templates but the live get mapper still projects every
+  preserved invalid level/action, allowing quarantined templates to expose
+  multi-action or invalid-default policy through the v5 response. Returned for
+  explicit compatibility-review projection and regression coverage; fixes do
+  not receive another Codex request under the single-review policy.
 - Requirements: `v5.md` Templates, Escalation Levels, Actions, Member
   Notifications, Firm Boundaries; matching scope drift rejected concepts.
 - Acceptance criteria:
@@ -774,7 +779,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 | --- | --- | --- | --- | --- | --- |
 | V5-000 | ACCEPTED | orchestration worktree | n/a | n/a | passed |
 | V5-001M | ACCEPTED | `slice/v5-001m-versioned-migrations` | [#1](https://github.com/dickeyy/5/pull/1) | 1 default + 1 large-rework exception; extra request ignored | passed round 2 |
-| V5-001 | REVIEW_WAIT | `slice/v5-001-template-model` | [#2](https://github.com/dickeyy/5/pull/2) | 1 requested | pending |
+| V5-001 | FIXING | `slice/v5-001-template-model` | [#2](https://github.com/dickeyy/5/pull/2) | 1 complete, no findings | rejected round 1 |
 | V5-001C | PLANNED | pending | pending | 0 | pending |
 | V5-002 | PLANNED | pending | pending | 0 | pending |
 | V5-003 | PLANNED | pending | pending | 0 | pending |
