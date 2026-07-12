@@ -1,6 +1,6 @@
 # Quack v5 Readiness Execution Plan
 
-Status: ACTIVE — THROUGHPUT RESET READY; IMPLEMENTATION PAUSED FOR REVIEW  
+Status: ACTIVE — PARALLEL WAVE P1 IN PROGRESS
 Owner: v5 orchestrator  
 Authoritative product definition: [`v5.md`](../../../v5.md)  
 Supporting inventory: [`TODO.md`](../../../TODO.md), [`docs/v5-scope-drift.md`](../../v5-scope-drift.md)
@@ -153,6 +153,15 @@ Execution rules after V5-003:
 | QP-A Core moderation runtime | V5-004 through V5-012, staff portion of V5-007 | templates, context, cases, evidence, Discord enforcement, leases/recovery, notification, feature-specific routes/adapters/tests | 0005-0049 |
 | QP-B HTTP/auth platform | V5-017A, V5-017B, platform portion of V5-017C/V5-017 | OAuth/session lifecycle, HTTP middleware/security/errors/limits/idempotency primitives, config/tests | 0050-0099 |
 | QP-C Tickets and logging modules | V5-018P, V5-018, V5-019, V5-020 | isolated module registry contracts, tickets, logging, module-specific routes/Discord adapters/import/docs/tests | 0100-0199 |
+
+P1 assignments from accepted V5-003 head `511d066`:
+
+- QP-A: fresh owner `/root/qp_a_core`, branch
+  `package/qp-a-core-moderation`, worktree `/tmp/quack-v5-worktrees/qp-a`.
+- QP-B: fresh owner `/root/qp_b_http_auth`, branch
+  `package/qp-b-http-auth`, worktree `/tmp/quack-v5-worktrees/qp-b`.
+- QP-C: fresh owner `/root/qp_c_modules`, branch
+  `package/qp-c-tickets-logging`, worktree `/tmp/quack-v5-worktrees/qp-c`.
 
 P1 shared integration-owned files: `internal/quack/app.go`,
 `internal/runtime/runtime.go`, `internal/httpapi/routes/router.go`, migration
@@ -454,7 +463,7 @@ by the macro-package ledger.
 
 #### V5-003 - Live Discord authorization and target-safety preflight
 
-- Status: FIXING
+- Status: ACCEPTED
 - Assignment: fresh implementation subagent `/root/slice_v5_003` using
   `v5-implementation-slice`; this owner is assigned only to V5-003.
 - Branch: `slice/v5-003-live-authorization`
@@ -466,12 +475,12 @@ by the macro-package ledger.
   valid P2: Discord Guild REST 403/404 responses must preserve the explicit
   bot-not-in-guild authorization state. The fresh owner applied a two-file
   classifier fix with focused, race, vet, build, and diff validation passing.
-  No second review will be requested.
-- Blocker 2026-07-11 20:38 MDT: the shared approval-usage limit rejected the
-  owner's mechanical fix commit/push and the orchestrator's read-only PR check.
-  The exact dirty files are `internal/discordbot/discord.go` and
-  `internal/discordbot/discord_authorization_test.go`; retry is deferred pending
-  explicit user approval or the reported 23:36 MDT quota reset.
+  The validated fix was committed/pushed as `511d066`; no second review was
+  requested. Local and remote heads match and the worktree is clean.
+- Orchestrator evidence gate: ACCEPTED 2026-07-11 at `511d066`. The structured
+  handoff covers the full authorization/hierarchy matrix, no-partial-commit
+  denial auditing, focused/full/MySQL/race/vet/build evidence, the single review
+  request, and the fixed P2. No redundant suite rerun was performed.
 - Requirements: People and Permissions; Actions Target Safety.
 - Acceptance criteria:
   - Every sensitive write refreshes current Discord membership, permissions,
@@ -967,10 +976,10 @@ by the macro-package ledger.
 | V5-001 | ACCEPTED | `slice/v5-001-template-model` | [#2](https://github.com/dickeyy/5/pull/2) | 1 complete, no findings | passed round 2 |
 | V5-001C | ACCEPTED | `slice/v5-001c-case-validity` | [#3](https://github.com/dickeyy/5/pull/3) | 1 complete, one P2 fixed | passed evidence gate |
 | V5-002 | ACCEPTED | `slice/v5-002-guild-bootstrap` | [#4](https://github.com/dickeyy/5/pull/4) | 1 complete, two findings fixed | passed evidence gate |
-| V5-003 | FIXING | `slice/v5-003-live-authorization` | [#5](https://github.com/dickeyy/5/pull/5) | 1 complete, one P2 fixed locally | commit/push quota blocked |
-| QP-A | PLANNED | pending | pending | 0 | absorbs V5-004–012 core/staff scope |
-| QP-B | PLANNED | pending | pending | 0 | absorbs V5-017A/B and platform scope |
-| QP-C | PLANNED | pending | pending | 0 | absorbs V5-018P–020 |
+| V5-003 | ACCEPTED | `slice/v5-003-live-authorization` | [#5](https://github.com/dickeyy/5/pull/5) | 1 complete, one P2 fixed | passed evidence gate |
+| QP-A | IN_PROGRESS | `package/qp-a-core-moderation` | pending | 0 | absorbs V5-004–012 core/staff scope |
+| QP-B | IN_PROGRESS | `package/qp-b-http-auth` | pending | 0 | absorbs V5-017A/B and platform scope |
+| QP-C | IN_PROGRESS | `package/qp-c-tickets-logging` | pending | 0 | absorbs V5-018P–020 |
 | QI-1 | PLANNED | pending | conditional | conditional | P1 integration anchor |
 | QP-D | PLANNED | pending | pending | 0 | absorbs member V5-007, V5-013/014/017C |
 | QP-E | PLANNED | pending | pending | 0 | absorbs V5-015/016 |
