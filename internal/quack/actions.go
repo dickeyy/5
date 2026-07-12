@@ -14,11 +14,21 @@ import (
 
 // ActionService claims persisted actions, executes supported moderation behavior, and records retry or terminal outcomes.
 type ActionService struct {
-	store      Repository
-	discord    DiscordActionClient
-	handlers   map[model.ActionType]actionmods.Executor
-	authorizer *GuildService
-	scheduler  CaseWorkScheduler
+	store            Repository
+	discord          DiscordActionClient
+	handlers         map[model.ActionType]actionmods.Executor
+	authorizer       *GuildService
+	scheduler        CaseWorkScheduler
+	dashboardBaseURL string
+}
+
+// WithDashboardBaseURL configures the secure member entry point used by
+// appealable case notifications.
+func (s *ActionService) WithDashboardBaseURL(baseURL string) *ActionService {
+	if s != nil {
+		s.dashboardBaseURL = strings.TrimSpace(baseURL)
+	}
+	return s
 }
 
 // NewActionService constructs action service with required dependencies explicit so callers control lifecycle and substitution.
@@ -223,7 +233,14 @@ func (s *ActionService) processNotification(ctx context.Context, workerID, caseI
 	}
 	var response map[string]any
 	var sendErr error
-	if claimed.PreparedChannelDiscordID != "" {
+	appealable := caseSnapshotAppealable(item.TemplateSnapshotJSON)
+	if appealable && s.dashboardBaseURL != "" {
+		if client, ok := s.discord.(DiscordCaseNotificationClient); ok {
+			response, sendErr = client.SendCaseNotification(ctx, item.TargetDiscordUserID, claimed.PreparedChannelDiscordID, message, s.dashboardBaseURL, item.GuildID, item.ID)
+		} else {
+			sendErr = errors.New("Discord appeal notification adapter is unavailable")
+		}
+	} else if claimed.PreparedChannelDiscordID != "" {
 		if prepared, ok := s.discord.(DiscordPreparedDMClient); ok {
 			response, sendErr = prepared.SendPreparedDM(ctx, claimed.PreparedChannelDiscordID, message)
 		} else {

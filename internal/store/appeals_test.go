@@ -25,7 +25,7 @@ func newAppealTestStore(t *testing.T) (*Store, *model.Guild) {
 	// transition tests model MySQL's row-lock serialization instead of failing
 	// both transactions with shared-cache table-lock errors.
 	sqlDB.SetMaxOpenConns(1)
-	migrations := append(registeredMigrations(), migration0200Appeals(uint64(len(registeredMigrations())+1)))
+	migrations := registeredMigrations()
 	if err := runMigrations(db, migrations); err != nil {
 		t.Fatalf("migrate appeals schema: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestLogical0200MigrationCreatesAppealContracts(t *testing.T) {
 
 func TestLogical0200MigrationPreservesPlaceholderAppealsSafely(t *testing.T) {
 	db := openSQLiteMigrationDB(t)
-	if err := runMigrations(db, registeredMigrations()); err != nil {
+	if err := runMigrations(db, registeredMigrations()[:8]); err != nil {
 		t.Fatalf("migrate baseline: %v", err)
 	}
 	repository := New(db, nil)
@@ -85,7 +85,7 @@ func TestLogical0200MigrationPreservesPlaceholderAppealsSafely(t *testing.T) {
 	if err := db.Create(&legacyEvent).Error; err != nil {
 		t.Fatalf("insert legacy event: %v", err)
 	}
-	migrations := append(registeredMigrations(), migration0200Appeals(uint64(len(registeredMigrations())+1)))
+	migrations := registeredMigrations()
 	if err := runMigrations(db, migrations); err != nil {
 		t.Fatalf("upgrade legacy appeal: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestLogical0200MigrationPreservesPlaceholderAppealsSafely(t *testing.T) {
 
 func TestMySQLLogical0200AppealMigrationAndAcceptance(t *testing.T) {
 	db := openMySQLMigrationDB(t)
-	if err := runMigrations(db, registeredMigrations()); err != nil {
+	if err := runMigrations(db, registeredMigrations()[:8]); err != nil {
 		t.Fatalf("migrate MySQL baseline: %v", err)
 	}
 	repository := New(db, nil)
@@ -122,7 +122,7 @@ func TestMySQLLogical0200AppealMigrationAndAcceptance(t *testing.T) {
 	if err := insertLegacyAppeal(db, &legacy); err != nil {
 		t.Fatalf("insert MySQL legacy appeal: %v", err)
 	}
-	migrations := append(registeredMigrations(), migration0200Appeals(uint64(len(registeredMigrations())+1)))
+	migrations := registeredMigrations()
 	if err := runMigrations(db, migrations); err != nil {
 		t.Fatalf("migrate MySQL appeal schema: %v", err)
 	}

@@ -56,7 +56,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Refresh stored guild name, icon, owner, and active state from Discord events.
 - [x] Clean or repair channel references when configured Discord channels are deleted.
 - [x] Document the Discord install permissions and privileged intents required by core and optional modules.
-- [ ] Reduce hard-coded Discord intents to the minimum enabled feature set.
+- [x] Reduce hard-coded Discord intents to the minimum enabled feature set.
 
 ## Discord Identity and Permissions
 

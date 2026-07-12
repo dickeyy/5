@@ -53,5 +53,6 @@ func registeredMigrations() []migration {
 		migration0006OptionalModuleRegistry(),
 		migration0007TicketLifecycle(),
 		migration0008HoneypotTriggers(),
+		migration0200Appeals(9),
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	discordadapter "github.com/quackdiscord/bot/internal/discordbot"
 	"github.com/quackdiscord/bot/internal/modules"
 	"github.com/quackdiscord/bot/internal/modules/generallogging"
 	"github.com/quackdiscord/bot/internal/modules/honeypot"
@@ -26,30 +27,36 @@ const (
 	loggingQueueWorkers     = 2
 	honeypotQueueCapacity   = 256
 	honeypotQueueWorkers    = 2
+	appealDispatchInterval  = 5 * time.Second
+	appealDispatchBatch     = 50
 )
 
 // Runtime owns the optional-module services and their process-scoped workers.
 type Runtime struct {
-	Tickets         *tickets.Service
-	TicketDiscord   *tickets.DiscordAdapter
-	Logging         *generallogging.Service
-	LoggingQueue    *generallogging.DeliveryQueue
-	Honeypot        *honeypot.Service
-	HoneypotDiscord *honeypot.DiscordAdapter
-	HoneypotRuntime *honeypot.Runtime
-	AuditMirror     *quack.AuditMirrorWorker
+	Tickets          *tickets.Service
+	TicketDiscord    *tickets.DiscordAdapter
+	Logging          *generallogging.Service
+	LoggingQueue     *generallogging.DeliveryQueue
+	Honeypot         *honeypot.Service
+	HoneypotDiscord  *honeypot.DiscordAdapter
+	HoneypotRuntime  *honeypot.Runtime
+	AuditMirror      *quack.AuditMirrorWorker
+	Appeals          *quack.AppealService
+	AppealDispatcher *quack.AppealNotificationDispatcher
 
 	db         *gorm.DB
 	registry   *modules.Registry
 	session    *discordgo.Session
 	resolver   guildResolver
 	repository quack.Repository
+	services   *quack.Services
 	cancel     context.CancelFunc
 	bulk       chan bulkDeleteEvent
 	bulkMu     sync.RWMutex
 	bulkWG     sync.WaitGroup
 	sweepWG    sync.WaitGroup
 	mirrorWG   sync.WaitGroup
+	appealWG   sync.WaitGroup
 	closed     bool
 }
 
@@ -91,6 +98,9 @@ func New(ctx context.Context, repositories *store.Store, session *discordgo.Sess
 	honeypotChannels := honeypotChannelValidator{session: session, resolver: resolver}
 	honeypotService := honeypot.NewService(registry, honeypot.NewStore(repositories.DB()), auditor, honeypotChannels, honeypotTemplates, honeypotCaseApplier{cases: services.Cases})
 	honeypotDiscord := honeypot.NewDiscordAdapter(honeypotService)
+	appeals := quack.NewAppealService(repositories)
+	appealAdapter := &discordadapter.AppealNotificationAdapter{Session: session, Resolver: appealStaffChannelResolver{repository: repositories}}
+	appealDispatcher := quack.NewAppealNotificationDispatcher(repositories, appealAdapter)
 	workerCtx, cancel := context.WithCancel(ctx)
 	var auditMirror *quack.AuditMirrorWorker
 	if len(auditSenders) > 0 && auditSenders[0] != nil {
@@ -98,21 +108,24 @@ func New(ctx context.Context, repositories *store.Store, session *discordgo.Sess
 	}
 
 	runtime := &Runtime{
-		Tickets:         ticketService,
-		TicketDiscord:   tickets.NewDiscordAdapter(ticketService, ticketClient),
-		Logging:         loggingService,
-		LoggingQueue:    generallogging.NewDeliveryQueue(workerCtx, loggingService, loggingQueueCapacity, loggingQueueWorkers),
-		Honeypot:        honeypotService,
-		HoneypotDiscord: honeypotDiscord,
-		HoneypotRuntime: honeypot.NewRuntime(workerCtx, honeypotDiscord, honeypotQueueCapacity, honeypotQueueWorkers),
-		AuditMirror:     auditMirror,
-		db:              repositories.DB(),
-		registry:        registry,
-		session:         session,
-		resolver:        resolver,
-		repository:      repositories,
-		cancel:          cancel,
-		bulk:            make(chan bulkDeleteEvent, loggingQueueCapacity),
+		Tickets:          ticketService,
+		TicketDiscord:    tickets.NewDiscordAdapter(ticketService, ticketClient),
+		Logging:          loggingService,
+		LoggingQueue:     generallogging.NewDeliveryQueue(workerCtx, loggingService, loggingQueueCapacity, loggingQueueWorkers),
+		Honeypot:         honeypotService,
+		HoneypotDiscord:  honeypotDiscord,
+		HoneypotRuntime:  honeypot.NewRuntime(workerCtx, honeypotDiscord, honeypotQueueCapacity, honeypotQueueWorkers),
+		AuditMirror:      auditMirror,
+		Appeals:          appeals,
+		AppealDispatcher: appealDispatcher,
+		db:               repositories.DB(),
+		registry:         registry,
+		session:          session,
+		resolver:         resolver,
+		repository:       repositories,
+		services:         services,
+		cancel:           cancel,
+		bulk:             make(chan bulkDeleteEvent, loggingQueueCapacity),
 	}
 	for range loggingQueueWorkers {
 		runtime.bulkWG.Add(1)
@@ -130,6 +143,11 @@ func New(ctx context.Context, repositories *store.Store, session *discordgo.Sess
 			runtime.AuditMirror.Run(workerCtx)
 		}()
 	}
+	runtime.appealWG.Add(1)
+	go func() {
+		defer runtime.appealWG.Done()
+		runtime.runAppealNotifications(workerCtx)
+	}()
 	return runtime, nil
 }
 
@@ -156,6 +174,40 @@ func (r *Runtime) Close() {
 	}
 	r.sweepWG.Wait()
 	r.mirrorWG.Wait()
+	r.appealWG.Wait()
+}
+
+// runAppealNotifications drains the durable appeal outbox in bounded batches
+// without coupling Discord delivery to moderation transactions.
+func (r *Runtime) runAppealNotifications(ctx context.Context) {
+	ticker := time.NewTicker(appealDispatchInterval)
+	defer ticker.Stop()
+	for {
+		if err := r.AppealDispatcher.DispatchPending(ctx, appealDispatchBatch); err != nil && !errors.Is(err, context.Canceled) {
+			log.Error().Err(err).Msg("Failed to dispatch appeal notifications")
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// appealStaffChannelResolver reuses the configured staff-only audit channel as
+// the appeal queue notification destination.
+type appealStaffChannelResolver struct{ repository quack.Repository }
+
+// AppealStaffChannel resolves the current staff-only destination for a guild.
+func (r appealStaffChannelResolver) AppealStaffChannel(ctx context.Context, guildID string) (string, error) {
+	if r.repository == nil {
+		return "", errors.New("appeal staff channel repository is not configured")
+	}
+	settings, err := r.repository.GetGuildSettings(ctx, guildID)
+	if err != nil || settings == nil {
+		return "", err
+	}
+	return settings.AuditMirrorChannelDiscordID, nil
 }
 
 // runBulkDeletes drains cache-aware bulk deletion work independently of case actions.

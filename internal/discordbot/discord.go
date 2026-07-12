@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/quackdiscord/bot/internal/discordbot/ui/views"
 	"github.com/quackdiscord/bot/internal/quack"
 	"github.com/quackdiscord/bot/internal/quack/actionmods"
 )
@@ -293,6 +294,37 @@ func (b *Bot) SendPreparedDM(ctx context.Context, channelID, message string) (ma
 		return nil, err
 	}
 	sent, err := b.Session.ChannelMessageSend(channelID, message)
+	if err != nil {
+		return nil, classifyDiscordOperation("dm_send", err, true)
+	}
+	result := map[string]any{"channel_id": channelID}
+	if sent != nil {
+		result["message_id"] = sent.ID
+	}
+	return result, nil
+}
+
+// SendCaseNotification sends the case body with a secure dashboard appeal
+// button through a prepared or newly opened direct-message channel.
+func (b *Bot) SendCaseNotification(ctx context.Context, userID, channelID, message, dashboardBaseURL, guildID, caseID string) (map[string]any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if b == nil || b.Session == nil {
+		return nil, actionmods.DiscordError{Code: "discord_session_unavailable", Message: "Discord is unavailable", Retryable: true}
+	}
+	if strings.TrimSpace(channelID) == "" {
+		channel, err := b.Session.UserChannelCreate(userID)
+		if err != nil {
+			return nil, classifyDiscordOperation("dm_prepare", err, false)
+		}
+		channelID = channel.ID
+	}
+	entry, err := views.AppealEntryMessage(dashboardBaseURL, guildID, caseID)
+	if err != nil {
+		return nil, err
+	}
+	sent, err := b.Session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{Content: message + "\n\n" + entry.Content, Components: entry.Components})
 	if err != nil {
 		return nil, classifyDiscordOperation("dm_send", err, true)
 	}

@@ -159,6 +159,9 @@ type fakeEnforcementClient struct {
 	calls                   []string
 	duration, deleteSeconds int
 	reason                  string
+	dashboardBaseURL        string
+	notificationGuildID     string
+	notificationCaseID      string
 }
 
 func (f *fakeEnforcementClient) SendDM(context.Context, string, string) (map[string]any, error) {
@@ -171,6 +174,11 @@ func (f *fakeEnforcementClient) PrepareDM(context.Context, string) (string, erro
 }
 func (f *fakeEnforcementClient) SendPreparedDM(context.Context, string, string) (map[string]any, error) {
 	f.calls = append(f.calls, "send_prepared_dm")
+	return map[string]any{"message_id": "dm"}, nil
+}
+func (f *fakeEnforcementClient) SendCaseNotification(_ context.Context, _, _ string, _ string, dashboardBaseURL, guildID, caseID string) (map[string]any, error) {
+	f.calls = append(f.calls, "send_case_notification")
+	f.dashboardBaseURL, f.notificationGuildID, f.notificationCaseID = dashboardBaseURL, guildID, caseID
 	return map[string]any{"message_id": "dm"}, nil
 }
 func (f *fakeEnforcementClient) TimeoutMember(_ context.Context, _, _ string, duration int, reason string) (map[string]any, error) {
@@ -245,6 +253,25 @@ func TestBanPreparesDMAndUsesExactHistoryDeletion(t *testing.T) {
 	}
 	if strings.Join(client.calls, ",") != "prepare_dm,ban,send_prepared_dm" || client.deleteSeconds != 86400 {
 		t.Fatalf("ban/notification order or setting mismatch: calls=%v delete=%d", client.calls, client.deleteSeconds)
+	}
+}
+
+func TestAppealableCaseNotificationUsesSecureDashboardControlContract(t *testing.T) {
+	ctx := context.Background()
+	store := newMigratedStore(t)
+	admin := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
+	moderator := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
+	template := createAppTemplate(t, ctx, store, admin, validTemplateInput("appeal-link"))
+	created, err := quack.NewCaseService(store).Create(ctx, moderator, quack.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeEnforcementClient{}
+	if err := quack.NewActionService(store, client).WithDashboardBaseURL("https://dashboard.example").ProcessCaseActions(ctx, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(client.calls, ",") != "send_case_notification" || client.dashboardBaseURL != "https://dashboard.example" || client.notificationGuildID != moderator.Guild.ID || client.notificationCaseID != created.ID {
+		t.Fatalf("secure appeal notification contract was not used: %+v", client)
 	}
 }
 

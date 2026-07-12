@@ -1,8 +1,8 @@
 # QI-2 P2 integration manifest
 
 QI-2 composes the P2 capability packages on accepted QI-1 head `11650a5`.
-The current checkpoint contains accepted QP-F head `fc6d82c`; QP-D and QP-E
-remain intentionally unmerged until their orchestrator acceptance handoffs.
+It contains accepted QP-F head `fc6d82c`, accepted QP-E head `f7ace2f`, and
+accepted post-review QP-D head `24f3e4d`.
 
 ## Installed QP-F contracts
 
@@ -33,28 +33,30 @@ remain intentionally unmerged until their orchestrator acceptance handoffs.
   projected message events, drains accepted work during reverse-order graceful
   shutdown, and cannot close ticket, logging, action, or notification workers.
 
-## Pending accepted-head reconciliation
+## Installed QP-D and QP-E contracts
 
-When QP-D is accepted, QI-2 must instantiate its appeal service, register its
-member and staff route registrars, append its logical 0200 migration through
-the package's frozen central migration builder, register
-`discordbot.RegisterAppealComponents` for `appeal:reverse:v1`, and wire its
-notification dispatcher/adapter and appeal-entry view. The exported component
-registrar owns confirmed reversal and must retain live permission, bot, target,
-and hierarchy checks; QI-2 must not implement a parallel handler.
+- The live authenticated member and staff routers install QP-D's complete case
+  ownership, appeal form, queue, decision, and explicit reversal surface with
+  QP-B rate-limit and idempotency primitives.
+- Logical appeal migration 0200 is frozen at physical ledger version 0009,
+  after already assigned honeypot migration 0008, without editing an applied
+  migration definition.
+- One bounded appeal outbox worker uses leased claims and the Discord adapter;
+  staff events resolve only to the configured staff-only audit channel.
+- The central component dispatcher registers ticket, case moderator, and
+  accepted-appeal reversal controls. QP-D's exported handler retains live
+  moderator, bot, target, permission, and hierarchy authorization.
+- Appealable case notifications use the structured secure dashboard entry
+  message whenever production supplies an HTTPS dashboard origin.
+- The authenticated guild router installs QP-E audit/statistics routes, the
+  process starts and joins the audit mirror worker, and module audit entries use
+  the canonical API/Discord/honeypot/import source resolver.
+- QP-E's three Codex findings were integration-owned and are closed here by
+  production registration of case components and statistics plus the bounded
+  audit mirror lifecycle.
 
-When QP-E is accepted, QI-2 must register its audit/statistics staff routes and
-case components and start/close its bounded audit mirror worker. QP-E declares
-no schema migration. Dispatcher ID deduplication must remain intact when both
-P2 component registrars join the process. The module audit adapter must also
-use QP-E's canonical source resolver: honeypot trigger/case activity maps to
-`honeypot`, v4 module imports map to `import`, and other module operations use
-the request context's API/Discord/system source instead of today's blanket
-system attribution.
-
-After both merges, QI-2 will resolve central registrar/runtime conflicts once,
-run the combined focused, migration/MySQL, race, full test, vet, and binary
-build gates, then create one P2 integration PR and request one Codex review.
+Combined focused, migration/MySQL, race, full test, vet, and binary build gates
+are recorded on the QI-2 pull request.
 
 Real Discord permission-changing checks remain a release validation gate that
 requires explicitly authorized guild credentials.

@@ -1,6 +1,8 @@
 package quack
 
 import (
+	"strings"
+
 	"github.com/quackdiscord/bot/internal/config"
 )
 
@@ -47,7 +49,17 @@ func NewWithConfigDependencies(cfg config.Config, store Repository, discord Disc
 		services.Cases.authorizer = services.Guilds
 	}
 	services.Audits = NewAuditService(store)
-	services.Actions = NewActionService(store, actions).WithRecoveryControls(services.Guilds, scheduler)
+	services.Actions = NewActionService(store, actions).WithRecoveryControls(services.Guilds, scheduler).WithDashboardBaseURL(dashboardBaseURL(cfg))
 	services.Ops = NewOpsService(store, scheduler)
 	return services
+}
+
+// dashboardBaseURL selects the first secure configured dashboard origin.
+func dashboardBaseURL(cfg config.Config) string {
+	for _, origin := range cfg.API.CORSAllowedOrigins {
+		if value := strings.TrimSpace(origin); strings.HasPrefix(value, "https://") {
+			return strings.TrimRight(value, "/")
+		}
+	}
+	return ""
 }

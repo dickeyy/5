@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
+	discordadapter "github.com/quackdiscord/bot/internal/discordbot"
 	discordcommands "github.com/quackdiscord/bot/internal/discordbot/commands"
 	"github.com/quackdiscord/bot/internal/discordbot/interactions"
 	"github.com/quackdiscord/bot/internal/discordbot/ui"
@@ -35,6 +36,9 @@ func (r *Runtime) RegisterComponents(registry *interactions.ComponentRegistry) e
 		return err
 	}
 	if err := discordcommands.RegisterCaseComponents(registry); err != nil {
+		return err
+	}
+	if err := discordadapter.RegisterAppealComponents(registry, r.services, r.Appeals); err != nil {
 		return err
 	}
 	if err := registry.RegisterComponent("ticket", "repair", r.repairTicketComponent); err != nil {

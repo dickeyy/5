@@ -51,14 +51,13 @@ The current backend already supports important parts of the intended v5 directio
   case-linked appeal state machine, form snapshots, atomic acceptance/voiding,
   audited timelines, notification outbox/adapters, and explicit reversal
   offers without relying on current Discord membership.
+- QI-2 installs the QP-D member/staff routes, appeal migration and outbox,
+  reversal components, QP-E audit/statistics routes and mirror lifecycle, and
+  QP-F honeypot runtime on the live process boundary.
 
 ## Behavior That Must Change
 
-The current implementation differs from the v5 definition in several core rules:
-
-- QP-D's member and appeal route registrars still need QI-2 central composition;
-  until that integration anchor is built, the live process retains its older
-  member route registration and does not expose the complete appeal surface.
+No P2 integration-owned product mismatch remains in this section.
 
 ## Rejected Concepts to Remove
 
@@ -74,17 +73,11 @@ Historical database compatibility may require a later migration rather than imme
 
 The intended v5 core still requires product behavior that is not complete today:
 
-- QI-2 composition of the implemented QP-D member/appeal registrars, logical
-  0200 migration, notification worker, and Discord component handlers.
-- Searchable audit views and optional Discord audit mirroring for all moderators.
-- Derived staff statistics.
 - V4 historical-case import that does not affect escalation.
 - Removal of legacy direct moderation commands after migration.
 
-QP-E now provides the audit/statistics services, mirror worker, HTTP registrar,
-and Discord case-component registrar. These entries remain in the drift audit
-until QI-2 installs those registrars and the separately owned appeal/honeypot
-contracts on the combined runtime anchor.
+QP-E's audit/statistics contracts and the separately owned appeal/honeypot
+contracts are installed on the combined QI-2 runtime anchor.
 
 ## Optional Modules Must Stay Separate
 
