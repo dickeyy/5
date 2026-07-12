@@ -163,6 +163,16 @@ P1 assignments from accepted V5-003 head `511d066`:
 - QP-C: fresh owner `/root/qp_c_modules`, branch
   `package/qp-c-tickets-logging`, worktree `/tmp/quack-v5-worktrees/qp-c`.
 
+Accepted P1 evidence:
+
+- QP-B accepted at `b2f3e0a`: one review, valid P1/P2 fixed, focused/race/full/
+  vet/build gates green. QI-1 must install `httpapi.NewPlatformRegistrar`,
+  trusted-proxy configuration, and feature rate/idempotency policies.
+- QP-C accepted at `4579d14`: one review, four valid P2s fixed and threads
+  resolved, module/race/MySQL/full/vet/build gates green. QI-1 must register
+  module migrations/registrars, adapt the audit sink, and schedule cleanup and
+  logging workers.
+
 P1 shared integration-owned files: `internal/quack/app.go`,
 `internal/runtime/runtime.go`, `internal/httpapi/routes/router.go`, migration
 registry ordering, command registration, and shared documentation indexes.
@@ -978,8 +988,8 @@ by the macro-package ledger.
 | V5-002 | ACCEPTED | `slice/v5-002-guild-bootstrap` | [#4](https://github.com/dickeyy/5/pull/4) | 1 complete, two findings fixed | passed evidence gate |
 | V5-003 | ACCEPTED | `slice/v5-003-live-authorization` | [#5](https://github.com/dickeyy/5/pull/5) | 1 complete, one P2 fixed | passed evidence gate |
 | QP-A | IN_PROGRESS | `package/qp-a-core-moderation` | pending | 0 | absorbs V5-004–012 core/staff scope |
-| QP-B | FIXING | `package/qp-b-http-auth` at `201a5f4` | [#7](https://github.com/dickeyy/5/pull/7) | 1 complete; P1/P2 fixing | CSRF challenge delivery and trusted-proxy boundary |
-| QP-C | FIXING | `package/qp-c-tickets-logging` at `d2925e6` | [#6](https://github.com/dickeyy/5/pull/6) | 1 complete; four P2s fixing | archive retry, transcript retention, cache limits, staff role |
+| QP-B | ACCEPTED | `package/qp-b-http-auth` at `b2f3e0a` | [#7](https://github.com/dickeyy/5/pull/7) | 1 complete; P1/P2 fixed | passed evidence gate |
+| QP-C | ACCEPTED | `package/qp-c-tickets-logging` at `4579d14` | [#6](https://github.com/dickeyy/5/pull/6) | 1 complete; four P2s fixed | passed evidence gate |
 | QI-1 | PLANNED | pending | conditional | conditional | P1 integration anchor |
 | QP-D | PLANNED | pending | pending | 0 | absorbs member V5-007, V5-013/014/017C |
 | QP-E | PLANNED | pending | pending | 0 | absorbs V5-015/016 |
