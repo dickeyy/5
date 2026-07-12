@@ -150,9 +150,10 @@ func opsActionStatus(snapshot *model.ActionQueueSnapshot) OpsActionStatus {
 // actionCapabilities encapsulates the action capabilities rule so callers share one consistent package implementation.
 func actionCapabilities() []OpsActionCapability {
 	return []OpsActionCapability{
-		{ActionType: model.ActionSendDM, Executable: true, Status: "implemented"},
-		{ActionType: model.ActionTimeoutUser, Executable: false, Status: "not_implemented"},
-		{ActionType: model.ActionKickUser, Executable: false, Status: "not_implemented"},
-		{ActionType: model.ActionBanUser, Executable: false, Status: "not_implemented"},
+		{ActionType: model.ActionTimeoutUser, Executable: true, Status: "implemented"},
+		{ActionType: model.ActionKickUser, Executable: true, Status: "implemented"},
+		{ActionType: model.ActionBanUser, Executable: true, Status: "implemented"},
+		{ActionType: model.ActionRemoveTimeout, Executable: true, Status: "staff_confirmed_reversal"},
+		{ActionType: model.ActionUnbanUser, Executable: true, Status: "staff_confirmed_reversal"},
 	}
 }

@@ -89,6 +89,29 @@ func TestMySQLMigrateForwardRerunPreservationAndRollbackBoundary(t *testing.T) {
 	assertRepresentativeHistory(t, db, want)
 }
 
+func TestMySQLCoreModerationRollbackBeforeForwardOnlyModules(t *testing.T) {
+	db := openMySQLMigrationDB(t)
+	through0004 := registeredMigrations()[:4]
+	if err := runMigrations(db, through0004); err != nil {
+		t.Fatalf("apply MySQL migrations through 0004: %v", err)
+	}
+	want := insertRepresentativeHistory(t, db)
+	through0005 := registeredMigrations()[:5]
+	if err := runMigrations(db, through0005); err != nil {
+		t.Fatalf("apply MySQL core moderation migration: %v", err)
+	}
+	if !db.Migrator().HasTable(&migration0005Notification{}) || !db.Migrator().HasColumn(&migration0005CaseColumns{}, "IdempotencyKey") {
+		t.Fatal("MySQL core moderation schema was not created")
+	}
+	if err := rollbackLastMigration(db, through0005); err != nil {
+		t.Fatalf("roll back MySQL core moderation migration: %v", err)
+	}
+	if db.Migrator().HasTable(&migration0005Notification{}) || db.Migrator().HasColumn(&migration0005CaseColumns{}, "IdempotencyKey") {
+		t.Fatal("MySQL core moderation schema remained after rollback")
+	}
+	assertRepresentativeHistory(t, db, want)
+}
+
 func TestMySQLMigrationRecoversFromPartialDDLAndRunsReviewedRollback(t *testing.T) {
 	db := openMySQLMigrationDB(t)
 	baseline := migration0001InitialV5Schema()

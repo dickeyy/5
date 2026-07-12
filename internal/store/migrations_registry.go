@@ -22,15 +22,20 @@ var migration0003Source string
 //go:embed migration_0004_guild_settings.go
 var migration0004Source string
 
-// migration0005Source binds logical module migration 0100 to the central ledger checksum.
+// migration0005Source binds migration 0005's core moderation runtime schema to its ledger checksum.
 //
-//go:embed migration_0005_optional_module_registry.go
+//go:embed migration_0005_core_moderation.go
 var migration0005Source string
 
-// migration0006Source binds logical module migration 0110 to the central ledger checksum.
+// migration0006Source binds logical module migration 0100 to the central ledger checksum.
 //
-//go:embed migration_0006_ticket_lifecycle.go
+//go:embed migration_0006_optional_module_registry.go
 var migration0006Source string
+
+// migration0007Source binds logical module migration 0110 to the central ledger checksum.
+//
+//go:embed migration_0007_ticket_lifecycle.go
+var migration0007Source string
 
 // registeredMigrations returns the immutable ordered production migration registry.
 func registeredMigrations() []migration {
@@ -39,7 +44,8 @@ func registeredMigrations() []migration {
 		migration0002SimplifyTemplateModel(),
 		migration0003CaseValidity(),
 		migration0004GuildSettings(),
-		migration0005OptionalModuleRegistry(),
-		migration0006TicketLifecycle(),
+		migration0005CoreModeration(),
+		migration0006OptionalModuleRegistry(),
+		migration0007TicketLifecycle(),
 	}
 }

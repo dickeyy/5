@@ -6,24 +6,24 @@ import (
 	"gorm.io/gorm"
 )
 
-const migration0005Definition = `optional-module-registry-v1
+const migration0006Definition = `optional-module-registry-v1
 logical migration: 0100 optional_module_registry
 schema: create guild-scoped module_configurations and idempotent module_import_records
 boundary: opaque settings and imports remain outside moderation cases, actions, appeals, and audit payload delivery
 rollback: forward-only because module configuration and import identities are operator data`
 
-// migration0005OptionalModuleRegistry reconciles logical module migration 0100
+// migration0006OptionalModuleRegistry reconciles logical module migration 0100
 // into the central contiguous production ledger.
-func migration0005OptionalModuleRegistry() migration {
+func migration0006OptionalModuleRegistry() migration {
 	return migration{
-		Version: 5, Name: "optional_module_registry_0100",
-		Definition: migration0005Definition, Source: migration0005Source,
+		Version: 6, Name: "optional_module_registry_0100",
+		Definition: migration0006Definition, Source: migration0006Source,
 		Up: applyOptionalModuleRegistry,
 	}
 }
 
-// migration0005Configuration freezes the logical 0100 settings envelope.
-type migration0005Configuration struct {
+// migration0006Configuration freezes the logical 0100 settings envelope.
+type migration0006Configuration struct {
 	ID         string    `gorm:"type:char(26);primaryKey"`
 	GuildID    string    `gorm:"type:char(26);not null;uniqueIndex:idx_module_configuration,priority:1"`
 	ModuleID   string    `gorm:"size:64;not null;uniqueIndex:idx_module_configuration,priority:2"`
@@ -34,10 +34,10 @@ type migration0005Configuration struct {
 }
 
 // TableName preserves the shared optional-module settings table.
-func (migration0005Configuration) TableName() string { return "module_configurations" }
+func (migration0006Configuration) TableName() string { return "module_configurations" }
 
-// migration0005ImportRecord freezes the logical 0100 idempotency ledger.
-type migration0005ImportRecord struct {
+// migration0006ImportRecord freezes the logical 0100 idempotency ledger.
+type migration0006ImportRecord struct {
 	ID        string    `gorm:"type:char(26);primaryKey"`
 	GuildID   string    `gorm:"type:char(26);not null;uniqueIndex:idx_module_import,priority:1"`
 	ModuleID  string    `gorm:"size:64;not null;uniqueIndex:idx_module_import,priority:2"`
@@ -47,9 +47,9 @@ type migration0005ImportRecord struct {
 }
 
 // TableName preserves the cross-module import identity table.
-func (migration0005ImportRecord) TableName() string { return "module_import_records" }
+func (migration0006ImportRecord) TableName() string { return "module_import_records" }
 
 // applyOptionalModuleRegistry creates only the two logical 0100 tables.
 func applyOptionalModuleRegistry(db *gorm.DB) error {
-	return withMySQLTableOptions(db).AutoMigrate(&migration0005Configuration{}, &migration0005ImportRecord{})
+	return withMySQLTableOptions(db).AutoMigrate(&migration0006Configuration{}, &migration0006ImportRecord{})
 }

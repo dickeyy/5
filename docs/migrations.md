@@ -50,6 +50,26 @@ history row. Its reviewed inverse drops only `guild_settings`; rerunning forward
 re-seeds one row per guild. SQLite and isolated real-MySQL coverage exercise
 forward, rerun, preservation, rollback, and reapplication.
 
+Migration 0005 adds the core moderation runtime without rewriting existing
+history. It creates ordered template-context definitions, immutable message and
+attachment evidence, and exactly-one case notifications. Additive case columns
+hold context, void/replacement links, and nullable idempotency keys. Action
+columns add leases, fencing, dismissal, and original-execution/accepted-appeal
+reversal links. Existing templates require no new context, existing cases are
+backfilled with an empty context array, and existing actions remain claimable.
+Its reviewed inverse drops only migration-owned tables and additive columns.
+
+Migration 0006 places logical optional-module migration 0100 in the contiguous
+production ledger. It creates only guild-scoped opaque module configuration and
+the idempotent v4 import identity ledger. Migration 0007 similarly reconciles
+logical ticket migration 0110: it preserves the baseline ticket and event rows
+while adding separately retained transcripts and member abuse-control state.
+Both definitions use frozen storage primitives and checksum-bound source.
+Because rolling either migration back could discard operator configuration,
+import identities, ticket transcripts, or ticket lifecycle state, 0006 and 0007
+are explicitly forward-only. Core migration 0005 retains its reviewed inverse
+when it is the newest applied migration before the forward-only module suffix.
+
 ## Forward procedure
 
 1. Back up MySQL and verify the backup before deploying schema-changing code.

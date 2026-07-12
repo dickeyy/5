@@ -1,8 +1,7 @@
 # QI-1 P1 integration manifest
 
-QI-1 combines the accepted QP-B HTTP/auth platform and QP-C tickets/logging
-module heads on the accepted V5-003 anchor. It remains intentionally uncommitted
-and without a pull request until the accepted QP-A head is incorporated.
+QI-1 combines the accepted QP-A core moderation, QP-B HTTP/auth platform, and
+QP-C tickets/logging module heads on the accepted V5-003 anchor.
 
 ## Installed contracts
 
@@ -19,23 +18,22 @@ and without a pull request until the accepted QP-A head is incorporated.
   process. Shutdown drains accepted logging work without entering the moderation
   action queue.
 - Logical module migrations 0100 and 0110 are represented as frozen,
-  checksum-bound central-ledger migrations. Their temporary physical positions
-  are 0005 and 0006 until QP-A's reserved 0005-0049 range is merged.
+  checksum-bound central-ledger migrations at physical positions 0006 and 0007,
+  immediately after QP-A's core moderation migration 0005.
 
-## QP-A merge plan
+## QP-A merge resolution
 
-1. Merge the accepted QP-A head into `integration/qi-1-p1` without rewriting
-   either package head.
-2. Reconcile `internal/quack/app.go` by preserving QP-A core services; optional
+1. The accepted QP-A head is incorporated without rewriting any package head.
+2. `internal/quack/app.go` preserves QP-A core services; optional
    modules stay process-composed and do not enter the moderation core.
-3. Preserve QP-A's Discord moderation client additions. QI-1's ticket and
+3. QP-A's Discord moderation client additions coexist with QI-1's ticket and
    logging transport remains in `internal/moduleintegration`, so only command
    component registration should require registry reconciliation.
-4. Preserve QP-A's migration files and order in reserved range 0005-0049, then
-   renumber the two QI-1 physical ledger entries immediately after the final
-   QP-A migration while retaining logical identities 0100 and 0110. Update
-   filenames, embedded sources, tests, and checksum evidence together.
-5. Reconcile `runtime.go`, `router.go`, and command registration once, then run
+4. QP-A migration 0005 is followed by QI-1 physical migrations 0006
+   and 0007 retaining logical identities 0100 and 0110. Filenames, embedded
+   sources, tests, and checksum evidence move together.
+5. `runtime.go`, `router.go`, and command registration are reconciled once;
+   production routing mounts both QP-A registrars and module registrars before
    the wave-wide focused, race, MySQL, full test, vet, and binary build gates.
 
 No QP-B or QP-C feature implementation is duplicated in this integration

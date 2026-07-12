@@ -107,6 +107,9 @@ func Register(session *discordgo.Session, services *quack.Services, componentReg
 	if err := registry.Register(CaseCommandSpec()); err != nil {
 		return err
 	}
+	if err := registry.Register(MessageCaseCommandSpec()); err != nil {
+		return err
+	}
 	dispatcher := interactions.NewDispatcher(services, registry)
 	for _, register := range componentRegistrars {
 		if register == nil {

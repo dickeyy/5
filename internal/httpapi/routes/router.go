@@ -27,13 +27,18 @@ func SetupRoutesWithModules(r *gin.Engine, services *quack.Services, moduleRunti
 	r.GET("/ops/status", func(c *gin.Context) { globalOpsStatus(c, services) })
 	r.GET("/guilds/:discordGuildID/ops/status", func(c *gin.Context) { guildOpsStatus(c, services) })
 	setupAuthRoutes(r, services)
-	return setupGuildRoutes(r, services, moduleRuntime)
+	if err := setupGuildRoutes(r, services, moduleRuntime); err != nil {
+		return err
+	}
+	setupMemberRoutes(r, services)
+	return nil
 }
 
 // setupGuildRoutes explicitly wires setup guild routes so runtime behavior does not depend on init-time registration.
 func setupGuildRoutes(r *gin.Engine, services *quack.Services, moduleRuntime *moduleintegration.Runtime) error {
 	guilds := r.Group("/guilds")
 	guilds.Use(middleware.RequireAuth(services.Store, services.Config.Auth))
+	RegisterCoreModerationStaffRoutes(guilds, services)
 	if moduleRuntime != nil {
 		if err := moduleRuntime.RegisterHTTP(guilds, services, httpplatform.FromRepository(services.Store)); err != nil {
 			return err
@@ -82,4 +87,12 @@ func setupGuildRoutes(r *gin.Engine, services *quack.Services, moduleRuntime *mo
 		listAuditLog(c, services)
 	})
 	return nil
+}
+
+// setupMemberRoutes mounts target-owned reads behind caller authentication
+// without requiring the member to remain in the Discord guild.
+func setupMemberRoutes(r *gin.Engine, services *quack.Services) {
+	members := r.Group("/members/me")
+	members.Use(middleware.RequireAuth(services.Store, services.Config.Auth))
+	RegisterCoreModerationMemberRoutes(members, services)
 }

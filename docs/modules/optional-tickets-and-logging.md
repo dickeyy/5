@@ -150,5 +150,11 @@ The integration package must:
 6. run the transcript retention sweep and bounded event worker lifecycle; and
 7. preserve the rule that general-log deliveries never enter the audit table.
 
+`internal/moduleintegration` implements this contract in production. It reuses
+the shared HTTP platform safety primitives, installs ticket components in the
+single command dispatcher, keeps gateway delivery off the moderation queue,
+drains accepted work during shutdown, and runs transcript cleanup without
+deleting ticket timelines.
+
 Real-guild validation remains an integration/release gate because it requires
 Discord credentials and permission-changing external operations.

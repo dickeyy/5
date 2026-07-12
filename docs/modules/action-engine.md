@@ -1,92 +1,53 @@
 # Action Engine
 
-The action engine is the asynchronous execution path for case actions. It starts
-after case creation persists `CaseActionExecution` rows and keeps pulling the
-next executable action for a case until none remain. The main orchestration
-lives in `internal/quack/actions.go`.
+The action engine in `internal/quack/actions.go` executes the selected
+zero-or-one enforcement action, persists every attempt, exposes staff recovery,
+and delivers one post-outcome case notification.
 
-## Responsibilities
+## Execution And Fencing
 
-- claim the next runnable action for one case
-- dispatch that action to an executor module
-- persist attempts, execution status, and case events
-- reschedule retryable failures
+1. `ClaimNextCaseAction` serializes a case and creates a running attempt with a
+   bounded lease and unique fence token.
+2. A crash-left claim is eligible after lease expiry. Recovery closes the old
+   running attempt as `lease_expired`, increments the attempt number, and issues
+   a new token.
+3. `CompleteCaseAction` accepts only the current token, so a stale worker cannot
+   overwrite reclaimed work.
+4. The persisted retry time makes safe retries discoverable after restart.
 
-## Execution Flow
+Outbound execution has a Quack-owned timeout. Total attempts equal the initial
+attempt plus the template's safe retry count.
 
-1. `CaseService.Create` persists the case, initial event, and action execution
-   rows, then submits a case-ID wake-up hint through `CaseWorkScheduler`.
-2. The injected queue calls the existing `ActionService.ProcessCaseActions`.
-3. `ProcessCaseActions` loops on `Repository.ClaimNextCaseAction`, which
-   locks the case and next eligible execution row for that case.
-4. `processClaimedAction` looks up the executor by `ActionType`, falls back to
-   `actions.Unsupported`, and runs it.
-5. `CompleteCaseAction` writes a `CaseActionAttempt`, updates the execution
-   status, appends a case event, writes audit data, and recomputes the case
-   status.
-6. If the failure is retryable and the execution allows retries,
-   the persisted `next_retry_at` makes the case discoverable when due.
+## Discord Executors
 
-## Executor Map
+- `timeout_user` uses the exact configured duration.
+- `kick_user` uses case-number and official-reason audit text.
+- `ban_user` uses Discord's exact seconds-based history deletion value.
+- `remove_timeout` and `unban_user` are explicit staff-confirmed reversals
+  linked to the original execution and, when supplied, an accepted appeal.
 
-`NewActionService` wires action types to executor modules:
+The adapter classifies validation, permission/hierarchy, unknown resource,
+rate-limit, server, network, timeout, and ambiguous outcomes into redacted
+attempt state. Only failures known not to have executed are automatically
+retryable. Uncertain kick, ban, and reversal outcomes remain in staff review.
 
-- `send_dm`: implemented in `internal/quack/actionmods/send_dm.go`
-- `timeout_user`: stubbed, currently returns `action_not_implemented`
-- `kick_user`: stubbed, currently returns `action_not_implemented`
-- `ban_user`: stubbed, currently returns `action_not_implemented`
+## Recovery Controls
 
-This means warning-level DM notifications are the only live end-to-end action
-path today. Template-authored moderation actions are persisted and scheduled,
-but they currently fail intentionally until the Discord moderation calls are
-implemented.
+Failed actions have a stable paginated review query. Retry rechecks live actor
+permission, bot permission, target membership, and both hierarchies. Dismissal
+removes the item from active review without deleting history. Void delegates to
+the case correction flow. Reversal validates the original succeeded action.
+Controls are idempotent and append case/audit history.
 
-## Notification Rules
+## One Case Notification
 
-The selected level is the only template-owned notification decision.
-`CaseService.Create` currently represents that decision as one internal
-`send_dm` execution. Enforcement actions cannot configure or send an additional
-notification. V5-012 owns the remaining transition to outcome-aware case-level
-delivery after enforcement completes.
+Notification is separate from enforcement and validity. For kick and ban, the
+worker opens the DM channel before enforcement. After the action is terminal,
+it renders one bounded product-owned message with guild name, official reason,
+visible context, outcome, case reference, appeal access, and optional guild
+introduction/footer.
 
-## Retry And Failure Semantics
-
-- Retries require both `Result.Retryable` and `CaseActionExecution.SafeForRetry`
-  to be true.
-- `shouldRetryAction` currently allows retry while
-  `AttemptCount <= MaxRetries`, so total attempts equal initial execution plus
-  the configured retry count.
-- `nextRetryTime` uses Quack's internal `RetryBackoffMS`, defaulting to `1000`
-  when unset. Templates cannot configure retry timing.
-
-## Storage Contract
-
-The action engine depends on these repository methods in `internal/store/cases.go`:
-
-- `ClaimNextCaseAction`
-- `CompleteCaseAction`
-- `ListExecutableCaseIDs`
-
-`ClaimNextCaseAction` also enforces per-case serialization by refusing to claim
-another row while one execution for the same case is already `running`.
-
-## Maintainability Notes
-
-- The queue is injected through a core-owned interface; the application core
-  does not import the worker implementation.
-- Delayed retries are durable because timing is stored in MySQL and discovered
-  by the scheduler rather than owned by a goroutine.
-- Retired action notification, ordering, and continuation columns remain frozen
-  in compatibility storage but do not influence newly created template actions.
-
-Relevant files:
-
-- `internal/quack/actions.go`
-- `internal/workqueue/queue.go`
-- `internal/quack/actionmods/types.go`
-- `internal/quack/actionmods/send_dm.go`
-- `internal/quack/actionmods/timeout.go`
-- `internal/quack/actionmods/kick.go`
-- `internal/quack/actionmods/ban.go`
-- `internal/store/cases.go`
-- `internal/quack/actions_test.go`
+A pre-send claim can recover after a crash. Immediately before the external
+send, the worker crosses a second durable fence. A crash after that point is
+ambiguous and is never automatically repeated. Delivery failure is visible and
+audited but never invalidates the case or causes an action retry to resend it.

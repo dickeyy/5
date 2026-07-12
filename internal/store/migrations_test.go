@@ -366,7 +366,7 @@ func TestMigration0003RollbackDowngradesPostMigrationCases(t *testing.T) {
 		TargetDiscordUserID: "target", ModeratorDiscordUserID: "moderator", Reason: "reason",
 		Validity: model.CaseValidityValid, Source: model.CaseSourceDashboard, MetadataJSON: `{}`,
 	}
-	if err := db.Select("*").Create(&postMigration).Error; err != nil {
+	if err := db.Omit("ContextValuesJSON", "VoidedReason", "VoidedByDiscordUserID", "VoidedAt", "ReplacementCaseID", "ReplacesCaseID", "IdempotencyKey").Create(&postMigration).Error; err != nil {
 		t.Fatalf("create post-migration case: %v", err)
 	}
 
@@ -908,7 +908,11 @@ func insertRepresentativeHistory(t *testing.T, db *gorm.DB) representativeHistor
 		&AuditLogEntryRecord{ULIDModelRecord: ULIDModelRecord{ID: want.AuditID, CreatedAt: now, UpdatedAt: now}, GuildID: want.GuildID, Source: model.AuditSource("dashboard"), Action: "case.create", ResourceType: "case", ResourceID: want.CaseID, Result: model.AuditResult("success"), MetadataJSON: "{}"},
 	}
 	for _, record := range records {
-		if err := db.Create(record).Error; err != nil {
+		query := db
+		if _, ok := record.(*CaseActionExecutionRecord); ok && !db.Migrator().HasColumn(&CaseActionExecutionRecord{}, "LeaseToken") {
+			query = query.Omit("LeaseToken", "LeaseExpiresAt", "DismissedAt", "DismissedByDiscordUserID", "ReversalOfExecutionID", "ReversalAppealID")
+		}
+		if err := query.Create(record).Error; err != nil {
 			t.Fatalf("insert representative history %T: %v", record, err)
 		}
 	}

@@ -36,14 +36,15 @@ func TestCaseServiceCreateFromTemplate(t *testing.T) {
 	if created.Reason != "No spam" || created.Validity != model.CaseValidityValid || created.Source != model.CaseSourceDashboard {
 		t.Fatalf("unexpected case fields: %+v", created)
 	}
-	if len(created.Actions) != 1 || created.Actions[0].ActionType != model.ActionSendDM {
-		t.Fatalf("expected generated warning notification action, got %+v", created.Actions)
+	if len(created.Actions) != 0 {
+		t.Fatalf("expected notification to be separate from enforcement actions, got %+v", created.Actions)
 	}
 	if created.SelectedLevel == nil || !created.SelectedLevel.IsDefault || created.SelectedLevel.MatchedCaseCount != 1 {
 		t.Fatalf("expected selected default level, got %+v", created.SelectedLevel)
 	}
-	if created.Actions[0].Position != 0 || created.Actions[0].Status != model.ActionExecutionPending {
-		t.Fatalf("unexpected first action: %+v", created.Actions[0])
+	notification, err := store.GetCaseNotification(ctx, created.ID)
+	if err != nil || notification == nil || notification.Status != model.NotificationPending {
+		t.Fatalf("expected pending case notification, got %+v err=%v", notification, err)
 	}
 
 	cases, err := store.ListCases(ctx, modContext.Guild.ID)
@@ -425,11 +426,8 @@ func TestCaseServiceDashboardReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get case detail: %v", err)
 	}
-	if detail.ID != first.ID || detail.TemplateSnapshot == nil || len(detail.Events) != 1 || len(detail.Actions) != 1 {
+	if detail.ID != first.ID || detail.TemplateSnapshot == nil || len(detail.Events) != 1 || len(detail.Actions) != 0 || detail.Notification == nil {
 		t.Fatalf("unexpected case detail: %+v", detail)
-	}
-	if detail.Actions[0].ActionType != model.ActionSendDM || len(detail.Actions[0].Attempts) != 0 {
-		t.Fatalf("unexpected detail actions: %+v", detail.Actions)
 	}
 	if len(detail.TemplateSnapshot.Actions) != 1 || detail.TemplateSnapshot.Actions[0].TimeoutDurationSeconds != 3600 || detail.TemplateSnapshot.Actions[0].MaxRetries != 2 {
 		t.Fatalf("expected legacy snapshot settings to remain readable, got %+v", detail.TemplateSnapshot.Actions)
@@ -506,8 +504,8 @@ func TestCaseServiceTraceIDsPropagateToCaseActionsAndAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list traced actions: %v", err)
 	}
-	if len(actions) != 1 || actions[0].CorrelationID != "corr-case-1" {
-		t.Fatalf("expected action correlation id, got %+v", actions)
+	if len(actions) != 0 {
+		t.Fatalf("expected case-level notification instead of a synthetic action, got %+v", actions)
 	}
 
 	audits, err := store.ListAuditLogEntries(ctx, modContext.Guild.ID)

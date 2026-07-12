@@ -44,10 +44,35 @@ const (
 type ActionType string
 
 const (
-	ActionSendDM      ActionType = "send_dm"
-	ActionTimeoutUser ActionType = "timeout_user"
-	ActionKickUser    ActionType = "kick_user"
-	ActionBanUser     ActionType = "ban_user"
+	ActionSendDM        ActionType = "send_dm"
+	ActionTimeoutUser   ActionType = "timeout_user"
+	ActionKickUser      ActionType = "kick_user"
+	ActionBanUser       ActionType = "ban_user"
+	ActionRemoveTimeout ActionType = "remove_timeout"
+	ActionUnbanUser     ActionType = "unban_user"
+)
+
+// ContextFieldType identifies the supported member-visible template context value shapes.
+type ContextFieldType string
+
+const (
+	ContextFieldShortText   ContextFieldType = "short_text"
+	ContextFieldLongText    ContextFieldType = "long_text"
+	ContextFieldBoolean     ContextFieldType = "boolean"
+	ContextFieldNumber      ContextFieldType = "number"
+	ContextFieldMessageLink ContextFieldType = "discord_message_link"
+)
+
+// NotificationStatus identifies the durable state of the single automatic member notification for a case.
+type NotificationStatus string
+
+const (
+	NotificationPending  NotificationStatus = "pending"
+	NotificationPrepared NotificationStatus = "prepared"
+	NotificationClaimed  NotificationStatus = "claimed"
+	NotificationSending  NotificationStatus = "sending"
+	NotificationSent     NotificationStatus = "sent"
+	NotificationFailed   NotificationStatus = "failed"
 )
 
 // NotificationType identifies the supported notification type values stored and exchanged by Quack.
@@ -77,6 +102,7 @@ const (
 type ActionAttemptStatus string
 
 const (
+	ActionAttemptRunning   ActionAttemptStatus = "running"
 	ActionAttemptSucceeded ActionAttemptStatus = "succeeded"
 	ActionAttemptFailed    ActionAttemptStatus = "failed"
 )
@@ -94,11 +120,18 @@ const (
 type CaseEventType string
 
 const (
-	CaseEventCreated         CaseEventType = "case_created"
-	CaseEventActionQueued    CaseEventType = "action_queued"
-	CaseEventActionSucceeded CaseEventType = "action_succeeded"
-	CaseEventActionFailed    CaseEventType = "action_failed"
-	CaseEventAppealCreated   CaseEventType = "appeal_created"
+	CaseEventCreated            CaseEventType = "case_created"
+	CaseEventActionQueued       CaseEventType = "action_queued"
+	CaseEventActionSucceeded    CaseEventType = "action_succeeded"
+	CaseEventActionFailed       CaseEventType = "action_failed"
+	CaseEventVoided             CaseEventType = "case_voided"
+	CaseEventReplaced           CaseEventType = "case_replaced"
+	CaseEventActionRetried      CaseEventType = "action_retry_requested"
+	CaseEventActionDismissed    CaseEventType = "action_failure_dismissed"
+	CaseEventReversalQueued     CaseEventType = "action_reversal_queued"
+	CaseEventNotificationSent   CaseEventType = "notification_sent"
+	CaseEventNotificationFailed CaseEventType = "notification_failed"
+	CaseEventAppealCreated      CaseEventType = "appeal_created"
 )
 
 // AppealStatus identifies the supported appeal status values stored and exchanged by Quack.
@@ -197,6 +230,17 @@ type CaseTemplate struct {
 	ArchivedAt             *time.Time
 }
 
+// CaseTemplateContextField defines one ordered member-visible value collected whenever a template is applied.
+type CaseTemplateContextField struct {
+	ULIDModel
+	TemplateID string
+	Key        string
+	Label      string
+	FieldType  ContextFieldType
+	Position   int
+	Required   bool
+}
+
 // CaseTemplateLevel represents the persistence-free domain state for a case template level.
 type CaseTemplateLevel struct {
 	ULIDModel
@@ -235,31 +279,92 @@ type Case struct {
 	ContextMessageDiscordID string
 	ContextURL              string
 	MetadataJSON            string
+	ContextValuesJSON       string
+	VoidedReason            string
+	VoidedByDiscordUserID   string
+	VoidedAt                *time.Time
+	ReplacementCaseID       *string
+	ReplacesCaseID          *string
+	IdempotencyKey          *string
 }
 
 // CaseActionExecution represents the persistence-free domain state for a case action execution.
 type CaseActionExecution struct {
 	ULIDModel
-	CaseID             string
-	TemplateActionID   *string
-	Position           int
-	ActionType         ActionType
-	Status             ActionExecutionStatus
-	IdempotencyKey     string
-	ConfigSnapshotJSON string
-	NotifyUser         bool
-	NotificationType   string
-	AttemptCount       uint8
-	MaxRetries         uint8
-	RetryBackoffMS     int
-	SafeForRetry       bool
-	Irreversible       bool
-	LastErrorCode      string
-	LastError          string
-	StartedAt          *time.Time
-	FinishedAt         *time.Time
-	NextRetryAt        *time.Time
-	CorrelationID      string
+	CaseID                   string
+	TemplateActionID         *string
+	Position                 int
+	ActionType               ActionType
+	Status                   ActionExecutionStatus
+	IdempotencyKey           string
+	ConfigSnapshotJSON       string
+	NotifyUser               bool
+	NotificationType         string
+	AttemptCount             uint8
+	MaxRetries               uint8
+	RetryBackoffMS           int
+	SafeForRetry             bool
+	Irreversible             bool
+	LastErrorCode            string
+	LastError                string
+	StartedAt                *time.Time
+	FinishedAt               *time.Time
+	NextRetryAt              *time.Time
+	CorrelationID            string
+	LeaseToken               string
+	LeaseExpiresAt           *time.Time
+	DismissedAt              *time.Time
+	DismissedByDiscordUserID string
+	ReversalOfExecutionID    *string
+	ReversalAppealID         *string
+}
+
+// CaseEvidenceSnapshot is an immutable, transport-neutral snapshot of a Discord message linked to a case.
+type CaseEvidenceSnapshot struct {
+	ULIDModel
+	CaseID              string
+	GuildID             string
+	ChannelDiscordID    string
+	MessageDiscordID    string
+	AuthorDiscordUserID string
+	MessageURL          string
+	Content             string
+	MessageCreatedAt    time.Time
+	MessageEditedAt     *time.Time
+	EmbedsJSON          string
+	CaptureOutcome      string
+	CaptureWarning      string
+}
+
+// CaseEvidenceAttachment preserves attachment metadata and, when possible, a stable managed-channel copy.
+type CaseEvidenceAttachment struct {
+	ULIDModel
+	EvidenceID                   string
+	Filename                     string
+	ContentType                  string
+	SizeBytes                    int64
+	OriginalURL                  string
+	PreservedURL                 string
+	PreservedMessageDiscordID    string
+	PreservedAttachmentDiscordID string
+	CopyOutcome                  string
+	Warning                      string
+}
+
+// CaseNotification is the single durable automatic member notification owned by a case rather than an action.
+type CaseNotification struct {
+	ULIDModel
+	CaseID                   string
+	Status                   NotificationStatus
+	PreparedChannelDiscordID string
+	RenderedMessage          string
+	DeliveryMessageDiscordID string
+	AttemptCount             uint8
+	LastErrorCode            string
+	LastError                string
+	LeaseToken               string
+	LeaseExpiresAt           *time.Time
+	SentAt                   *time.Time
 }
 
 // CaseActionAttempt represents the persistence-free domain state for a case action attempt.

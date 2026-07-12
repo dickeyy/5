@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/quackdiscord/bot/internal/quack/model"
 )
@@ -38,12 +39,22 @@ type TemplateService struct {
 
 // TemplateInput groups the validated inputs needed for template input.
 type TemplateInput struct {
-	Slug           string               `json:"slug"`
-	Name           string               `json:"name"`
-	Description    string               `json:"description"`
-	ReasonTemplate string               `json:"reason_template"`
-	Appealable     bool                 `json:"appealable"`
-	Levels         []TemplateLevelInput `json:"levels"`
+	Slug           string                      `json:"slug"`
+	Name           string                      `json:"name"`
+	Description    string                      `json:"description"`
+	ReasonTemplate string                      `json:"reason_template"`
+	Appealable     bool                        `json:"appealable"`
+	ContextFields  []TemplateContextFieldInput `json:"context_fields"`
+	Levels         []TemplateLevelInput        `json:"levels"`
+}
+
+// TemplateContextFieldInput defines an ordered member-visible field collected during case creation.
+type TemplateContextFieldInput struct {
+	Key       string                 `json:"key"`
+	Label     string                 `json:"label"`
+	FieldType model.ContextFieldType `json:"type"`
+	Position  int                    `json:"position"`
+	Required  bool                   `json:"required"`
 }
 
 // TemplateLevelInput groups the validated inputs needed for template level input.
@@ -66,18 +77,47 @@ type TemplateActionInput struct {
 
 // TemplateResponse is the transport-neutral representation returned for template response.
 type TemplateResponse struct {
-	ID                     string                  `json:"id"`
-	GuildID                string                  `json:"guild_id"`
-	Slug                   string                  `json:"slug"`
-	Name                   string                  `json:"name"`
-	Description            string                  `json:"description"`
-	ReasonTemplate         string                  `json:"reason_template"`
-	Appealable             bool                    `json:"appealable"`
-	Version                uint                    `json:"version"`
-	CreatedByDiscordUserID string                  `json:"created_by_discord_user_id"`
-	UpdatedByDiscordUserID string                  `json:"updated_by_discord_user_id"`
-	ArchivedAt             any                     `json:"archived_at"`
-	Levels                 []TemplateLevelResponse `json:"levels"`
+	ID                     string                         `json:"id"`
+	GuildID                string                         `json:"guild_id"`
+	Slug                   string                         `json:"slug"`
+	Name                   string                         `json:"name"`
+	Description            string                         `json:"description"`
+	ReasonTemplate         string                         `json:"reason_template"`
+	Appealable             bool                           `json:"appealable"`
+	Version                uint                           `json:"version"`
+	CreatedByDiscordUserID string                         `json:"created_by_discord_user_id"`
+	UpdatedByDiscordUserID string                         `json:"updated_by_discord_user_id"`
+	ArchivedAt             *time.Time                     `json:"archived_at"`
+	ContextFields          []TemplateContextFieldResponse `json:"context_fields"`
+	Levels                 []TemplateLevelResponse        `json:"levels"`
+}
+
+// TemplateContextFieldResponse is the stable transport representation of a template context definition.
+type TemplateContextFieldResponse struct {
+	ID        string                 `json:"id"`
+	Key       string                 `json:"key"`
+	Label     string                 `json:"label"`
+	FieldType model.ContextFieldType `json:"type"`
+	Position  int                    `json:"position"`
+	Required  bool                   `json:"required"`
+}
+
+// TemplatePolicy is the guild-neutral policy-only import and export shape.
+type TemplatePolicy struct {
+	SchemaVersion  int                         `json:"schema_version"`
+	Slug           string                      `json:"slug"`
+	Name           string                      `json:"name"`
+	Description    string                      `json:"description"`
+	OfficialReason string                      `json:"official_reason"`
+	Appealable     bool                        `json:"appealable"`
+	ContextFields  []TemplateContextFieldInput `json:"context_fields"`
+	Levels         []TemplateLevelInput        `json:"levels"`
+}
+
+// TemplateImportInput requires explicit confirmation before imported policy becomes active.
+type TemplateImportInput struct {
+	Confirm bool           `json:"confirm"`
+	Policy  TemplatePolicy `json:"policy"`
 }
 
 // TemplateLevelDetails groups the template level details state used to keep this package's responsibilities explicit.
@@ -124,6 +164,21 @@ func (s *TemplateService) List(ctx context.Context, guildContext *GuildStaffCont
 	return out, nil
 }
 
+// ListActive returns only templates currently available for new cases and Discord autocomplete.
+func (s *TemplateService) ListActive(ctx context.Context, guildContext *GuildStaffContext) ([]TemplateResponse, error) {
+	all, err := s.List(ctx, guildContext)
+	if err != nil {
+		return nil, err
+	}
+	active := make([]TemplateResponse, 0, len(all))
+	for _, item := range all {
+		if item.ArchivedAt == nil {
+			active = append(active, item)
+		}
+	}
+	return active, nil
+}
+
 // Get retrieves get without exposing the underlying adapter implementation.
 func (s *TemplateService) Get(ctx context.Context, guildContext *GuildStaffContext, templateID string) (*TemplateResponse, error) {
 	template, err := s.store.GetCaseTemplateExpanded(ctx, guildContext.Guild.ID, templateID)
@@ -148,9 +203,10 @@ func (s *TemplateService) Create(ctx context.Context, guildContext *GuildStaffCo
 	}
 
 	expanded, err := s.store.CreateCaseTemplate(ctx, model.CreateCaseTemplateParams{
-		Template: normalized.template,
-		Levels:   normalized.levels,
-		Audit:    s.auditEntry(ctx, guildContext, "case_template.create", "case_template", "", model.AuditResultSuccess, ""),
+		Template:      normalized.template,
+		ContextFields: normalized.contextFields,
+		Levels:        normalized.levels,
+		Audit:         s.auditEntry(ctx, guildContext, "case_template.create", "case_template", "", model.AuditResultSuccess, ""),
 	})
 	if err != nil {
 		return nil, err
@@ -178,11 +234,12 @@ func (s *TemplateService) Update(ctx context.Context, guildContext *GuildStaffCo
 	}
 
 	expanded, err := s.store.UpdateCaseTemplate(ctx, model.UpdateCaseTemplateParams{
-		GuildID:    guildContext.Guild.ID,
-		TemplateID: templateID,
-		Template:   normalized.template,
-		Levels:     normalized.levels,
-		Audit:      s.auditEntry(ctx, guildContext, "case_template.update", "case_template", templateID, model.AuditResultSuccess, ""),
+		GuildID:       guildContext.Guild.ID,
+		TemplateID:    templateID,
+		Template:      normalized.template,
+		ContextFields: normalized.contextFields,
+		Levels:        normalized.levels,
+		Audit:         s.auditEntry(ctx, guildContext, "case_template.update", "case_template", templateID, model.AuditResultSuccess, ""),
 	})
 	if err != nil {
 		return nil, err
@@ -191,6 +248,72 @@ func (s *TemplateService) Update(ctx context.Context, guildContext *GuildStaffCo
 		return nil, ErrTemplateNotFound
 	}
 
+	response := templateResponse(*expanded)
+	return &response, nil
+}
+
+// Restore reverses archive without changing the template identity or version.
+func (s *TemplateService) Restore(ctx context.Context, guildContext *GuildStaffContext, templateID string) (*TemplateResponse, error) {
+	ctx = ensureTraceContext(ctx)
+	expanded, err := s.store.RestoreCaseTemplate(ctx, guildContext.Guild.ID, strings.TrimSpace(templateID), s.auditEntry(ctx, guildContext, "case_template.restore", "case_template", templateID, model.AuditResultSuccess, ""))
+	if err != nil {
+		_ = s.audit(ctx, guildContext, "case_template.restore", "case_template", templateID, model.AuditResultFailure, err.Error())
+		return nil, err
+	}
+	if expanded == nil {
+		_ = s.audit(ctx, guildContext, "case_template.restore", "case_template", templateID, model.AuditResultFailure, ErrTemplateNotFound.Error())
+		return nil, ErrTemplateNotFound
+	}
+	response := templateResponse(*expanded)
+	return &response, nil
+}
+
+// Export returns policy fields only, deliberately excluding guild identity, history, channels, audit data, and secrets.
+func (s *TemplateService) Export(ctx context.Context, guildContext *GuildStaffContext, templateID string) (*TemplatePolicy, error) {
+	template, err := s.Get(ctx, guildContext, templateID)
+	if err != nil {
+		_ = s.audit(ctx, guildContext, "case_template.export", "case_template", templateID, model.AuditResultFailure, err.Error())
+		return nil, err
+	}
+	policy := &TemplatePolicy{SchemaVersion: 1, Slug: template.Slug, Name: template.Name, Description: template.Description, OfficialReason: template.ReasonTemplate, Appealable: template.Appealable}
+	for _, f := range template.ContextFields {
+		policy.ContextFields = append(policy.ContextFields, TemplateContextFieldInput{Key: f.Key, Label: f.Label, FieldType: f.FieldType, Position: f.Position, Required: f.Required})
+	}
+	for _, level := range template.Levels {
+		in := TemplateLevelInput{Name: level.Name, Position: level.Position, IsDefault: level.IsDefault, TriggerCaseCount: level.TriggerCaseCount, NotifyUser: level.NotifyUser}
+		for _, action := range level.Actions {
+			in.Actions = append(in.Actions, TemplateActionInput{ActionType: action.ActionType, TimeoutDurationSeconds: action.TimeoutDurationSeconds, DeleteMessageSeconds: action.DeleteMessageSeconds, MaxRetries: int(action.MaxRetries)})
+		}
+		policy.Levels = append(policy.Levels, in)
+	}
+	if err := s.audit(ctx, guildContext, "case_template.export", "case_template", templateID, model.AuditResultSuccess, ""); err != nil {
+		return nil, err
+	}
+	return policy, nil
+}
+
+// Import validates confirmed guild-neutral policy and creates a new active guild-owned template identity.
+func (s *TemplateService) Import(ctx context.Context, guildContext *GuildStaffContext, input TemplateImportInput) (*TemplateResponse, error) {
+	if !input.Confirm {
+		err := validationError("template import must be explicitly confirmed")
+		_ = s.audit(ctx, guildContext, "case_template.import", "case_template", "unknown", model.AuditResultFailure, err.Error())
+		return nil, err
+	}
+	if input.Policy.SchemaVersion != 1 {
+		err := validationError("unsupported template policy schema_version")
+		_ = s.audit(ctx, guildContext, "case_template.import", "case_template", "unknown", model.AuditResultFailure, err.Error())
+		return nil, err
+	}
+	normalized, err := s.validate(ctx, guildContext, "", TemplateInput{Slug: input.Policy.Slug, Name: input.Policy.Name, Description: input.Policy.Description, ReasonTemplate: input.Policy.OfficialReason, Appealable: input.Policy.Appealable, ContextFields: input.Policy.ContextFields, Levels: input.Policy.Levels})
+	if err != nil {
+		_ = s.audit(ctx, guildContext, "case_template.import", "case_template", "unknown", model.AuditResultFailure, err.Error())
+		return nil, err
+	}
+	expanded, err := s.store.CreateCaseTemplate(ctx, model.CreateCaseTemplateParams{Template: normalized.template, ContextFields: normalized.contextFields, Levels: normalized.levels, Audit: s.auditEntry(ctx, guildContext, "case_template.import", "case_template", "", model.AuditResultSuccess, "")})
+	if err != nil {
+		_ = s.audit(ctx, guildContext, "case_template.import", "case_template", "unknown", model.AuditResultFailure, err.Error())
+		return nil, err
+	}
 	response := templateResponse(*expanded)
 	return &response, nil
 }
@@ -205,9 +328,11 @@ func (s *TemplateService) Archive(ctx context.Context, guildContext *GuildStaffC
 		s.auditEntry(ctx, guildContext, "case_template.archive", "case_template", templateID, model.AuditResultSuccess, ""),
 	)
 	if err != nil {
+		_ = s.audit(ctx, guildContext, "case_template.archive", "case_template", templateID, model.AuditResultFailure, err.Error())
 		return nil, err
 	}
 	if expanded == nil {
+		_ = s.audit(ctx, guildContext, "case_template.archive", "case_template", templateID, model.AuditResultFailure, ErrTemplateNotFound.Error())
 		return nil, ErrTemplateNotFound
 	}
 
@@ -217,8 +342,9 @@ func (s *TemplateService) Archive(ctx context.Context, guildContext *GuildStaffC
 
 // normalizedTemplate groups the normalized template state used to keep this package's responsibilities explicit.
 type normalizedTemplate struct {
-	template model.CaseTemplate
-	levels   []model.ExpandedCaseTemplateLevel
+	template      model.CaseTemplate
+	contextFields []model.CaseTemplateContextField
+	levels        []model.ExpandedCaseTemplateLevel
 }
 
 // validate checks validate before state is read or changed.
@@ -264,7 +390,61 @@ func (s *TemplateService) validate(ctx context.Context, guildContext *GuildStaff
 		UpdatedByDiscordUserID: guildContext.Staff.DiscordUserID,
 	}
 
-	return &normalizedTemplate{template: template, levels: levels}, nil
+	contextFields, err := normalizeContextFields(input.ContextFields)
+	if err != nil {
+		return nil, err
+	}
+	return &normalizedTemplate{template: template, contextFields: contextFields, levels: levels}, nil
+}
+
+// normalizeContextFields validates identifiers, types, unique ordering, and member-visible field bounds.
+func normalizeContextFields(inputs []TemplateContextFieldInput) ([]model.CaseTemplateContextField, error) {
+	if len(inputs) > 10 {
+		return nil, validationError("at most 10 context fields are allowed")
+	}
+	keys := map[string]struct{}{}
+	positions := map[int]struct{}{}
+	fields := make([]model.CaseTemplateContextField, 0, len(inputs))
+	for i, input := range inputs {
+		key := strings.ToLower(strings.TrimSpace(input.Key))
+		if !templateSlugPattern.MatchString(key) {
+			return nil, validationError("context field key must be 2-64 lowercase letters, numbers, underscores, or hyphens")
+		}
+		if _, ok := keys[key]; ok {
+			return nil, validationError("context field keys must be unique")
+		}
+		keys[key] = struct{}{}
+		label := strings.TrimSpace(input.Label)
+		if label == "" || len([]rune(label)) > 100 {
+			return nil, validationError("context field label must be 1-100 characters")
+		}
+		if !validContextFieldType(input.FieldType) {
+			return nil, validationError("context field type is invalid")
+		}
+		position := input.Position
+		if position == 0 {
+			position = i + 1
+		}
+		if position < 1 {
+			return nil, validationError("context field position must be positive")
+		}
+		if _, ok := positions[position]; ok {
+			return nil, validationError("context field positions must be unique")
+		}
+		positions[position] = struct{}{}
+		fields = append(fields, model.CaseTemplateContextField{Key: key, Label: label, FieldType: input.FieldType, Position: position, Required: input.Required})
+	}
+	return fields, nil
+}
+
+// validContextFieldType reports whether a field uses one of the five v5 value shapes.
+func validContextFieldType(value model.ContextFieldType) bool {
+	switch value {
+	case model.ContextFieldShortText, model.ContextFieldLongText, model.ContextFieldBoolean, model.ContextFieldNumber, model.ContextFieldMessageLink:
+		return true
+	default:
+		return false
+	}
 }
 
 // normalizeLevels produces a stable levels representation for deterministic validation, comparison, or caching.
@@ -490,7 +670,11 @@ func templateResponse(expanded model.ExpandedCaseTemplate) TemplateResponse {
 		CreatedByDiscordUserID: template.CreatedByDiscordUserID,
 		UpdatedByDiscordUserID: template.UpdatedByDiscordUserID,
 		ArchivedAt:             template.ArchivedAt,
+		ContextFields:          make([]TemplateContextFieldResponse, 0, len(expanded.ContextFields)),
 		Levels:                 make([]TemplateLevelResponse, 0, len(expanded.Levels)),
+	}
+	for _, field := range expanded.ContextFields {
+		response.ContextFields = append(response.ContextFields, TemplateContextFieldResponse{ID: field.ID, Key: field.Key, Label: field.Label, FieldType: field.FieldType, Position: field.Position, Required: field.Required})
 	}
 
 	for _, level := range expanded.Levels {
