@@ -220,6 +220,11 @@ QI-1 accepted at `11650a5`: one review, two valid P2s fixed/resolved, all P1
 packages integrated, route-mount P1 closed, and focused/MySQL/race/full/vet/
 build/diff gates green.
 
+QP-F accepted at `fc6d82c`: one review, one valid P2 fixed/resolved, and module/
+race/MySQL/full/vet/build gates green. It merged cleanly into
+`integration/qi-2-p2`; fresh owner `/root/qi_2_integration` is wiring honeypot
+runtime/routes/migration/drift/intents while QP-D/QP-E remain active.
+
 ### Parallel wave P3 - migration and operations from QI-2
 
 | Package | Absorbed requirements | Exclusive implementation surface | Migration range |
@@ -1020,8 +1025,8 @@ by the macro-package ledger.
 | QI-1 | ACCEPTED | `integration/qi-1-p1` at `11650a5` | [#9](https://github.com/dickeyy/5/pull/9) | 1 complete; two P2s fixed | passed wave evidence gate |
 | QP-D | IN_PROGRESS | `package/qp-d-appeals-member` | pending | 0 | absorbs member V5-007, V5-013/014/017C |
 | QP-E | IN_PROGRESS | `package/qp-e-audit-discord` | pending | 0 | absorbs V5-015/016 |
-| QP-F | IN_PROGRESS | `package/qp-f-honeypot-isolation` | pending | 0 | absorbs V5-021/022 |
-| QI-2 | PLANNED | pending | conditional | conditional | P2 integration anchor |
+| QP-F | ACCEPTED | `package/qp-f-honeypot-isolation` at `fc6d82c` | [#10](https://github.com/dickeyy/5/pull/10) | 1 complete; one P2 fixed | passed evidence gate |
+| QI-2 | IN_PROGRESS | `integration/qi-2-p2` with QP-F merged | pending | 0 | fresh owner wiring; awaiting QP-D/QP-E |
 | QP-G | PLANNED | pending | pending | 0 | absorbs V5-023/024 |
 | QP-H | PLANNED | pending | pending | 0 | absorbs remaining V5-017/025 |
 | QP-I | PLANNED | pending | pending | 0 | absorbs V5-026 and final readiness |
