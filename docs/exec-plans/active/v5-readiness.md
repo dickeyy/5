@@ -240,7 +240,10 @@ focused regressions repeated 20 times plus full/race/MySQL/vet/build evidence
 green. QP-E accepted at `f7ace2f` on PR #11 after one Codex request with no
 package-local bugs; its P1/P2 findings are the three QI-2-owned registration and
 worker-startup obligations. QI-2 checkpointed QP-F/honeypot at `62a9b73`, then
-combined QP-E at `7f012c2`; it is wiring both accepted heads concurrently.
+combined QP-E at `7f012c2` and QP-D at `d8fb78c`. Final QI-2 head `1ddad6d`
+closes all transferred wiring obligations and passes focused, real-MySQL, race,
+full, vet, build, formatting, and diff gates. PR #13 has one Codex review
+request pending.
 
 ### Parallel wave P3 - migration and operations from QI-2
 
@@ -1043,7 +1046,7 @@ by the macro-package ledger.
 | QP-D | ACCEPTED | `package/qp-d-appeals-member` at `24f3e4d` | [#12](https://github.com/dickeyy/5/pull/12) | 1 complete; P1/P2 fixed | focused x20/full/race/MySQL/vet/build green |
 | QP-E | ACCEPTED | `package/qp-e-audit-discord` at `f7ace2f` | [#11](https://github.com/dickeyy/5/pull/11) | 1 complete; three integration findings | package gates green; findings transferred to QI-2 |
 | QP-F | ACCEPTED | `package/qp-f-honeypot-isolation` at `fc6d82c` | [#10](https://github.com/dickeyy/5/pull/10) | 1 complete; one P2 fixed | passed evidence gate |
-| QI-2 | IN_PROGRESS | `integration/qi-2-p2`, QP-E merged at `7f012c2` | pending | 0 | combining accepted QP-D/QP-E/QP-F and running wave gates |
+| QI-2 | REVIEW_PENDING | `integration/qi-2-p2` at `1ddad6d` | [#13](https://github.com/dickeyy/5/pull/13) | 1 requested | all P2 heads integrated; focused/MySQL/race/full/vet/build green |
 | QP-G | PLANNED | pending | pending | 0 | absorbs V5-023/024 |
 | QP-H | PLANNED | pending | pending | 0 | absorbs remaining V5-017/025 |
 | QP-I | PLANNED | pending | pending | 0 | absorbs V5-026 and final readiness |
