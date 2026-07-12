@@ -82,37 +82,9 @@ func TestMySQLMigrateForwardRerunPreservationAndRollbackBoundary(t *testing.T) {
 		t.Fatalf("expected pending starter review notice, got %+v", guildSettings)
 	}
 
-	if err := repositories.RollbackLastMigration(); err != nil {
-		t.Fatalf("roll back guild settings migration: %v", err)
-	}
-	if db.Migrator().HasTable(&migration0004GuildSettingsRecord{}) {
-		t.Fatal("MySQL guild settings table remained after rollback")
-	}
-	assertRepresentativeHistory(t, db, want)
-	if err := repositories.RollbackLastMigration(); err != nil {
-		t.Fatalf("roll back case validity migration: %v", err)
-	}
-	if err := db.First(&mapped, "id = ?", want.CaseID).Error; err != nil {
-		t.Fatalf("load rolled-back representative case: %v", err)
-	}
-	if mapped.Status != "open" || mapped.Source != "discord_command" {
-		t.Fatalf("unexpected MySQL case rollback: %+v", mapped)
-	}
-	var preservedEvent migration0003LegacyEvent
-	if err := db.First(&preservedEvent, "id = ?", legacyEventID).Error; err != nil {
-		t.Fatalf("load preserved MySQL retired event after rollback: %v", err)
-	}
-	assertMigration0003LegacyEventEqual(t, preservedEvent, legacyEventBefore)
-	if err := repositories.RollbackLastMigration(); err != nil {
-		t.Fatalf("roll back template compatibility migration: %v", err)
-	}
-	assertTemplateArchiveState(t, db, disabledTemplateID, false)
-	assertTemplateArchiveState(t, db, windowTemplateID, false)
-	assertTemplateArchiveState(t, db, deletedTemplateID, false)
-	assertTemplateDeletedState(t, db, deletedTemplateID, true)
 	err = repositories.RollbackLastMigration()
 	if !errors.Is(err, ErrMigrationNotReversible) {
-		t.Fatalf("expected baseline rollback refusal, got %v", err)
+		t.Fatalf("expected module migration rollback refusal, got %v", err)
 	}
 	assertRepresentativeHistory(t, db, want)
 }

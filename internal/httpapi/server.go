@@ -9,12 +9,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/internal/config"
 	"github.com/quackdiscord/bot/internal/httpapi/routes"
+	"github.com/quackdiscord/bot/internal/moduleintegration"
 	"github.com/quackdiscord/bot/internal/quack"
 	"github.com/rs/zerolog/log"
 )
 
 // Run serves the configured HTTP API until the context is canceled, then performs a bounded graceful shutdown.
-func Run(ctx context.Context, cfg config.Config, services *quack.Services, discord routes.DiscordStatusProvider) error {
+func Run(ctx context.Context, cfg config.Config, services *quack.Services, moduleRuntime *moduleintegration.Runtime, discord routes.DiscordStatusProvider) error {
 	if cfg.Environment != "dev" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -29,7 +30,9 @@ func Run(ctx context.Context, cfg config.Config, services *quack.Services, disco
 		return fmt.Errorf("configure trusted HTTP proxies: %w", err)
 	}
 
-	routes.SetupRoutes(r, services, discord)
+	if err := routes.SetupRoutesWithModules(r, services, moduleRuntime, discord); err != nil {
+		return fmt.Errorf("register HTTP routes: %w", err)
+	}
 
 	log.Info().Msg("Starting API on port " + cfg.API.Port)
 	server := newHTTPServer(cfg, r)

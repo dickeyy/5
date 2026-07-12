@@ -24,6 +24,10 @@ type Registry struct {
 	commands map[string]CommandSpec
 }
 
+// ComponentRegistrar installs integration-owned component and modal handlers
+// into the same dispatcher as application commands.
+type ComponentRegistrar func(*interactions.ComponentRegistry) error
+
 // NewRegistry constructs registry with required dependencies explicit so callers control lifecycle and substitution.
 func NewRegistry() *Registry {
 	return &Registry{commands: map[string]CommandSpec{}}
@@ -91,7 +95,7 @@ func (r *Registry) LookupCommand(name string) (ui.Handler, bool) {
 }
 
 // Register explicitly wires register so runtime behavior does not depend on init-time registration.
-func Register(session *discordgo.Session, services *quack.Services) error {
+func Register(session *discordgo.Session, services *quack.Services, componentRegistrars ...ComponentRegistrar) error {
 	if session == nil {
 		return errors.New("discord session is not configured")
 	}
@@ -104,6 +108,14 @@ func Register(session *discordgo.Session, services *quack.Services) error {
 		return err
 	}
 	dispatcher := interactions.NewDispatcher(services, registry)
+	for _, register := range componentRegistrars {
+		if register == nil {
+			continue
+		}
+		if err := register(dispatcher.Components); err != nil {
+			return fmt.Errorf("register Discord components: %w", err)
+		}
+	}
 	session.AddHandler(dispatcher.Handle)
 
 	appID := strings.TrimSpace(services.Config.Discord.AppID)
