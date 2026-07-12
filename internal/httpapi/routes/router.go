@@ -24,6 +24,9 @@ func SetupRoutesWithModules(r *gin.Engine, services *quack.Services, moduleRunti
 		discord = providers[0]
 	}
 	r.GET("/status", func(c *gin.Context) { status(c, services, discord) })
+	r.GET("/livez", liveness)
+	r.GET("/readyz", func(c *gin.Context) { readiness(c, services, discord) })
+	r.GET("/metrics", func(c *gin.Context) { metrics(c, services) })
 	r.GET("/ops/status", func(c *gin.Context) { globalOpsStatus(c, services) })
 	r.GET("/guilds/:discordGuildID/ops/status", func(c *gin.Context) { guildOpsStatus(c, services) })
 	setupAuthRoutes(r, services)

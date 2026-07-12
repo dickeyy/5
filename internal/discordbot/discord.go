@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -22,6 +23,7 @@ const discordUserGuildsURL = "https://discord.com/api/v10/users/@me/guilds"
 type Bot struct {
 	Session    *discordgo.Session
 	HTTPClient *http.Client
+	connected  atomic.Bool
 }
 
 // New constructs new with required dependencies explicit so callers control lifecycle and substitution.
@@ -43,7 +45,11 @@ func (b *Bot) Open() error {
 	if b == nil || b.Session == nil {
 		return errors.New("discord session is not configured")
 	}
-	return b.Session.Open()
+	if err := b.Session.Open(); err != nil {
+		return err
+	}
+	b.connected.Store(true)
+	return nil
 }
 
 // Close releases resources owned by bot and is safe to use during reverse-order shutdown.
@@ -51,12 +57,15 @@ func (b *Bot) Close() error {
 	if b == nil || b.Session == nil {
 		return nil
 	}
+	if !b.connected.Swap(false) {
+		return nil
+	}
 	return b.Session.Close()
 }
 
 // Status reports whether the adapter's external dependency is currently ready for health checks.
 func (b *Bot) Status() (bool, string, int64) {
-	if b == nil || b.Session == nil || b.Session.State == nil || b.Session.State.User == nil {
+	if b == nil || !b.connected.Load() || b.Session == nil || b.Session.State == nil || b.Session.State.User == nil {
 		return false, "", 0
 	}
 	return true, b.Session.State.User.Username, b.Session.HeartbeatLatency().Milliseconds()

@@ -31,6 +31,8 @@ type Queue struct {
 	handler    Handler
 	source     DueSource
 	cancelPoll context.CancelFunc
+	cancelWork context.CancelFunc
+	workerCtx  context.Context
 	stats      quack.QueueStats
 }
 
@@ -67,8 +69,11 @@ func (q *Queue) Start(ctx context.Context, handler Handler, source DueSource) {
 	q.active = true
 	q.handler = handler
 	q.source = source
-	pollCtx, cancel := context.WithCancel(ctx)
-	q.cancelPoll = cancel
+	workerCtx, cancelWork := context.WithCancel(context.Background())
+	pollCtx, cancelPoll := context.WithCancel(workerCtx)
+	q.cancelPoll = cancelPoll
+	q.cancelWork = cancelWork
+	q.workerCtx = workerCtx
 	for i := 0; i < q.workers; i++ {
 		q.wg.Add(1)
 		go q.worker()
@@ -156,7 +161,7 @@ func (q *Queue) process(next job) {
 		if recovered := recover(); recovered != nil {
 			atomic.AddUint64(&q.stats.PanickedTotal, 1)
 			atomic.AddUint64(&q.stats.FailedTotal, 1)
-			log.Error().Interface("panic", recovered).Str("case_id", next.caseID).Msg("Case action job panicked")
+			log.Error().Interface("panic", recovered).Str("case_id", next.caseID).Str("request_id", next.requestID).Str("correlation_id", next.correlationID).Msg("Case action job panicked")
 		}
 	}()
 	q.mu.RLock()
@@ -166,10 +171,16 @@ func (q *Queue) process(next job) {
 		atomic.AddUint64(&q.stats.FailedTotal, 1)
 		return
 	}
-	ctx := idutil.ContextWithTrace(context.Background(), next.requestID, next.correlationID)
+	q.mu.RLock()
+	workerCtx := q.workerCtx
+	q.mu.RUnlock()
+	if workerCtx == nil {
+		workerCtx = context.Background()
+	}
+	ctx := idutil.ContextWithTrace(workerCtx, next.requestID, next.correlationID)
 	if err := handler(ctx, next.caseID); err != nil {
 		atomic.AddUint64(&q.stats.FailedTotal, 1)
-		log.Error().Err(err).Str("case_id", next.caseID).Msg("Case action job failed")
+		log.Error().Err(err).Str("case_id", next.caseID).Str("request_id", next.requestID).Str("correlation_id", next.correlationID).Msg("Case action job failed")
 		return
 	}
 	atomic.AddUint64(&q.stats.ProcessedTotal, 1)
@@ -181,24 +192,49 @@ func (q *Queue) process(next job) {
 
 // Stop stops accepting queue work, halts polling, and drains workers before returning.
 func (q *Queue) Stop() {
+	_ = q.StopContext(context.Background())
+}
+
+// StopContext stops accepting work and waits only until the caller's shutdown
+// deadline. Canceling the worker context interrupts dependency calls that honor
+// Quack's context contract.
+func (q *Queue) StopContext(ctx context.Context) error {
 	if q == nil {
-		return
+		return nil
 	}
 	q.mu.Lock()
 	if !q.active {
 		q.mu.Unlock()
-		return
+		return nil
 	}
 	q.active = false
 	cancelPoll := q.cancelPoll
 	q.cancelPoll = nil
+	cancelWork := q.cancelWork
+	q.cancelWork = nil
 	q.mu.Unlock()
 
 	if cancelPoll != nil {
 		cancelPoll()
 	}
 	close(q.jobs)
-	q.wg.Wait()
+	done := make(chan struct{})
+	go func() {
+		q.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		if cancelWork != nil {
+			cancelWork()
+		}
+		return nil
+	case <-ctx.Done():
+		if cancelWork != nil {
+			cancelWork()
+		}
+		return ctx.Err()
+	}
 }
 
 // IsActive reports whether the queue currently accepts immediate submissions.

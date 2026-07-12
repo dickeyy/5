@@ -76,6 +76,23 @@ func TestQueueStopDrainsWithoutDeadlock(t *testing.T) {
 	}
 }
 
+func TestQueueStopContextCancelsActiveDependencyWork(t *testing.T) {
+	started := make(chan struct{})
+	q := New(1, 1)
+	q.Start(context.Background(), func(ctx context.Context, _ string) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	}, nil)
+	q.Submit(context.Background(), "case-1")
+	<-started
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := q.StopContext(shutdownCtx); err == nil {
+		t.Fatal("expected active handler to be bounded by shutdown deadline")
+	}
+}
+
 func TestQueueSaturationLeavesWorkDiscoverable(t *testing.T) {
 	q := New(1, 1)
 	block := make(chan struct{})

@@ -24,7 +24,7 @@ func RequireGuildContext(services *quack.Services, requiredAction model.Permissi
 
 		guildContext, err := services.Guilds.ResolveStaffContext(c.Request.Context(), session, c.Param("discordGuildID"))
 		if err != nil {
-			log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Str("actor_discord_user_id", session.DiscordUserID).Str("discord_guild_id", c.Param("discordGuildID")).Msg("live guild authorization denied")
+			log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Str("correlation_id", quack.CorrelationIDFromContext(c.Request.Context())).Str("actor_discord_user_id", session.DiscordUserID).Str("discord_guild_id", c.Param("discordGuildID")).Msg("live guild authorization denied")
 			status := http.StatusForbidden
 			if errors.Is(err, quack.ErrBotNotInGuild) {
 				status = http.StatusNotFound
@@ -38,7 +38,7 @@ func RequireGuildContext(services *quack.Services, requiredAction model.Permissi
 		}
 
 		if err := services.Guilds.Authorize(c.Request.Context(), guildContext, requiredAction, model.AuditSourceAPI); err != nil {
-			log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Str("actor_discord_user_id", session.DiscordUserID).Str("discord_guild_id", c.Param("discordGuildID")).Str("permission_action", string(requiredAction)).Msg("guild permission denied")
+			log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Str("correlation_id", quack.CorrelationIDFromContext(c.Request.Context())).Str("actor_discord_user_id", session.DiscordUserID).Str("discord_guild_id", c.Param("discordGuildID")).Str("permission_action", string(requiredAction)).Msg("guild permission denied")
 			apierror.Write(c, http.StatusForbidden, apierror.CodeAuthorization, "access denied")
 			return
 		}
