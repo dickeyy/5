@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/quackdiscord/bot/internal/quack"
 	"github.com/quackdiscord/bot/internal/quack/model"
@@ -16,6 +17,9 @@ import (
 type Store struct {
 	db    *gorm.DB
 	redis *r.Client
+
+	executableMu          sync.Mutex
+	executableGuildCursor string
 }
 
 // WithGuildCaseLock runs case creation in one transaction while locking the guild row to serialize numbering and escalation selection.
