@@ -268,7 +268,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 
 #### V5-001C - Simplify case validity, sources, reason, and event model
 
-- Status: REVIEW_WAIT
+- Status: ACCEPTED
 - Assignment: fresh implementation subagent `/root/slice_v5_001c` using
   `v5-implementation-slice`; the initially reused V5-001 owner was interrupted
   before editing and the worktree was verified clean when the one-agent-per-slice
@@ -281,7 +281,25 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
   but its external Git write was policy-rejected; the subagent-owned diff was
   not changed).
 - PR/review: [PR #3](https://github.com/dickeyy/5/pull/3); exactly one standalone
-  `@codex review` posted 2026-07-11 and awaiting completion.
+  `@codex review` posted 2026-07-11. Codex reviewed `609ee76` and raised one P2:
+  rollback did not map cases created after migration 0003 back into the pre-0003
+  schema contract. The owner accepted the finding, fixed it in `8adb20b`, added
+  complete inverse-mapping and post-migration rollback tests, reran all required
+  validation, and resolved the review thread. No second review was requested.
+- Orchestrator evidence gate: ACCEPTED 2026-07-11 at remote head
+  `8adb20b33bc0b67ffc3f66db16d072714b669ba9`.
+  - Structured handoff accounts for every acceptance criterion, compatibility
+    decision, documentation update, and scope boundary.
+  - Post-fix focused store/quack/Discord and HTTP tests: PASS.
+  - Post-fix real MySQL `TestMySQL*` migration coverage: PASS.
+  - Post-fix `go test ./...`, `go vet -buildvcs=false ./...`, both command
+    builds, and `git diff --check`: PASS.
+  - PR metadata confirms the expected base, exact final head, one standalone
+    review request, and one Codex review on the initial commit; worktree is clean
+    and synchronized with origin.
+  - The valid P2 is fixed and its thread resolved; no actionable P0/P1 remains.
+    Under the evidence-focused orchestration policy, no redundant full diff
+    review or repository-wide command rerun was performed.
 - Implementation decision 2026-07-11: migration 0003 preserves legacy private-note
   and generic status-change event rows byte-for-byte and inventories them in
   migration-owned compatibility bookkeeping, while the live v5 event query and
@@ -311,7 +329,15 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 
 #### V5-002 - Guild settings, lifecycle bootstrap, and starter policy
 
-- Status: PLANNED
+- Status: IN_PROGRESS
+- Assignment: fresh implementation subagent `/root/slice_v5_002` using
+  `v5-implementation-slice`; this owner is assigned only to V5-002.
+- Branch: `slice/v5-002-guild-bootstrap`
+- Worktree: `/tmp/quack-v5-worktrees/v5-002`
+- Base/PR target: `slice/v5-001c-case-validity` at accepted head `8adb20b`
+- Scope decision 2026-07-11: this slice persists and safely clears/repairs the
+  managed-evidence channel reference, while Discord channel creation,
+  permissioning, and attachment upload behavior remain owned by V5-009.
 - Requirements: Starter Policy; guild-owned rules; optional-module enablement.
 - Acceptance criteria:
   - Guild settings persist core channels, notification branding, module toggles,
@@ -824,7 +850,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 | V5-000 | ACCEPTED | orchestration worktree | n/a | n/a | passed |
 | V5-001M | ACCEPTED | `slice/v5-001m-versioned-migrations` | [#1](https://github.com/dickeyy/5/pull/1) | 1 default + 1 large-rework exception; extra request ignored | passed round 2 |
 | V5-001 | ACCEPTED | `slice/v5-001-template-model` | [#2](https://github.com/dickeyy/5/pull/2) | 1 complete, no findings | passed round 2 |
-| V5-001C | REVIEW_WAIT | `slice/v5-001c-case-validity` | [#3](https://github.com/dickeyy/5/pull/3) | 1 requested | pending |
+| V5-001C | ACCEPTED | `slice/v5-001c-case-validity` | [#3](https://github.com/dickeyy/5/pull/3) | 1 complete, one P2 fixed | passed evidence gate |
 | V5-002 | PLANNED | pending | pending | 0 | pending |
 | V5-003 | PLANNED | pending | pending | 0 | pending |
 | V5-004 | PLANNED | pending | pending | 0 | pending |
