@@ -27,6 +27,7 @@ func TestPlatformRegistrarRejectsUnsafeProductionConfig(t *testing.T) {
 		{name: "insecure cookie", mutate: func(cfg *config.Config) { cfg.Auth.CookieSecure = false }},
 		{name: "unbounded body", mutate: func(cfg *config.Config) { cfg.API.MaxBodyBytes = 0 }},
 		{name: "unbounded timeout", mutate: func(cfg *config.Config) { cfg.API.ReadTimeoutSeconds = 0 }},
+		{name: "invalid trusted proxy", mutate: func(cfg *config.Config) { cfg.API.TrustedProxies = []string{"not-a-proxy"} }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -65,7 +66,9 @@ func TestPlatformSecurityErrorAndCSRFContract(t *testing.T) {
 		t.Fatalf("new registrar: %v", err)
 	}
 	router := gin.New()
-	registrar.Register(router)
+	if err := registrar.Register(router); err != nil {
+		t.Fatalf("register platform: %v", err)
+	}
 	router.GET("/ok", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
 	router.POST("/write", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
 	router.POST("/body", func(c *gin.Context) {
@@ -166,7 +169,9 @@ func TestLoggerRedactsQueryCredentialsAndHeaders(t *testing.T) {
 	log.Logger = zerolog.New(&output)
 	t.Cleanup(func() { log.Logger = previous })
 	router := gin.New()
-	registrar.Register(router)
+	if err := registrar.Register(router); err != nil {
+		t.Fatalf("register platform: %v", err)
+	}
 	router.GET("/callback", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 	request := httptest.NewRequest(http.MethodGet, "/callback?code=oauth-secret&state=state-secret", nil)
 	request.Header.Set("Authorization", "Bearer session-secret")
@@ -178,6 +183,42 @@ func TestLoggerRedactsQueryCredentialsAndHeaders(t *testing.T) {
 		if strings.Contains(logged, secret) {
 			t.Fatalf("logger exposed %q in %s", secret, logged)
 		}
+	}
+}
+
+func TestPlatformDisablesForwardedClientIPsUnlessProxyIsTrusted(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, test := range []struct {
+		name           string
+		trustedProxies []string
+		remoteAddr     string
+		forwardedFor   string
+		wantClientIP   string
+	}{
+		{name: "untrusted direct client cannot spoof", remoteAddr: "192.0.2.10:1234", forwardedFor: "198.51.100.99", wantClientIP: "192.0.2.10"},
+		{name: "explicit proxy forwards client", trustedProxies: []string{"127.0.0.1/32"}, remoteAddr: "127.0.0.1:1234", forwardedFor: "198.51.100.99", wantClientIP: "198.51.100.99"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.API.TrustedProxies = test.trustedProxies
+			registrar, err := NewPlatformRegistrar(cfg)
+			if err != nil {
+				t.Fatalf("new registrar: %v", err)
+			}
+			router := gin.New()
+			if err := registrar.Register(router); err != nil {
+				t.Fatalf("register platform: %v", err)
+			}
+			router.GET("/ip", func(c *gin.Context) { c.String(http.StatusOK, c.ClientIP()) })
+			request := httptest.NewRequest(http.MethodGet, "/ip", nil)
+			request.RemoteAddr = test.remoteAddr
+			request.Header.Set("X-Forwarded-For", test.forwardedFor)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != http.StatusOK || response.Body.String() != test.wantClientIP {
+				t.Fatalf("expected client IP %q, got status=%d body=%q", test.wantClientIP, response.Code, response.Body.String())
+			}
+		})
 	}
 }
 

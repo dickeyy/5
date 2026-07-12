@@ -25,7 +25,9 @@ func Run(ctx context.Context, cfg config.Config, services *quack.Services, disco
 	}
 
 	r := gin.New()
-	registrar.Register(r)
+	if err := registrar.Register(r); err != nil {
+		return fmt.Errorf("configure trusted HTTP proxies: %w", err)
+	}
 
 	routes.SetupRoutes(r, services, discord)
 

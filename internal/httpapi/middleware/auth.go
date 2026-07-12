@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"net/http"
 	"strings"
 	"time"
@@ -62,6 +64,14 @@ func RequireAuth(s quack.Repository, auth config.AuthConfig) gin.HandlerFunc {
 			apierror.Write(c, http.StatusUnauthorized, apierror.CodeReauthenticate, "Discord authorization expired; sign in again")
 			return
 		}
+		if session.CSRFToken == "" {
+			csrfToken, err := NewCSRFToken()
+			if err != nil {
+				apierror.Write(c, http.StatusInternalServerError, apierror.CodeInternal, "could not refresh authentication session")
+				return
+			}
+			session.CSRFToken = csrfToken
+		}
 
 		session.LastSeenAt = now
 		ttl := time.Duration(auth.SessionTTLHours) * time.Hour
@@ -71,11 +81,29 @@ func RequireAuth(s quack.Repository, auth config.AuthConfig) gin.HandlerFunc {
 			apierror.Write(c, http.StatusServiceUnavailable, apierror.CodeDependency, "authentication service unavailable")
 			return
 		}
+		if _, err := c.Cookie(auth.SessionCookieName); err == nil {
+			setCSRFCookie(c, auth, session.CSRFToken, int(ttl.Seconds()))
+		}
 
 		c.Set(ContextSessionKey, session)
 		c.Set(ContextUserIDKey, session.DiscordUserID)
 		c.Next()
 	}
+}
+
+// NewCSRFToken creates the non-secret random challenge used by the double-submit browser contract.
+func NewCSRFToken() (string, error) {
+	var body [32]byte
+	if _, err := rand.Read(body[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(body[:]), nil
+}
+
+// setCSRFCookie repairs or refreshes the browser's host-only double-submit cookie.
+func setCSRFCookie(c *gin.Context, auth config.AuthConfig, token string, maxAge int) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(auth.CSRFCookieName, token, maxAge, "/", "", auth.CookieSecure, false)
 }
 
 // expireAuthCookies invalidates both browser credentials without exposing their values.

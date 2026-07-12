@@ -3,6 +3,7 @@ package middleware
 import (
 	"crypto/subtle"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -59,6 +60,14 @@ func ValidateSecurityConfig(cfg config.Config) error {
 		}
 		if strings.Contains(origin, "*") {
 			return fmt.Errorf("wildcard CORS origins are not supported")
+		}
+	}
+	for _, proxy := range cfg.API.TrustedProxies {
+		if net.ParseIP(proxy) != nil {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(proxy); err != nil {
+			return fmt.Errorf("invalid trusted proxy %q", proxy)
 		}
 	}
 	return nil

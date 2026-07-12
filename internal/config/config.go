@@ -27,6 +27,7 @@ func Load() Config {
 			Port:                     getEnvWithDefault("API_PORT", "8080"),
 			OpsStatusToken:           getEnvWithDefault("OPS_STATUS_TOKEN", ""),
 			CORSAllowedOrigins:       corsAllowedOrigins,
+			TrustedProxies:           getEnvCSV("API_TRUSTED_PROXIES"),
 			MaxBodyBytes:             getEnvWithDefaultInt64("API_MAX_BODY_BYTES", 1<<20),
 			ReadHeaderTimeoutSeconds: getEnvWithDefaultInt("API_READ_HEADER_TIMEOUT_SECONDS", 5),
 			ReadTimeoutSeconds:       getEnvWithDefaultInt("API_READ_TIMEOUT_SECONDS", 15),

@@ -63,7 +63,8 @@ func TestExpiredOAuthTokenForcesStableReauthenticationAndRevokesSession(t *testi
 	if err := store.SaveSession(context.Background(), session, time.Hour); err != nil {
 		t.Fatalf("save session: %v", err)
 	}
-	router := authTestRouter(quack.New(store))
+	services := quack.New(store)
+	router := authTestRouter(services)
 	request := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
 	request.Header.Set("Authorization", "Bearer "+session.ID)
 	response := httptest.NewRecorder()
@@ -94,9 +95,10 @@ func TestAuthMeAndLogoutAllDoNotExposeOrRetainSessions(t *testing.T) {
 			t.Fatalf("save session: %v", err)
 		}
 	}
-	router := authTestRouter(quack.New(store))
+	services := quack.New(store)
+	router := authTestRouter(services)
 	request := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
-	request.Header.Set("Authorization", "Bearer "+first.ID)
+	request.AddCookie(&http.Cookie{Name: services.Config.Auth.SessionCookieName, Value: first.ID})
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -106,6 +108,21 @@ func TestAuthMeAndLogoutAllDoNotExposeOrRetainSessions(t *testing.T) {
 		if strings.Contains(response.Body.String(), secret) {
 			t.Fatalf("auth me exposed %q: %s", secret, response.Body.String())
 		}
+	}
+	var meBody struct {
+		CSRFToken string `json:"csrf_token"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &meBody); err != nil || meBody.CSRFToken == "" {
+		t.Fatalf("expected readable CSRF challenge in auth me response: %+v err=%v", meBody, err)
+	}
+	foundCSRFCookie := false
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == services.Config.Auth.CSRFCookieName && cookie.Value == meBody.CSRFToken {
+			foundCSRFCookie = true
+		}
+	}
+	if !foundCSRFCookie {
+		t.Fatalf("expected matching host-only CSRF cookie, headers=%v", response.Header())
 	}
 
 	request = httptest.NewRequest(http.MethodPost, "/auth/logout-all", nil)
@@ -198,18 +215,19 @@ func TestOAuthJSONCallbackReturnsOnlySafeUserContract(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", response.Code, response.Body.String())
 	}
-	for _, secret := range []string{"access-secret", "refresh-secret", "code-secret", "state-id", "session_id", "csrf"} {
+	for _, secret := range []string{"access-secret", "refresh-secret", "code-secret", "state-id", "session_id"} {
 		if strings.Contains(response.Body.String(), secret) {
 			t.Fatalf("OAuth callback exposed %q: %s", secret, response.Body.String())
 		}
 	}
 	var body struct {
-		User struct {
+		CSRFToken string `json:"csrf_token"`
+		User      struct {
 			ID string `json:"id"`
 		} `json:"user"`
 		ExpiresAt time.Time `json:"expires_at"`
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || body.User.ID != "user-1" || body.ExpiresAt.IsZero() {
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || body.CSRFToken == "" || body.User.ID != "user-1" || body.ExpiresAt.IsZero() {
 		t.Fatalf("unexpected safe callback contract: %+v err=%v", body, err)
 	}
 	if len(response.Result().Cookies()) != 2 {

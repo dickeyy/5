@@ -2,8 +2,6 @@ package routes
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -175,7 +173,7 @@ func discordCallback(c *gin.Context, services *quack.Services) {
 		apierror.Write(c, http.StatusInternalServerError, apierror.CodeInternal, "could not create authentication session")
 		return
 	}
-	csrfToken, err := newSecretToken()
+	csrfToken, err := middleware.NewCSRFToken()
 	if err != nil {
 		apierror.Write(c, http.StatusInternalServerError, apierror.CodeInternal, "could not create authentication session")
 		return
@@ -210,6 +208,7 @@ func discordCallback(c *gin.Context, services *quack.Services) {
 
 	if statePayload.ResponseMode == "json" {
 		c.JSON(http.StatusOK, gin.H{
+			"csrf_token": csrfToken,
 			"user": gin.H{
 				"id":          session.DiscordUserID,
 				"username":    session.Username,
@@ -234,6 +233,7 @@ func authMe(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
+		"csrf_token": session.CSRFToken,
 		"user": gin.H{
 			"id":          session.DiscordUserID,
 			"username":    session.Username,
@@ -387,15 +387,6 @@ func clearAuthCookies(c *gin.Context, cfg config.Config) {
 		true,
 	)
 	c.SetCookie(cfg.Auth.CSRFCookieName, "", -1, "/", "", cfg.Auth.CookieSecure, false)
-}
-
-// newSecretToken creates an unguessable browser credential without returning raw entropy in errors.
-func newSecretToken() (string, error) {
-	var body [32]byte
-	if _, err := rand.Read(body[:]); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(body[:]), nil
 }
 
 // builds discord avatar url

@@ -22,6 +22,7 @@ Configured in `internal/config/config.go`.
 | `API_PORT` | no | API listen port. Defaults to `8080`. |
 | `OPS_STATUS_TOKEN` | no | Enables global `GET /ops/status` when supplied and matched by `X-Quack-Ops-Key`. |
 | `API_CORS_ALLOWED_ORIGINS` | required outside `dev` | Comma-separated exact dashboard origins. Wildcards and malformed origins fail startup. Development defaults to localhost ports `3000`. |
+| `API_TRUSTED_PROXIES` | no | Comma-separated proxy IPs/CIDRs allowed to supply forwarded client IPs. Empty disables forwarded-IP trust. |
 | `API_MAX_BODY_BYTES` | no | Maximum request body size. Defaults to `1048576`. |
 | `API_READ_HEADER_TIMEOUT_SECONDS` | no | Header-read bound. Defaults to `5`. |
 | `API_READ_TIMEOUT_SECONDS` | no | Whole-request read bound. Defaults to `15`. |
@@ -74,6 +75,7 @@ profile are the app runtime settings and Discord/auth credentials from
 - `API_PORT`
 - `OPS_STATUS_TOKEN`
 - `API_CORS_ALLOWED_ORIGINS`
+- `API_TRUSTED_PROXIES`
 - `API_MAX_BODY_BYTES`
 - `API_READ_HEADER_TIMEOUT_SECONDS`, `API_READ_TIMEOUT_SECONDS`, `API_WRITE_TIMEOUT_SECONDS`, `API_IDLE_TIMEOUT_SECONDS`
 - `DEV_DISCORD_TOKEN`

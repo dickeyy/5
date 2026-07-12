@@ -19,8 +19,11 @@ func NewPlatformRegistrar(cfg config.Config) (*PlatformRegistrar, error) {
 	return &PlatformRegistrar{cfg: cfg}, nil
 }
 
-// Register installs middleware in the required order before feature routes are registered.
-func (p *PlatformRegistrar) Register(r *gin.Engine) {
+// Register installs trusted-proxy handling and middleware in the required order before feature routes are registered.
+func (p *PlatformRegistrar) Register(r *gin.Engine) error {
+	if err := r.SetTrustedProxies(p.cfg.API.TrustedProxies); err != nil {
+		return err
+	}
 	r.Use(middleware.RequestContext)
 	r.Use(middleware.ErrorEnvelope)
 	r.Use(gin.Recovery())
@@ -29,4 +32,5 @@ func (p *PlatformRegistrar) Register(r *gin.Engine) {
 	r.Use(middleware.CORS(p.cfg.API.CORSAllowedOrigins))
 	r.Use(middleware.BodyLimit(p.cfg.API.MaxBodyBytes))
 	r.Use(middleware.CSRF(p.cfg.Auth, p.cfg.API.CORSAllowedOrigins))
+	return nil
 }

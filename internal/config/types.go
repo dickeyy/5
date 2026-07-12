@@ -33,6 +33,7 @@ type APIConfig struct {
 	Port                     string
 	OpsStatusToken           string
 	CORSAllowedOrigins       []string
+	TrustedProxies           []string
 	MaxBodyBytes             int64
 	ReadHeaderTimeoutSeconds int
 	ReadTimeoutSeconds       int
