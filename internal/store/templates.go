@@ -79,7 +79,7 @@ func (s *Store) ListCaseTemplates(ctx context.Context, guildID string) ([]Expand
 	}
 
 	var records []CaseTemplateRecord
-	if err := s.db.WithContext(ctx).Unscoped().
+	if err := s.db.WithContext(ctx).
 		Where("guild_id = ?", guildID).
 		Order("slug ASC").
 		Find(&records).Error; err != nil {
@@ -117,7 +117,7 @@ func (s *Store) GetCaseTemplateBySlug(ctx context.Context, guildID, slug string)
 	}
 
 	var record CaseTemplateRecord
-	if err := s.db.WithContext(ctx).Unscoped().Where("guild_id = ? AND slug = ?", guildID, slug).First(&record).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("guild_id = ? AND slug = ?", guildID, slug).First(&record).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
@@ -137,7 +137,7 @@ func (s *Store) UpdateCaseTemplate(ctx context.Context, params UpdateCaseTemplat
 	now := time.Now().UTC()
 	var record CaseTemplateRecord
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Unscoped().Where("id = ? AND guild_id = ?", params.TemplateID, params.GuildID).First(&record).Error; err != nil {
+		if err := tx.Where("id = ? AND guild_id = ?", params.TemplateID, params.GuildID).First(&record).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return gorm.ErrRecordNotFound
 			}
@@ -202,7 +202,7 @@ func (s *Store) RestoreCaseTemplate(ctx context.Context, guildID, templateID str
 	now := time.Now().UTC()
 	var record CaseTemplateRecord
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Unscoped().Where("id = ? AND guild_id = ?", templateID, guildID).First(&record)
+		result := tx.Where("id = ? AND guild_id = ?", templateID, guildID).First(&record)
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return gorm.ErrRecordNotFound
 		}
@@ -241,7 +241,7 @@ func (s *Store) ArchiveCaseTemplate(ctx context.Context, guildID, templateID str
 	now := time.Now().UTC()
 	var record CaseTemplateRecord
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Unscoped().Where("id = ? AND guild_id = ?", templateID, guildID).First(&record).Error; err != nil {
+		if err := tx.Where("id = ? AND guild_id = ?", templateID, guildID).First(&record).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return gorm.ErrRecordNotFound
 			}
@@ -387,7 +387,7 @@ func filteredAuditQuery(query *gorm.DB, params ListAuditLogEntriesParams) *gorm.
 // getCaseTemplateExpanded retrieves case template expanded without exposing the underlying adapter implementation.
 func getCaseTemplateExpanded(db *gorm.DB, guildID, templateID string) (*ExpandedCaseTemplate, error) {
 	var templateRecord CaseTemplateRecord
-	if err := db.Unscoped().Where("id = ? AND guild_id = ?", templateID, guildID).First(&templateRecord).Error; err != nil {
+	if err := db.Where("id = ? AND guild_id = ?", templateID, guildID).First(&templateRecord).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}

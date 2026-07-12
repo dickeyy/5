@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/quackdiscord/bot/internal/quack/model"
-	"gorm.io/gorm"
 )
 
 // ULIDModelRecord is the GORM persistence representation of ulidmodel; domain models remain storage-agnostic.
@@ -56,19 +55,20 @@ type StaffMemberRecord struct {
 // CaseTemplateRecord is the GORM persistence representation of case template; domain models remain storage-agnostic.
 type CaseTemplateRecord struct {
 	ULIDModelRecord
-	GuildID                string         `gorm:"type:char(26);not null;uniqueIndex:idx_case_template_guild_slug,priority:1;index:idx_case_template_guild_enabled,priority:1"`
-	Slug                   string         `gorm:"size:64;not null;uniqueIndex:idx_case_template_guild_slug,priority:2"`
-	Name                   string         `gorm:"size:191;not null"`
-	Description            string         `gorm:"type:text;not null"`
-	ReasonTemplate         string         `gorm:"type:text;not null"`
-	DefaultSeverity        string         `gorm:"size:32;not null;default:'medium'"`
-	Appealable             bool           `gorm:"not null;default:false"`
-	Enabled                bool           `gorm:"not null;default:true;index:idx_case_template_guild_enabled,priority:2"`
-	Version                uint           `gorm:"not null;default:1"`
-	CreatedByDiscordUserID string         `gorm:"size:32;not null"`
-	UpdatedByDiscordUserID string         `gorm:"size:32;not null"`
-	ArchivedAt             *time.Time     `gorm:"index"`
-	DeletedAt              gorm.DeletedAt `gorm:"index"`
+	GuildID                string     `gorm:"type:char(26);not null;uniqueIndex:idx_case_template_guild_slug,priority:1;index:idx_case_template_guild_enabled,priority:1"`
+	Slug                   string     `gorm:"size:64;not null;uniqueIndex:idx_case_template_guild_slug,priority:2"`
+	Name                   string     `gorm:"size:191;not null"`
+	Description            string     `gorm:"type:text;not null"`
+	ReasonTemplate         string     `gorm:"type:text;not null"`
+	DefaultSeverity        string     `gorm:"size:32;not null;default:'medium'"`
+	Appealable             bool       `gorm:"not null;default:false"`
+	Enabled                bool       `gorm:"not null;default:true;index:idx_case_template_guild_enabled,priority:2"`
+	Version                uint       `gorm:"not null;default:1"`
+	CreatedByDiscordUserID string     `gorm:"size:32;not null"`
+	UpdatedByDiscordUserID string     `gorm:"size:32;not null"`
+	ArchivedAt             *time.Time `gorm:"index"`
+	// DeletedAt preserves the frozen v4-era column without enabling GORM soft-delete behavior in live v5 queries.
+	DeletedAt *time.Time `gorm:"index"`
 }
 
 // CaseTemplateContextFieldRecord persists an ordered template context definition.
