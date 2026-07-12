@@ -186,6 +186,10 @@ QI-1 began early after QP-B/QP-C acceptance: their heads merged cleanly into
 wiring platform/modules while QP-A remains active; QP-A will be merged into the
 same worktree before the integration PR and wave gates.
 
+QI-1 B/C wiring is green: focused/race/vet/diff checks pass, and
+`docs/integration/qi-1-p1.md` records the QP-A conflict/migration plan. QP-A is
+reviewable at `2e5bd6e` on PR #8 with one Codex request pending.
+
 ### Parallel wave P2 - product completion from QI-1
 
 | Package | Absorbed requirements | Exclusive implementation surface | Migration range |
@@ -992,7 +996,7 @@ by the macro-package ledger.
 | V5-001C | ACCEPTED | `slice/v5-001c-case-validity` | [#3](https://github.com/dickeyy/5/pull/3) | 1 complete, one P2 fixed | passed evidence gate |
 | V5-002 | ACCEPTED | `slice/v5-002-guild-bootstrap` | [#4](https://github.com/dickeyy/5/pull/4) | 1 complete, two findings fixed | passed evidence gate |
 | V5-003 | ACCEPTED | `slice/v5-003-live-authorization` | [#5](https://github.com/dickeyy/5/pull/5) | 1 complete, one P2 fixed | passed evidence gate |
-| QP-A | IN_PROGRESS | `package/qp-a-core-moderation` | pending | 0 | absorbs V5-004–012 core/staff scope |
+| QP-A | REVIEW_WAIT | `package/qp-a-core-moderation` at `2e5bd6e` | [#8](https://github.com/dickeyy/5/pull/8) | 1 requested | focused/MySQL/race/full/vet/build green |
 | QP-B | ACCEPTED | `package/qp-b-http-auth` at `b2f3e0a` | [#7](https://github.com/dickeyy/5/pull/7) | 1 complete; P1/P2 fixed | passed evidence gate |
 | QP-C | ACCEPTED | `package/qp-c-tickets-logging` at `4579d14` | [#6](https://github.com/dickeyy/5/pull/6) | 1 complete; four P2s fixed | passed evidence gate |
 | QI-1 | IN_PROGRESS | `integration/qi-1-p1` with QP-B/QP-C merged | pending | 0 | fresh integration owner wiring; awaiting QP-A |
