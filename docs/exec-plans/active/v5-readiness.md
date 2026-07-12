@@ -234,11 +234,13 @@ parallel to run their single missing environment gate, publish one PR each,
 request Codex once, and fix findings. QI-2 proceeds concurrently and will
 combine both reviewed heads without another idle integration setup phase.
 
-QP-D reached reviewable head `12f8e1f` on PR #12 after its final MySQL gate and
-a pre-review SQLite concurrency-fixture correction; one Codex review is
-pending. QP-E reached reviewable head `f7ace2f` on PR #11 with the full suite
-green; one Codex review is pending. QI-2 checkpointed the coherent QP-F and
-honeypot integration at `62a9b73` and is clean while those reviews complete.
+QP-D accepted at review-fix head `24f3e4d` on PR #12 after one Codex request:
+the valid P1 atomic-cancellation and P2 outbox-lease findings were fixed, with
+focused regressions repeated 20 times plus full/race/MySQL/vet/build evidence
+green. QP-E accepted at `f7ace2f` on PR #11 after one Codex request with no
+package-local bugs; its P1/P2 findings are the three QI-2-owned registration and
+worker-startup obligations. QI-2 checkpointed QP-F/honeypot at `62a9b73`, then
+combined QP-E at `7f012c2`; it is wiring both accepted heads concurrently.
 
 ### Parallel wave P3 - migration and operations from QI-2
 
@@ -1038,10 +1040,10 @@ by the macro-package ledger.
 | QP-B | ACCEPTED | `package/qp-b-http-auth` at `b2f3e0a` | [#7](https://github.com/dickeyy/5/pull/7) | 1 complete; P1/P2 fixed | passed evidence gate |
 | QP-C | ACCEPTED | `package/qp-c-tickets-logging` at `4579d14` | [#6](https://github.com/dickeyy/5/pull/6) | 1 complete; four P2s fixed | passed evidence gate |
 | QI-1 | ACCEPTED | `integration/qi-1-p1` at `11650a5` | [#9](https://github.com/dickeyy/5/pull/9) | 1 complete; two P2s fixed | passed wave evidence gate |
-| QP-D | REVIEW_PENDING | `package/qp-d-appeals-member` at `12f8e1f` | [#12](https://github.com/dickeyy/5/pull/12) | 1 requested | final MySQL/focused/race/vet/build green |
-| QP-E | REVIEW_PENDING | `package/qp-e-audit-discord` at `f7ace2f` | [#11](https://github.com/dickeyy/5/pull/11) | 1 requested | full/focused/race/vet/build green |
+| QP-D | ACCEPTED | `package/qp-d-appeals-member` at `24f3e4d` | [#12](https://github.com/dickeyy/5/pull/12) | 1 complete; P1/P2 fixed | focused x20/full/race/MySQL/vet/build green |
+| QP-E | ACCEPTED | `package/qp-e-audit-discord` at `f7ace2f` | [#11](https://github.com/dickeyy/5/pull/11) | 1 complete; three integration findings | package gates green; findings transferred to QI-2 |
 | QP-F | ACCEPTED | `package/qp-f-honeypot-isolation` at `fc6d82c` | [#10](https://github.com/dickeyy/5/pull/10) | 1 complete; one P2 fixed | passed evidence gate |
-| QI-2 | IN_PROGRESS | `integration/qi-2-p2` at checkpoint `62a9b73` | pending | 0 | QP-F/honeypot wiring green; awaiting reviewed QP-D/QP-E |
+| QI-2 | IN_PROGRESS | `integration/qi-2-p2`, QP-E merged at `7f012c2` | pending | 0 | combining accepted QP-D/QP-E/QP-F and running wave gates |
 | QP-G | PLANNED | pending | pending | 0 | absorbs V5-023/024 |
 | QP-H | PLANNED | pending | pending | 0 | absorbs remaining V5-017/025 |
 | QP-I | PLANNED | pending | pending | 0 | absorbs V5-026 and final readiness |
