@@ -1,6 +1,6 @@
 # Quack v5 Readiness Execution Plan
 
-Status: ACTIVE  
+Status: ACTIVE — THROUGHPUT RESET READY; IMPLEMENTATION PAUSED FOR REVIEW  
 Owner: v5 orchestrator  
 Authoritative product definition: [`v5.md`](../../../v5.md)  
 Supporting inventory: [`TODO.md`](../../../TODO.md), [`docs/v5-scope-drift.md`](../../v5-scope-drift.md)
@@ -16,16 +16,17 @@ matrix in `docs/v5-readiness.md`.
 ## Non-negotiable gates
 
 - `v5.md` wins when code, technical docs, or the backlog disagree.
-- Every implementation slice uses an isolated worktree and branch.
-- Every slice has explicit acceptance criteria, affected areas, dependencies,
+- Every implementation work package uses an isolated worktree and branch.
+- Every package has explicit acceptance criteria, absorbed requirement IDs,
+  exclusive affected areas, dependencies,
   and validation commands before implementation begins.
-- Every slice is committed, pushed, opened as a pull request, and receives an
+- Every implementation package is committed, pushed, opened as a pull request, and receives an
   explicit standalone `@codex review` request.
 - Request Codex review exactly once per PR by default. Apply review findings,
   validate, and hand the fixed head to the orchestrator without another ping.
   A second request is allowed only for documented large substantive rework;
   additional review loops are not an acceptance gate.
-- The slice owner triages every Codex finding and completes fixes and
+- The package owner triages every Codex finding and completes fixes and
   revalidation before returning the slice.
 - Orchestrator acceptance happens only after the review-and-fix lifecycle and
   independent validation.
@@ -54,13 +55,17 @@ matrix in `docs/v5-readiness.md`.
 
 ## Integration strategy
 
-The plan will use a cumulative, dependency-ordered branch stack so later work
-can be validated with earlier accepted behavior without merging pull requests.
-The orchestration branch contains this plan. Each sequential slice starts from
-the latest independently accepted slice branch and targets that predecessor in
-its PR. Parallel slices are allowed only when their contracts and write sets do
-not materially overlap; a dedicated reviewed integration slice must reconcile
-parallel branches before dependent work begins.
+The accepted V5-003 head becomes the anchor for parallel capability waves. Up to
+three fresh subagents work concurrently on macro packages with disjoint write
+sets. Parallel PRs target the same wave anchor. After review-and-fix acceptance,
+an integration branch locally combines their heads, runs repository-wide gates,
+and becomes the next anchor. GitHub PRs remain open and unmerged. A separate
+integration PR/review is required only when conflict resolution changes behavior;
+a clean branch combination is an evidence checkpoint, not another slice.
+
+Legacy V5-004 through V5-026 entries below remain the detailed requirement and
+acceptance catalog. They are no longer one-PR scheduling units after the
+throughput reset; the macro-package ledger is authoritative.
 
 Planned orchestration branch: `orchestrator/v5-readiness`  
 Planned worktree root: `/tmp/quack-v5-worktrees`  
@@ -121,10 +126,80 @@ PR base for first slice: `orchestrator/v5-readiness`
 | V4 import and removal of direct moderation workflows | V5-016, V5-023 |
 | Tickets, general logging, honeypots remain separate modules | V5-018P through V5-022 |
 
+## Throughput reset and macro work packages
+
+Recorded 2026-07-11 after roughly 3.5 hours produced only three accepted
+product slices. The previous one-PR-per-micro-slice schedule created excessive
+serial GitHub review, validation, worktree, and plan-update overhead. V5-004
+through V5-026 now identify requirements, not individual implementation tasks.
+
+Execution rules after V5-003:
+
+- run three fresh package owners concurrently whenever dependencies allow;
+- use one PR/Codex lifecycle per complete macro capability;
+- reserve central router/runtime/migration wiring for integration packages;
+- run focused tests during development, one full gate on each reviewable head,
+  targeted post-review validation for narrow fixes, and one full integration
+  gate per combined wave;
+- batch plan commits at package assignment, material blocker/finding,
+  acceptance, and wave integration;
+- target nine capability PRs plus at most two integration PRs, replacing more
+  than twenty remaining micro-slice PRs.
+
+### Parallel wave P1 - foundations from accepted V5-003
+
+| Package | Absorbed requirements | Exclusive implementation surface | Migration range |
+| --- | --- | --- | --- |
+| QP-A Core moderation runtime | V5-004 through V5-012, staff portion of V5-007 | templates, context, cases, evidence, Discord enforcement, leases/recovery, notification, feature-specific routes/adapters/tests | 0005-0049 |
+| QP-B HTTP/auth platform | V5-017A, V5-017B, platform portion of V5-017C/V5-017 | OAuth/session lifecycle, HTTP middleware/security/errors/limits/idempotency primitives, config/tests | 0050-0099 |
+| QP-C Tickets and logging modules | V5-018P, V5-018, V5-019, V5-020 | isolated module registry contracts, tickets, logging, module-specific routes/Discord adapters/import/docs/tests | 0100-0199 |
+
+P1 shared integration-owned files: `internal/quack/app.go`,
+`internal/runtime/runtime.go`, `internal/httpapi/routes/router.go`, migration
+registry ordering, command registration, and shared documentation indexes.
+Package branches expose registrars and migration lists instead of editing these
+files. QI-1 combines accepted P1 heads, wires registrars, resolves contracts,
+and runs full repository/MySQL/build gates. If QI-1 changes behavior, it uses a
+fresh integration owner and one PR/review lifecycle.
+
+### Parallel wave P2 - product completion from QI-1
+
+| Package | Absorbed requirements | Exclusive implementation surface | Migration range |
+| --- | --- | --- | --- |
+| QP-D Appeals and member access | member portion of V5-007, V5-013, V5-014, endpoint use of V5-017C | appeal/member services, routes, notification/reversal adapters, ownership/concurrency/idempotency tests | 0200-0249 |
+| QP-E Audit, statistics, and moderator UX | V5-015, V5-016 | audit/stat/mirror services and Discord moderator workflows, feature-specific routes/UI/tests | 0250-0299 |
+| QP-F Honeypot and module isolation | V5-021, V5-022 | honeypot module plus cross-module/guild isolation, intent/shutdown integration contracts/tests | 0300-0349 |
+
+QI-2 combines accepted P2 heads, performs central registration and cross-feature
+reconciliation, and runs full repository/MySQL/race/build gates. Behavioral
+integration changes receive one fresh integration owner and PR/review.
+
+### Parallel wave P3 - migration and operations from QI-2
+
+| Package | Absorbed requirements | Exclusive implementation surface | Migration range |
+| --- | --- | --- | --- |
+| QP-G V4 import and storage recovery | V5-023, V5-024 | v4 import/coexistence, final constraints/indexes, backup/restore/durability fixtures/docs/tests | 0400-0449 |
+| QP-H API/operations completion | remaining V5-017C/V5-017, V5-025 | final route contract/security coverage, ops/metrics/logging/health/shutdown/runbooks and authorized CI/release evidence | 0450-0499 |
+
+Release-infrastructure mutations within QP-H remain blocked until explicit user
+authorization; code, tests, docs, and an exact proposed infrastructure diff may
+proceed independently.
+
+### Final package
+
+QP-I absorbs V5-026. It integrates the final accepted heads, runs systematic
+`v5.md`/TODO/scope-drift and PR-review audits, executes repository/MySQL/race/
+E2E/rehearsal gates, and writes `docs/v5-readiness.md` with the READY/NOT READY
+verdict. It does not redefine readiness around missing external authorization.
+
 ## Dependency waves and slices
 
 Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
-`ACCEPTED`, `REJECTED`, `BLOCKED`, `DEFERRED`.
+`ACCEPTED`, `REJECTED`, `BLOCKED`, `DEFERRED`, `ABSORBED`.
+
+The detailed V5-004–V5-026 sections below are retained as the acceptance
+catalog for the macro packages above. Their legacy status fields are superseded
+by the macro-package ledger.
 
 ### Wave 0 - inventory and orchestration foundation
 
@@ -379,7 +454,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 
 #### V5-003 - Live Discord authorization and target-safety preflight
 
-- Status: REVIEW_WAIT
+- Status: FIXING
 - Assignment: fresh implementation subagent `/root/slice_v5_003` using
   `v5-implementation-slice`; this owner is assigned only to V5-003.
 - Branch: `slice/v5-003-live-authorization`
@@ -387,7 +462,16 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 - Base/PR target: `slice/v5-002-guild-bootstrap` at accepted head `cec76ef`
 - Commit: `444a582`.
 - PR/review: [PR #5](https://github.com/dickeyy/5/pull/5); exactly one standalone
-  `@codex review` posted 2026-07-11 and awaiting completion.
+  `@codex review` posted 2026-07-11. Codex reviewed `444a582` and raised one
+  valid P2: Discord Guild REST 403/404 responses must preserve the explicit
+  bot-not-in-guild authorization state. The fresh owner applied a two-file
+  classifier fix with focused, race, vet, build, and diff validation passing.
+  No second review will be requested.
+- Blocker 2026-07-11 20:38 MDT: the shared approval-usage limit rejected the
+  owner's mechanical fix commit/push and the orchestrator's read-only PR check.
+  The exact dirty files are `internal/discordbot/discord.go` and
+  `internal/discordbot/discord_authorization_test.go`; retry is deferred pending
+  explicit user approval or the reported 23:36 MDT quota reset.
 - Requirements: People and Permissions; Actions Target Safety.
 - Acceptance criteria:
   - Every sensitive write refreshes current Discord membership, permissions,
@@ -883,34 +967,18 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 | V5-001 | ACCEPTED | `slice/v5-001-template-model` | [#2](https://github.com/dickeyy/5/pull/2) | 1 complete, no findings | passed round 2 |
 | V5-001C | ACCEPTED | `slice/v5-001c-case-validity` | [#3](https://github.com/dickeyy/5/pull/3) | 1 complete, one P2 fixed | passed evidence gate |
 | V5-002 | ACCEPTED | `slice/v5-002-guild-bootstrap` | [#4](https://github.com/dickeyy/5/pull/4) | 1 complete, two findings fixed | passed evidence gate |
-| V5-003 | REVIEW_WAIT | `slice/v5-003-live-authorization` | [#5](https://github.com/dickeyy/5/pull/5) | 1 requested | pending |
-| V5-004 | PLANNED | pending | pending | 0 | pending |
-| V5-005 | PLANNED | pending | pending | 0 | pending |
-| V5-006 | PLANNED | pending | pending | 0 | pending |
-| V5-007 | PLANNED | pending | pending | 0 | pending |
-| V5-008 | PLANNED | pending | pending | 0 | pending |
-| V5-009 | PLANNED | pending | pending | 0 | pending |
-| V5-010 | PLANNED | pending | pending | 0 | pending |
-| V5-011 | PLANNED | pending | pending | 0 | pending |
-| V5-012 | PLANNED | pending | pending | 0 | pending |
-| V5-013 | PLANNED | pending | pending | 0 | pending |
-| V5-014 | PLANNED | pending | pending | 0 | pending |
-| V5-015 | PLANNED | pending | pending | 0 | pending |
-| V5-016 | PLANNED | pending | pending | 0 | pending |
-| V5-017A | PLANNED | pending | pending | 0 | pending |
-| V5-017B | PLANNED | pending | pending | 0 | pending |
-| V5-017C | PLANNED | pending | pending | 0 | pending |
-| V5-017 | PLANNED | pending | pending | 0 | pending |
-| V5-018P | PLANNED | pending | pending | 0 | pending |
-| V5-018 | PLANNED | pending | pending | 0 | pending |
-| V5-019 | PLANNED | pending | pending | 0 | pending |
-| V5-020 | PLANNED | pending | pending | 0 | pending |
-| V5-021 | PLANNED | pending | pending | 0 | pending |
-| V5-022 | PLANNED | pending | pending | 0 | pending |
-| V5-023 | PLANNED | pending | pending | 0 | pending |
-| V5-024 | PLANNED | pending | pending | 0 | pending |
-| V5-025 | PLANNED | pending | pending | 0 | pending |
-| V5-026 | PLANNED | pending | pending | 0 | pending |
+| V5-003 | FIXING | `slice/v5-003-live-authorization` | [#5](https://github.com/dickeyy/5/pull/5) | 1 complete, one P2 fixed locally | commit/push quota blocked |
+| QP-A | PLANNED | pending | pending | 0 | absorbs V5-004–012 core/staff scope |
+| QP-B | PLANNED | pending | pending | 0 | absorbs V5-017A/B and platform scope |
+| QP-C | PLANNED | pending | pending | 0 | absorbs V5-018P–020 |
+| QI-1 | PLANNED | pending | conditional | conditional | P1 integration anchor |
+| QP-D | PLANNED | pending | pending | 0 | absorbs member V5-007, V5-013/014/017C |
+| QP-E | PLANNED | pending | pending | 0 | absorbs V5-015/016 |
+| QP-F | PLANNED | pending | pending | 0 | absorbs V5-021/022 |
+| QI-2 | PLANNED | pending | conditional | conditional | P2 integration anchor |
+| QP-G | PLANNED | pending | pending | 0 | absorbs V5-023/024 |
+| QP-H | PLANNED | pending | pending | 0 | absorbs remaining V5-017/025 |
+| QP-I | PLANNED | pending | pending | 0 | absorbs V5-026 and final readiness |
 
 ## Decisions
 
@@ -1019,10 +1087,12 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 
 ## Continuous update protocol
 
-After each assignment, review poll, fix round, or validation gate, update:
+Batch updates at package assignment, material product decision/blocker, completed
+Codex review/fix, acceptance, and wave integration. Do not commit plan changes
+for every poll, minor checkpoint, or repeated green command. Record:
 
-1. the slice status and branch/PR columns;
-2. validation commands and exact results;
+1. package status, absorbed IDs, branch/PR, and integration anchor;
+2. concise validation evidence with exact detail retained in the PR/handoff;
 3. Codex findings and dispositions;
 4. decisions, blockers, and newly discovered v5 work;
 5. the owning items in `TODO.md` and `docs/v5-scope-drift.md` only when evidence
