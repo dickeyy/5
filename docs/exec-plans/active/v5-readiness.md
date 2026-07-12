@@ -145,7 +145,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 
 #### V5-001M - Versioned migration foundation
 
-- Status: FIXING
+- Status: REVIEW_WAIT
 - Assignment: implementation subagent using `v5-implementation-slice`
 - Branch: `slice/v5-001m-versioned-migrations`
 - Worktree: `/tmp/quack-v5-worktrees/v5-001m`
@@ -165,8 +165,10 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
   Fix commit `99c018a` is pushed with real MySQL validation reported passing;
   Codex round 2 reviewed `99c018a` and raised one P2: frozen migration 0001
   still imports live domain enum types, so later model cleanup could break or
-  change the applied migration. Finding is valid/in-scope and returned for fix;
-  a new head, validation, and Codex round 3 are required.
+  change the applied migration. Finding was valid/in-scope; fix `7608e1a`
+  replaces live aliases with primitive storage types and adds a regression
+  guard. Real MySQL/full validation reported passing; thread resolved and Codex
+  round 3 requested on the new head.
 - Requirements: history must remain understandable; important records are not
   hard-deleted; TODO Database and Storage Reliability.
 - Acceptance criteria:
@@ -715,7 +717,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 | Slice | Status | Branch | PR | Codex rounds | Orchestrator validation |
 | --- | --- | --- | --- | --- | --- |
 | V5-000 | ACCEPTED | orchestration worktree | n/a | n/a | passed |
-| V5-001M | FIXING | `slice/v5-001m-versioned-migrations` | [#1](https://github.com/dickeyy/5/pull/1) | 2 complete, 3 required | rejected round 1 |
+| V5-001M | REVIEW_WAIT | `slice/v5-001m-versioned-migrations` | [#1](https://github.com/dickeyy/5/pull/1) | 2 complete, 3 pending | rejected round 1 |
 | V5-001 | PLANNED | pending | pending | 0 | pending |
 | V5-002 | PLANNED | pending | pending | 0 | pending |
 | V5-003 | PLANNED | pending | pending | 0 | pending |
