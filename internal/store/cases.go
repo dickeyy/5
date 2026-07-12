@@ -671,6 +671,9 @@ func (s *Store) ClaimNextCaseAction(ctx context.Context, params ClaimCaseActionP
 				if err := tx.Select("*").Save(&prior).Error; err != nil {
 					return fmt.Errorf("close expired action attempt: %w", err)
 				}
+				if err := createAuditLogEntry(tx, &model.AuditLogEntry{GuildID: caseModel.GuildID, Source: model.AuditSourceSystem, Action: string(model.AuditActionActionRecovered), ResourceType: "case_action_execution", ResourceID: execution.ID, Result: model.AuditResultFailure, FailureReason: "lease_expired", CorrelationID: firstNonEmpty(execution.CorrelationID, caseModel.CorrelationID), MetadataJSON: marshalJSONObject(map[string]any{"case_id": caseModel.ID, "attempt_number": prior.AttemptNumber, "recovery": "lease_reclaimed"})}, now); err != nil {
+					return err
+				}
 			} else if !errors.Is(priorResult.Error, gorm.ErrRecordNotFound) {
 				return priorResult.Error
 			}
@@ -696,6 +699,9 @@ func (s *Store) ClaimNextCaseAction(ctx context.Context, params ClaimCaseActionP
 		}
 		if err := tx.Select("*").Create(&attempt).Error; err != nil {
 			return fmt.Errorf("create running action attempt: %w", err)
+		}
+		if err := createAuditLogEntry(tx, &model.AuditLogEntry{GuildID: caseModel.GuildID, Source: model.AuditSourceSystem, Action: string(model.AuditActionActionAttempt), ResourceType: "case_action_execution", ResourceID: execution.ID, Result: model.AuditResultSuccess, CorrelationID: firstNonEmpty(execution.CorrelationID, caseModel.CorrelationID), MetadataJSON: marshalJSONObject(map[string]any{"case_id": caseModel.ID, "attempt_number": attempt.AttemptNumber, "status": attempt.Status})}, now); err != nil {
+			return err
 		}
 
 		claimed = &ClaimedCaseAction{

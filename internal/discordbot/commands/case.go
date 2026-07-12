@@ -50,8 +50,23 @@ func HandleMessageCaseInteraction(ctx ui.Context) ui.HandlerResult {
 		return ui.Immediate(ui.Error(caseCommandErrorMessage(err)))
 	}
 	templates, err := ctx.Services.Templates.ListActive(ctx.Context, guildContext)
-	if err != nil || len(templates) != 1 {
-		return ui.Immediate(ui.Error("Use `/case add` to select a template for this message."))
+	if err != nil || len(templates) == 0 {
+		return ui.Immediate(ui.Error("No active case template is available."))
+	}
+	if len(templates) > 1 {
+		options := make([]discordgo.SelectMenuOption, 0, len(templates))
+		for _, template := range templates {
+			options = append(options, discordgo.SelectMenuOption{Label: templateAutocompleteLabel(template), Value: template.ID})
+			if len(options) == 25 {
+				break
+			}
+		}
+		customID, encodeErr := ui.EncodeCustomID(ui.CustomID{Namespace: "case", Action: "message_template", Version: "v1", Payload: strings.Join([]string{message.Author.ID, message.ChannelID, message.ID}, "|")})
+		if encodeErr != nil {
+			return ui.Immediate(ui.Error("Use `/case add` to select a template for this message."))
+		}
+		selectMenu := discordgo.SelectMenu{CustomID: customID, Placeholder: "Choose an active case template", MinValues: intPointer(1), MaxValues: 1, Options: options}
+		return ui.Immediate(ui.Ephemeral(ui.Message{Content: "Choose the template that matches this message.", Components: []discordgo.MessageComponent{ui.Row(selectMenu)}, Ephemeral: true}))
 	}
 	template := templates[0]
 	if len(template.ContextFields) > 1 || (len(template.ContextFields) == 1 && template.ContextFields[0].FieldType != model.ContextFieldMessageLink) {
@@ -69,9 +84,12 @@ func HandleMessageCaseInteraction(ctx ui.Context) ui.HandlerResult {
 			_, editErr := responder.EditOriginal(ui.ErrorEdit(caseCommandErrorMessage(createErr)))
 			return editErr
 		}
-		_, followErr := responder.Followup(views.CaseCreatedMessage(views.CaseCreated{Case: created, Template: &template}))
+		message, followErr := responder.Followup(views.CaseCreatedMessage(views.CaseCreated{Case: created, Template: &template}))
 		if followErr == nil {
 			_ = responder.DeleteOriginal()
+			if message != nil {
+				updatePublicCaseResult(responder, ctx.Services, created, message.ID, &template)
+			}
 		}
 		return followErr
 	})
@@ -96,6 +114,23 @@ func HandleCaseInteraction(ctx ui.Context) ui.HandlerResult {
 	if err := validateCaseInteraction(ctx.Context, ctx.Services, interaction, add); err != nil {
 		return ui.Immediate(ui.Error(caseCommandErrorMessage(err)))
 	}
+	if contextOption := add.GetOption("context"); contextOption == nil || strings.TrimSpace(contextOption.StringValue()) == "" {
+		guildContext, resolveErr := resolveInteractionGuildContext(ctx.Context, ctx.Services, interaction)
+		if resolveErr != nil {
+			return ui.Immediate(ui.Error(caseCommandErrorMessage(resolveErr)))
+		}
+		_, template, templateErr := resolveTemplate(ctx.Context, ctx.Services, guildContext, optionStringValue(add.GetOption("template")))
+		if templateErr != nil {
+			return ui.Immediate(ui.Error(caseCommandErrorMessage(templateErr)))
+		}
+		if template != nil && len(template.ContextFields) > 0 {
+			modal, modalErr := contextModal(interaction, template, optionStringValue(add.GetOption("user")), optionStringValue(add.GetOption("message_link")))
+			if modalErr != nil {
+				return ui.Immediate(ui.Error(modalErr.Error()))
+			}
+			return ui.Immediate(modal)
+		}
+	}
 
 	return ui.Async(ui.DeferEphemeral(), func(taskCtx context.Context, responder ui.Responder) error {
 		result, err := createCaseFromInteraction(taskCtx, ctx.Services, interaction, add)
@@ -107,12 +142,15 @@ func HandleCaseInteraction(ctx ui.Context) ui.HandlerResult {
 			return nil
 		}
 
-		_, err = responder.Followup(views.CaseCreatedMessage(views.CaseCreated{
+		message, err := responder.Followup(views.CaseCreatedMessage(views.CaseCreated{
 			Case:     result.Case,
 			Template: result.Template,
 		}))
 		if err == nil {
 			_ = responder.DeleteOriginal()
+			if message != nil {
+				updatePublicCaseResult(responder, ctx.Services, result.Case, message.ID, result.Template)
+			}
 		}
 		return err
 	})
@@ -136,65 +174,52 @@ func handleCaseStaffSubcommand(ctx ui.Context, data discordgo.ApplicationCommand
 			_, editErr := responder.EditOriginal(ui.ErrorEdit(caseCommandErrorMessage(err)))
 			return editErr
 		}
-		var message string
+		var response ui.Message
 		switch selected.Name {
 		case "view":
 			detail, getErr := ctx.Services.Cases.Get(taskCtx, guildContext, optionStringValue(selected.GetOption("case")))
 			err = getErr
 			if detail != nil {
-				message = fmt.Sprintf("Case #%d • <@%s> • %s • %s", detail.CaseNumber, detail.TargetDiscordUserID, detail.Reason, detail.Validity)
+				response = views.CaseDetailMessage(detail)
 			}
 		case "list":
 			list, listErr := ctx.Services.Cases.List(taskCtx, guildContext, quack.CaseListInput{Limit: "10"})
 			err = listErr
 			if list != nil {
-				var rows []string
-				for _, item := range list.Cases {
-					rows = append(rows, fmt.Sprintf("#%d <@%s> — %s", item.CaseNumber, item.TargetDiscordUserID, item.Validity))
-				}
-				message = strings.Join(rows, "\n")
-				if message == "" {
-					message = "No cases found."
-				}
+				response = views.CaseListMessage(list, 1, "")
 			}
 		case "user":
-			profile, profileErr := ctx.Services.Cases.UserHistory(taskCtx, guildContext, optionStringValue(selected.GetOption("user")), quack.CaseListInput{Limit: "10"})
+			targetID := optionStringValue(selected.GetOption("user"))
+			profile, profileErr := ctx.Services.Cases.UserHistory(taskCtx, guildContext, targetID, quack.CaseListInput{Limit: "10"})
 			err = profileErr
 			if profile != nil {
-				message = fmt.Sprintf("%d cases for <@%s>", profile.Total, optionStringValue(selected.GetOption("user")))
+				response = views.CaseListMessage(&quack.CaseListResponse{Cases: profile.Cases, Total: profile.Total, Limit: profile.Limit, Offset: profile.Offset}, 1, targetID)
 			}
 		case "failures":
-			failed, failedErr := ctx.Services.Actions.ListFailures(taskCtx, guildContext, 20, 0)
+			failed, failedErr := ctx.Services.Actions.ListFailures(taskCtx, guildContext, 10, 0)
 			err = failedErr
 			if failed != nil {
-				var rows []string
-				for _, item := range failed.Executions {
-					rows = append(rows, fmt.Sprintf("`%s` %s — %s", item.ID, item.ActionType, item.LastErrorCode))
-				}
-				message = strings.Join(rows, "\n")
-				if message == "" {
-					message = "No action failures need review."
-				}
+				response = views.FailedActionMessage(failed, 1)
 			}
 		case "retry":
 			_, err = ctx.Services.Actions.Retry(taskCtx, guildContext, optionStringValue(selected.GetOption("execution")))
-			message = "Action retry queued."
+			response = ui.EmbedMessage(ui.SuccessEmbed("Action retry queued", "The same configured action will be attempted after current permission and hierarchy checks."), true)
 		case "dismiss":
 			_, err = ctx.Services.Actions.Dismiss(taskCtx, guildContext, optionStringValue(selected.GetOption("execution")))
-			message = "Action failure dismissed."
+			response = ui.EmbedMessage(ui.SuccessEmbed("Action failure dismissed", "Attempt history remains visible on the case."), true)
 		case "void":
 			if confirm := selected.GetOption("confirm"); confirm == nil || !confirm.BoolValue() {
 				err = quack.ErrCaseValidation
 			} else {
 				_, err = ctx.Services.Cases.Void(taskCtx, guildContext, optionStringValue(selected.GetOption("case")), optionStringValue(selected.GetOption("reason")), nil)
-				message = "Case voided."
+				response = ui.EmbedMessage(ui.SuccessEmbed("Case voided", "The correction remains visible in history."), true)
 			}
 		case "reverse":
 			if confirm := selected.GetOption("confirm"); confirm == nil || !confirm.BoolValue() {
 				err = quack.ErrCaseValidation
 			} else {
 				_, err = ctx.Services.Actions.Reverse(taskCtx, guildContext, optionStringValue(selected.GetOption("case")), optionStringValue(selected.GetOption("execution")), model.ActionType(optionStringValue(selected.GetOption("action"))))
-				message = "Reversal queued."
+				response = ui.EmbedMessage(ui.SuccessEmbed("Reversal queued", "The original action and reversal remain visible in history."), true)
 			}
 		default:
 			err = quack.ErrCaseValidation
@@ -203,9 +228,53 @@ func handleCaseStaffSubcommand(ctx ui.Context, data discordgo.ApplicationCommand
 			_, editErr := responder.EditOriginal(ui.ErrorEdit(caseCommandErrorMessage(err)))
 			return editErr
 		}
-		_, editErr := responder.EditOriginal(ui.EditMessage(ui.Content(message, true)))
+		_, editErr := responder.EditOriginal(ui.EditMessage(response))
 		return editErr
 	})
+}
+
+func intPointer(value int) *int { return &value }
+
+func updatePublicCaseResult(responder ui.Responder, services *quack.Services, created *quack.CaseResponse, messageID string, template *quack.TemplateResponse) {
+	if services == nil || services.Store == nil || responder == nil || created == nil || created.ID == "" || messageID == "" {
+		return
+	}
+	refresh := func() (*quack.CaseResponse, bool) {
+		actions, err := services.Store.ListCaseActionExecutions(context.Background(), created.ID)
+		if err != nil {
+			return nil, false
+		}
+		copy := *created
+		byID := make(map[string]model.CaseActionExecution, len(actions))
+		for _, action := range actions {
+			byID[action.ID] = action
+		}
+		terminal := true
+		for index := range copy.Actions {
+			if current, ok := byID[copy.Actions[index].ID]; ok {
+				copy.Actions[index].Status = current.Status
+			}
+			switch copy.Actions[index].Status {
+			case model.ActionExecutionPending, model.ActionExecutionRunning, model.ActionExecutionRetrying:
+				terminal = false
+			}
+		}
+		return &copy, terminal
+	}
+	if current, terminal := refresh(); current != nil && terminal {
+		_, _ = responder.EditFollowup(messageID, ui.EditMessage(views.CaseCreatedMessage(views.CaseCreated{Case: current, Template: template})))
+		return
+	}
+	go func() {
+		for attempt := 0; attempt < 300; attempt++ {
+			time.Sleep(100 * time.Millisecond)
+			current, terminal := refresh()
+			if current != nil && terminal {
+				_, _ = responder.EditFollowup(messageID, ui.EditMessage(views.CaseCreatedMessage(views.CaseCreated{Case: current, Template: template})))
+				return
+			}
+		}
+	}()
 }
 
 // validateCaseInteraction checks case interaction before state is read or changed.

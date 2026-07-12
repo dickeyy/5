@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,6 +11,12 @@ import (
 	"github.com/quackdiscord/bot/internal/httpapi/middleware"
 	"github.com/quackdiscord/bot/internal/quack"
 )
+
+// templateChangeHandler receives successful policy changes that may invalidate
+// an optional automation reference.
+type templateChangeHandler interface {
+	HandleTemplateChange(context.Context, string, string)
+}
 
 // listTemplates returns templates subject to authorization, ordering, and filtering constraints.
 func listTemplates(c *gin.Context, services *quack.Services) {
@@ -52,7 +59,7 @@ func getTemplate(c *gin.Context, services *quack.Services) {
 }
 
 // updateTemplate updates template while retaining validation, compatibility, and audit requirements.
-func updateTemplate(c *gin.Context, services *quack.Services) {
+func updateTemplate(c *gin.Context, services *quack.Services, changes templateChangeHandler) {
 	var input quack.TemplateInput
 	if err := bindTemplateInput(c, &input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid template payload"})
@@ -63,6 +70,12 @@ func updateTemplate(c *gin.Context, services *quack.Services) {
 	if err != nil {
 		writeTemplateError(c, err)
 		return
+	}
+	if changes != nil {
+		guildContext := middleware.GetGuildContext(c)
+		if guildContext != nil && guildContext.Guild != nil {
+			changes.HandleTemplateChange(c.Request.Context(), guildContext.Guild.ID, template.ID)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"template": template})
@@ -85,11 +98,17 @@ func bindTemplateInput(c *gin.Context, input *quack.TemplateInput) error {
 }
 
 // archiveTemplate encapsulates the archive template rule so callers share one consistent package implementation.
-func archiveTemplate(c *gin.Context, services *quack.Services) {
+func archiveTemplate(c *gin.Context, services *quack.Services, changes templateChangeHandler) {
 	template, err := services.Templates.Archive(c.Request.Context(), middleware.GetGuildContext(c), c.Param("templateID"))
 	if err != nil {
 		writeTemplateError(c, err)
 		return
+	}
+	if changes != nil {
+		guildContext := middleware.GetGuildContext(c)
+		if guildContext != nil && guildContext.Guild != nil {
+			changes.HandleTemplateChange(c.Request.Context(), guildContext.Guild.ID, template.ID)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"template": template})

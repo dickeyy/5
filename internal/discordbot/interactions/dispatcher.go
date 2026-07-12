@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/internal/discordbot/ui"
 	"github.com/quackdiscord/bot/internal/quack"
+	"github.com/quackdiscord/bot/internal/quack/model"
 	"github.com/rs/zerolog/log"
 )
 
@@ -22,6 +25,7 @@ type Client interface {
 	InteractionRespond(*discordgo.Interaction, *discordgo.InteractionResponse) error
 	InteractionResponseEdit(*discordgo.Interaction, *discordgo.WebhookEdit) (*discordgo.Message, error)
 	FollowupMessageCreate(*discordgo.Interaction, bool, *discordgo.WebhookParams) (*discordgo.Message, error)
+	FollowupMessageEdit(*discordgo.Interaction, string, *discordgo.WebhookEdit) (*discordgo.Message, error)
 	InteractionResponseDelete(*discordgo.Interaction) error
 }
 
@@ -31,6 +35,8 @@ type Dispatcher struct {
 	Commands   CommandLookup
 	Components *ComponentRegistry
 	Client     Client
+	Deduper    *InteractionDeduper
+	dedupeMu   sync.Mutex
 }
 
 // NewDispatcher constructs dispatcher with required dependencies explicit so callers control lifecycle and substitution.
@@ -39,6 +45,7 @@ func NewDispatcher(services *quack.Services, commands CommandLookup) *Dispatcher
 		Services:   services,
 		Commands:   commands,
 		Components: NewComponentRegistry(),
+		Deduper:    NewInteractionDeduper(15*time.Minute, 10000),
 	}
 }
 
@@ -106,7 +113,10 @@ func (d *Dispatcher) handleModal(session *discordgo.Session, interaction *discor
 
 // execute processes execute according to persisted state and retry policy.
 func (d *Dispatcher) execute(session *discordgo.Session, interaction *discordgo.InteractionCreate, name string, handler ui.Handler) {
-	ctx := interactionTraceContext(interaction)
+	if interaction != nil && !d.interactionDeduper().Claim(interaction.ID) {
+		return
+	}
+	ctx := quack.ContextWithAuditSource(interactionTraceContext(interaction), model.AuditSourceDiscord)
 	result := d.safeHandle(ctx, session, interaction, name, handler)
 	if result.Response == nil {
 		return
@@ -120,6 +130,15 @@ func (d *Dispatcher) execute(session *discordgo.Session, interaction *discordgo.
 	}
 
 	go d.runTask(ctx, interaction, name, result.Task)
+}
+
+func (d *Dispatcher) interactionDeduper() *InteractionDeduper {
+	d.dedupeMu.Lock()
+	defer d.dedupeMu.Unlock()
+	if d.Deduper == nil {
+		d.Deduper = NewInteractionDeduper(15*time.Minute, 10000)
+	}
+	return d.Deduper
 }
 
 // safeHandle encapsulates the safe handle rule so callers share one consistent package implementation.
@@ -209,6 +228,11 @@ func (r responder) Followup(message ui.Message) (*discordgo.Message, error) {
 	return r.client.FollowupMessageCreate(r.interaction, true, message.WebhookParams())
 }
 
+// EditFollowup updates a previously published public result after asynchronous work reaches a terminal state.
+func (r responder) EditFollowup(messageID string, edit ui.Edit) (*discordgo.Message, error) {
+	return r.client.FollowupMessageEdit(r.interaction, messageID, edit.WebhookEdit())
+}
+
 // DeleteOriginal encapsulates the delete original rule so callers share one consistent package implementation.
 func (r responder) DeleteOriginal() error {
 	return r.client.InteractionResponseDelete(r.interaction)
@@ -237,6 +261,11 @@ func (c sessionClient) InteractionResponseEdit(interaction *discordgo.Interactio
 // FollowupMessageCreate encapsulates the followup message create rule so callers share one consistent package implementation.
 func (c sessionClient) FollowupMessageCreate(interaction *discordgo.Interaction, wait bool, params *discordgo.WebhookParams) (*discordgo.Message, error) {
 	return c.session.FollowupMessageCreate(interaction, wait, params)
+}
+
+// FollowupMessageEdit updates an interaction followup through the application webhook token.
+func (c sessionClient) FollowupMessageEdit(interaction *discordgo.Interaction, messageID string, edit *discordgo.WebhookEdit) (*discordgo.Message, error) {
+	return c.session.WebhookMessageEdit(interaction.AppID, interaction.Token, messageID, edit)
 }
 
 // InteractionResponseDelete encapsulates the interaction response delete rule so callers share one consistent package implementation.

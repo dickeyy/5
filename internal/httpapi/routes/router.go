@@ -30,8 +30,7 @@ func SetupRoutesWithModules(r *gin.Engine, services *quack.Services, moduleRunti
 	if err := setupGuildRoutes(r, services, moduleRuntime); err != nil {
 		return err
 	}
-	setupMemberRoutes(r, services)
-	return nil
+	return setupMemberRoutes(r, services, moduleRuntime)
 }
 
 // setupGuildRoutes explicitly wires setup guild routes so runtime behavior does not depend on init-time registration.
@@ -39,8 +38,13 @@ func setupGuildRoutes(r *gin.Engine, services *quack.Services, moduleRuntime *mo
 	guilds := r.Group("/guilds")
 	guilds.Use(middleware.RequireAuth(services.Store, services.Config.Auth))
 	RegisterCoreModerationStaffRoutes(guilds, services)
+	RegisterAuditStatisticsStaffRoutes(guilds, services)
 	if moduleRuntime != nil {
-		if err := moduleRuntime.RegisterHTTP(guilds, services, httpplatform.FromRepository(services.Store)); err != nil {
+		primitives := httpplatform.FromRepository(services.Store)
+		if err := RegisterAppealStaffRoutes(guilds, services, moduleRuntime.Appeals, primitives); err != nil {
+			return err
+		}
+		if err := moduleRuntime.RegisterHTTP(guilds, services, primitives); err != nil {
 			return err
 		}
 	}
@@ -66,10 +70,10 @@ func setupGuildRoutes(r *gin.Engine, services *quack.Services, moduleRuntime *mo
 		getTemplate(c, services)
 	})
 	guilds.PATCH("/:discordGuildID/templates/:templateID", middleware.RequireGuildContext(services, model.PermissionActionCaseTemplateWrite), func(c *gin.Context) {
-		updateTemplate(c, services)
+		updateTemplate(c, services, moduleRuntime)
 	})
 	guilds.DELETE("/:discordGuildID/templates/:templateID", middleware.RequireGuildContext(services, model.PermissionActionCaseTemplateDelete), func(c *gin.Context) {
-		archiveTemplate(c, services)
+		archiveTemplate(c, services, moduleRuntime)
 	})
 	guilds.GET("/:discordGuildID/cases", middleware.RequireGuildContext(services, model.PermissionActionCaseRead), func(c *gin.Context) {
 		listCases(c, services)
@@ -91,8 +95,12 @@ func setupGuildRoutes(r *gin.Engine, services *quack.Services, moduleRuntime *mo
 
 // setupMemberRoutes mounts target-owned reads behind caller authentication
 // without requiring the member to remain in the Discord guild.
-func setupMemberRoutes(r *gin.Engine, services *quack.Services) {
+func setupMemberRoutes(r *gin.Engine, services *quack.Services, moduleRuntime *moduleintegration.Runtime) error {
 	members := r.Group("/members/me")
 	members.Use(middleware.RequireAuth(services.Store, services.Config.Auth))
+	if moduleRuntime != nil {
+		return RegisterAppealAndMemberRoutes(members, services, moduleRuntime.Appeals, httpplatform.FromRepository(services.Store))
+	}
 	RegisterCoreModerationMemberRoutes(members, services)
+	return nil
 }

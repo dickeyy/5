@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	discordadapter "github.com/quackdiscord/bot/internal/discordbot"
 	"github.com/quackdiscord/bot/internal/modules"
 	"github.com/quackdiscord/bot/internal/modules/generallogging"
+	"github.com/quackdiscord/bot/internal/modules/honeypot"
 	"github.com/quackdiscord/bot/internal/modules/tickets"
 	"github.com/quackdiscord/bot/internal/quack"
 	"github.com/quackdiscord/bot/internal/quack/model"
@@ -23,22 +25,39 @@ const (
 	transcriptSweepInterval = time.Hour
 	loggingQueueCapacity    = 1000
 	loggingQueueWorkers     = 2
+	honeypotQueueCapacity   = 256
+	honeypotQueueWorkers    = 2
+	appealDispatchInterval  = 5 * time.Second
+	appealDispatchBatch     = 50
 )
 
 // Runtime owns the optional-module services and their process-scoped workers.
 type Runtime struct {
-	Tickets       *tickets.Service
-	TicketDiscord *tickets.DiscordAdapter
-	Logging       *generallogging.Service
-	LoggingQueue  *generallogging.DeliveryQueue
+	Tickets          *tickets.Service
+	TicketDiscord    *tickets.DiscordAdapter
+	Logging          *generallogging.Service
+	LoggingQueue     *generallogging.DeliveryQueue
+	Honeypot         *honeypot.Service
+	HoneypotDiscord  *honeypot.DiscordAdapter
+	HoneypotRuntime  *honeypot.Runtime
+	AuditMirror      *quack.AuditMirrorWorker
+	Appeals          *quack.AppealService
+	AppealDispatcher *quack.AppealNotificationDispatcher
 
-	db      *gorm.DB
-	cancel  context.CancelFunc
-	bulk    chan bulkDeleteEvent
-	bulkMu  sync.RWMutex
-	bulkWG  sync.WaitGroup
-	sweepWG sync.WaitGroup
-	closed  bool
+	db         *gorm.DB
+	registry   *modules.Registry
+	session    *discordgo.Session
+	resolver   guildResolver
+	repository quack.Repository
+	services   *quack.Services
+	cancel     context.CancelFunc
+	bulk       chan bulkDeleteEvent
+	bulkMu     sync.RWMutex
+	bulkWG     sync.WaitGroup
+	sweepWG    sync.WaitGroup
+	mirrorWG   sync.WaitGroup
+	appealWG   sync.WaitGroup
+	closed     bool
 }
 
 // bulkDeleteEvent carries one bounded cache-aware bulk deletion job.
@@ -49,18 +68,22 @@ type bulkDeleteEvent struct {
 
 // New constructs the shared registry, immutable audit adapter, module stores,
 // Discord adapters, and bounded general-logging delivery workers.
-func New(_ context.Context, repositories *store.Store, session *discordgo.Session) (*Runtime, error) {
+func New(ctx context.Context, repositories *store.Store, session *discordgo.Session, services *quack.Services, auditSenders ...quack.AuditMirrorSender) (*Runtime, error) {
 	if repositories == nil || repositories.DB() == nil {
 		return nil, errors.New("optional module database is not configured")
 	}
 	if session == nil {
 		return nil, errors.New("optional module Discord session is not configured")
 	}
+	if services == nil || services.Cases == nil || services.Store == nil {
+		return nil, errors.New("optional module core services are not configured")
+	}
 
 	registry, err := modules.NewRegistry(
 		modules.NewSQLSettingsStore(repositories.DB()),
 		tickets.Descriptor(),
 		generallogging.Descriptor(),
+		honeypot.Descriptor(),
 	)
 	if err != nil {
 		return nil, err
@@ -71,16 +94,38 @@ func New(_ context.Context, repositories *store.Store, session *discordgo.Sessio
 	ticketClient := ticketDiscordClient{session: session, resolver: resolver}
 	loggingClient := loggingDiscordClient{session: session, resolver: resolver}
 	loggingService := generallogging.NewService(registry, auditor, loggingClient, nil)
-	workerCtx, cancel := context.WithCancel(context.Background())
+	honeypotTemplates := honeypotTemplateValidator{repository: repositories}
+	honeypotChannels := honeypotChannelValidator{session: session, resolver: resolver}
+	honeypotService := honeypot.NewService(registry, honeypot.NewStore(repositories.DB()), auditor, honeypotChannels, honeypotTemplates, honeypotCaseApplier{cases: services.Cases})
+	honeypotDiscord := honeypot.NewDiscordAdapter(honeypotService)
+	appeals := quack.NewAppealService(repositories)
+	appealAdapter := &discordadapter.AppealNotificationAdapter{Session: session, Resolver: appealStaffChannelResolver{repository: repositories}}
+	appealDispatcher := quack.NewAppealNotificationDispatcher(repositories, appealAdapter)
+	workerCtx, cancel := context.WithCancel(ctx)
+	var auditMirror *quack.AuditMirrorWorker
+	if len(auditSenders) > 0 && auditSenders[0] != nil {
+		auditMirror = quack.NewAuditMirrorWorker(repositories, auditSenders[0], 0)
+	}
 
 	runtime := &Runtime{
-		Tickets:       ticketService,
-		TicketDiscord: tickets.NewDiscordAdapter(ticketService, ticketClient),
-		Logging:       loggingService,
-		LoggingQueue:  generallogging.NewDeliveryQueue(workerCtx, loggingService, loggingQueueCapacity, loggingQueueWorkers),
-		db:            repositories.DB(),
-		cancel:        cancel,
-		bulk:          make(chan bulkDeleteEvent, loggingQueueCapacity),
+		Tickets:          ticketService,
+		TicketDiscord:    tickets.NewDiscordAdapter(ticketService, ticketClient),
+		Logging:          loggingService,
+		LoggingQueue:     generallogging.NewDeliveryQueue(workerCtx, loggingService, loggingQueueCapacity, loggingQueueWorkers),
+		Honeypot:         honeypotService,
+		HoneypotDiscord:  honeypotDiscord,
+		HoneypotRuntime:  honeypot.NewRuntime(workerCtx, honeypotDiscord, honeypotQueueCapacity, honeypotQueueWorkers),
+		AuditMirror:      auditMirror,
+		Appeals:          appeals,
+		AppealDispatcher: appealDispatcher,
+		db:               repositories.DB(),
+		registry:         registry,
+		session:          session,
+		resolver:         resolver,
+		repository:       repositories,
+		services:         services,
+		cancel:           cancel,
+		bulk:             make(chan bulkDeleteEvent, loggingQueueCapacity),
 	}
 	for range loggingQueueWorkers {
 		runtime.bulkWG.Add(1)
@@ -90,6 +135,18 @@ func New(_ context.Context, repositories *store.Store, session *discordgo.Sessio
 	go func() {
 		defer runtime.sweepWG.Done()
 		runtime.runTranscriptSweep(workerCtx)
+	}()
+	if runtime.AuditMirror != nil {
+		runtime.mirrorWG.Add(1)
+		go func() {
+			defer runtime.mirrorWG.Done()
+			runtime.AuditMirror.Run(workerCtx)
+		}()
+	}
+	runtime.appealWG.Add(1)
+	go func() {
+		defer runtime.appealWG.Done()
+		runtime.runAppealNotifications(workerCtx)
 	}()
 	return runtime, nil
 }
@@ -106,6 +163,9 @@ func (r *Runtime) Close() {
 	}
 	r.bulkMu.Unlock()
 	r.bulkWG.Wait()
+	if r.HoneypotRuntime != nil {
+		r.HoneypotRuntime.Close()
+	}
 	if r.LoggingQueue != nil {
 		r.LoggingQueue.Close()
 	}
@@ -113,6 +173,41 @@ func (r *Runtime) Close() {
 		r.cancel()
 	}
 	r.sweepWG.Wait()
+	r.mirrorWG.Wait()
+	r.appealWG.Wait()
+}
+
+// runAppealNotifications drains the durable appeal outbox in bounded batches
+// without coupling Discord delivery to moderation transactions.
+func (r *Runtime) runAppealNotifications(ctx context.Context) {
+	ticker := time.NewTicker(appealDispatchInterval)
+	defer ticker.Stop()
+	for {
+		if err := r.AppealDispatcher.DispatchPending(ctx, appealDispatchBatch); err != nil && !errors.Is(err, context.Canceled) {
+			log.Error().Err(err).Msg("Failed to dispatch appeal notifications")
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// appealStaffChannelResolver reuses the configured staff-only audit channel as
+// the appeal queue notification destination.
+type appealStaffChannelResolver struct{ repository quack.Repository }
+
+// AppealStaffChannel resolves the current staff-only destination for a guild.
+func (r appealStaffChannelResolver) AppealStaffChannel(ctx context.Context, guildID string) (string, error) {
+	if r.repository == nil {
+		return "", errors.New("appeal staff channel repository is not configured")
+	}
+	settings, err := r.repository.GetGuildSettings(ctx, guildID)
+	if err != nil || settings == nil {
+		return "", err
+	}
+	return settings.AuditMirrorChannelDiscordID, nil
 }
 
 // runBulkDeletes drains cache-aware bulk deletion work independently of case actions.
@@ -179,7 +274,7 @@ func (a moduleAuditor) RecordModuleAudit(ctx context.Context, event modules.Audi
 	requestID, correlationID := quack.TraceIDsFromContext(ctx)
 	return a.repository.CreateAuditLogEntry(ctx, &model.AuditLogEntry{
 		GuildID: event.GuildID, ActorDiscordUserID: event.ActorDiscordUserID,
-		Source: model.AuditSourceSystem, Action: event.Action,
+		Source: quack.AuditSourceForModuleAction(ctx, event.Action), Action: event.Action,
 		ResourceType: event.ResourceType, ResourceID: event.ResourceID,
 		Result: result, FailureReason: event.FailureReason,
 		RequestID: requestID, CorrelationID: correlationID, MetadataJSON: event.MetadataJSON,
@@ -199,6 +294,20 @@ func (r guildResolver) internalID(ctx context.Context, discordGuildID string) (s
 	}
 	if result.RowsAffected == 0 {
 		return "", errors.New("active guild is not registered")
+	}
+	return guild.ID, nil
+}
+
+// internalIDAny resolves preserved guild identity for departure cleanup even
+// when another gateway handler has already marked the guild inactive.
+func (r guildResolver) internalIDAny(ctx context.Context, discordGuildID string) (string, error) {
+	var guild model.Guild
+	result := r.db.WithContext(ctx).Where("discord_guild_id = ?", discordGuildID).Limit(1).Find(&guild)
+	if result.Error != nil {
+		return "", result.Error
+	}
+	if result.RowsAffected == 0 {
+		return "", errors.New("guild is not registered")
 	}
 	return guild.ID, nil
 }

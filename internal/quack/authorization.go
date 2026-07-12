@@ -137,6 +137,50 @@ func (s *GuildService) PreflightCase(ctx context.Context, guildContext *GuildSta
 	return nil
 }
 
+// PreflightSystemCase refreshes the guild, bot, and target immediately before
+// honeypot persistence. It deliberately omits staff authority while preserving
+// every target-safety and bot-capability check required by the normal path.
+func (s *GuildService) PreflightSystemCase(ctx context.Context, guildContext *GuildStaffContext, targetDiscordUserID string, actionType model.ActionType) error {
+	ctx = ensureTraceContext(ctx)
+	if s == nil || s.store == nil || s.discord == nil || guildContext == nil || guildContext.Guild == nil {
+		return ErrAuthorizationUnavailable
+	}
+	targetDiscordUserID = strings.TrimSpace(targetDiscordUserID)
+	snapshot, err := s.discord.GuildAuthorization(ctx, guildContext.Guild.DiscordGuildID, "", targetDiscordUserID)
+	if err != nil || snapshot == nil {
+		return ErrAuthorizationUnavailable
+	}
+	if snapshot.Guild.ID != guildContext.Guild.DiscordGuildID {
+		return caseDenial(actionType, authorizationReasonGuildMismatch)
+	}
+	if snapshot.Target == nil || snapshot.Target.DiscordUserID != targetDiscordUserID {
+		return caseDenial(actionType, authorizationReasonIdentityMismatch)
+	}
+	guildContext.Live = *snapshot
+	guildContext.PermissionBits = 0
+	if !snapshot.Bot.Present {
+		return caseDenial(actionType, authorizationReasonBotMembership)
+	}
+	if !snapshot.Target.Present {
+		return caseDenial(actionType, authorizationReasonTargetRequired)
+	}
+	target := *snapshot.Target
+	if target.Bot || target.DiscordUserID == snapshot.Bot.DiscordUserID {
+		return caseDenial(actionType, authorizationReasonBotTarget)
+	}
+	if target.DiscordUserID == snapshot.Guild.OwnerID {
+		return caseDenial(actionType, authorizationReasonOwnerTarget)
+	}
+	if target.TopRolePosition >= snapshot.Bot.TopRolePosition {
+		return caseDenial(actionType, authorizationReasonBotHierarchy)
+	}
+	required := actionPermission(actionType)
+	if required != 0 && !hasDiscordPermission(snapshot.Bot.PermissionBits, required) {
+		return caseDenial(actionType, authorizationReasonBotPermission)
+	}
+	return nil
+}
+
 // PreflightReversal refreshes current authority while allowing unban to reference a departed member.
 func (s *GuildService) PreflightReversal(ctx context.Context, guildContext *GuildStaffContext, targetDiscordUserID string, actionType model.ActionType) error {
 	if actionType != model.ActionRemoveTimeout && actionType != model.ActionUnbanUser {

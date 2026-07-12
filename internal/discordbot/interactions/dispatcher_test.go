@@ -171,6 +171,11 @@ func (f *fakeClient) FollowupMessageCreate(interaction *discordgo.Interaction, w
 	return &discordgo.Message{ID: "followup-1"}, nil
 }
 
+func (f *fakeClient) FollowupMessageEdit(interaction *discordgo.Interaction, messageID string, edit *discordgo.WebhookEdit) (*discordgo.Message, error) {
+	f.edits = append(f.edits, edit)
+	return &discordgo.Message{ID: messageID}, nil
+}
+
 func (f *fakeClient) InteractionResponseDelete(interaction *discordgo.Interaction) error {
 	f.deleted++
 	return nil
@@ -209,7 +214,7 @@ func componentInteraction(customID string) *discordgo.InteractionCreate {
 
 func modalInteraction(customID string) *discordgo.InteractionCreate {
 	return &discordgo.InteractionCreate{Interaction: &discordgo.Interaction{
-		ID:      "interaction-1",
+		ID:      "interaction-2",
 		Type:    discordgo.InteractionModalSubmit,
 		GuildID: "guild-1",
 		Data: discordgo.ModalSubmitInteractionData{

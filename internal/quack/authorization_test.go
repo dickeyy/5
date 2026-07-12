@@ -184,7 +184,7 @@ func TestCasePreflightMatrixAndNoPartialCommit(t *testing.T) {
 			if auditErr != nil || len(audits) != 1 {
 				t.Fatalf("expected exactly one denial audit, audits=%+v err=%v", audits, auditErr)
 			}
-			if audits[0].Action != "authorization.denied" || audits[0].Result != model.AuditResultDenied || audits[0].FailureReason != tt.wantReason || audits[0].RequestID != "req-case" || audits[0].CorrelationID != "corr-case" || audits[0].Source != model.AuditSourceAPI {
+			if audits[0].Action != "authorization.denied" || audits[0].Result != model.AuditResultDenied || audits[0].FailureReason != tt.wantReason || audits[0].RequestID != "req-case" || audits[0].CorrelationID != "corr-case" || audits[0].Source != model.AuditSourceWeb {
 				t.Fatalf("unexpected denial audit: %+v", audits[0])
 			}
 		})

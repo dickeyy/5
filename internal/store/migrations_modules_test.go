@@ -15,6 +15,8 @@ func TestOptionalModuleLogicalMigrationsJoinCentralLedger(t *testing.T) {
 	for _, table := range []any{
 		&migration0006Configuration{}, &migration0006ImportRecord{},
 		&migration0007Transcript{}, &migration0007MemberState{},
+		&migration0008HoneypotTrigger{},
+		&AppealRecord{}, &AppealEventRecord{}, &GuildAppealSettingsRecord{}, &AppealNotificationRecord{},
 	} {
 		if !db.Migrator().HasTable(table) {
 			t.Fatalf("central migration did not create %T", table)
@@ -24,10 +26,10 @@ func TestOptionalModuleLogicalMigrationsJoinCentralLedger(t *testing.T) {
 	if err := db.Order("version ASC").Find(&ledger).Error; err != nil {
 		t.Fatalf("read migration ledger: %v", err)
 	}
-	if len(ledger) != 7 || ledger[5].Name != "optional_module_registry_0100" || ledger[6].Name != "ticket_lifecycle_0110" {
+	if len(ledger) != 9 || ledger[5].Name != "optional_module_registry_0100" || ledger[6].Name != "ticket_lifecycle_0110" || ledger[7].Name != "honeypot_triggers_0300" || ledger[8].Name != "appeals_and_member_access_0200" {
 		t.Fatalf("unexpected reconciled ledger: %+v", ledger)
 	}
-	if strings.Contains(migration0006Source, "internal/modules") || strings.Contains(migration0007Source, "internal/modules") {
+	if strings.Contains(migration0006Source, "internal/modules") || strings.Contains(migration0007Source, "internal/modules") || strings.Contains(migration0008Source, "internal/modules") || strings.Contains(migration0200Source, "internal/modules") {
 		t.Fatal("central module migrations depend on mutable feature models")
 	}
 }

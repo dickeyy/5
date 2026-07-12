@@ -201,13 +201,20 @@ func listUserCases(c *gin.Context, services *quack.Services) {
 // listAuditLog returns audit log subject to authorization, ordering, and filtering constraints.
 func listAuditLog(c *gin.Context, services *quack.Services) {
 	result, err := services.Audits.List(c.Request.Context(), middleware.GetGuildContext(c), quack.AuditListInput{
-		Limit:              c.Query("limit"),
-		Offset:             c.Query("offset"),
-		ActorDiscordUserID: c.Query("actor_discord_user_id"),
-		Action:             c.Query("action"),
-		ResourceType:       c.Query("resource_type"),
-		ResourceID:         c.Query("resource_id"),
-		Result:             c.Query("result"),
+		Limit:               c.Query("limit"),
+		Offset:              c.Query("offset"),
+		ActorDiscordUserID:  c.Query("actor_discord_user_id"),
+		Source:              c.Query("source"),
+		Action:              c.Query("action"),
+		ResourceType:        c.Query("resource_type"),
+		ResourceID:          c.Query("resource_id"),
+		Result:              c.Query("result"),
+		CaseID:              c.Query("case_id"),
+		MemberDiscordUserID: c.Query("member_discord_user_id"),
+		CreatedAfter:        c.Query("created_after"),
+		CreatedBefore:       c.Query("created_before"),
+		ReadSource:          model.AuditSourceAPI,
+		BeforeID:            c.Query("before_id"),
 	})
 	if err != nil {
 		writeAuditError(c, err)

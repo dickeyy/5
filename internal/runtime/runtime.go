@@ -44,11 +44,16 @@ func Run(ctx context.Context) error {
 	}
 	queue := workqueue.New(cfg.EventQueue.Size, cfg.EventQueue.Workers)
 	services := quack.NewWithConfigDependencies(cfg, repositories, bot, bot, queue)
-	moduleRuntime, err := moduleintegration.New(ctx, repositories, bot.Session)
+	moduleRuntime, err := moduleintegration.New(ctx, repositories, bot.Session, services, bot)
 	if err != nil {
 		return fmt.Errorf("compose optional modules: %w", err)
 	}
 	defer moduleRuntime.Close()
+	intents, err := moduleRuntime.RequiredGatewayIntents(ctx)
+	if err != nil {
+		return fmt.Errorf("derive optional module gateway intents: %w", err)
+	}
+	bot.Session.Identify.Intents = intents
 	if err := discordbot.RegisterGuildLifecycle(bot.Session, services); err != nil {
 		return fmt.Errorf("register Discord guild lifecycle: %w", err)
 	}

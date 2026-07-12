@@ -14,11 +14,21 @@ import (
 
 // ActionService claims persisted actions, executes supported moderation behavior, and records retry or terminal outcomes.
 type ActionService struct {
-	store      Repository
-	discord    DiscordActionClient
-	handlers   map[model.ActionType]actionmods.Executor
-	authorizer *GuildService
-	scheduler  CaseWorkScheduler
+	store            Repository
+	discord          DiscordActionClient
+	handlers         map[model.ActionType]actionmods.Executor
+	authorizer       *GuildService
+	scheduler        CaseWorkScheduler
+	dashboardBaseURL string
+}
+
+// WithDashboardBaseURL configures the secure member entry point used by
+// appealable case notifications.
+func (s *ActionService) WithDashboardBaseURL(baseURL string) *ActionService {
+	if s != nil {
+		s.dashboardBaseURL = strings.TrimSpace(baseURL)
+	}
+	return s
 }
 
 // NewActionService constructs action service with required dependencies explicit so callers control lifecycle and substitution.
@@ -223,7 +233,14 @@ func (s *ActionService) processNotification(ctx context.Context, workerID, caseI
 	}
 	var response map[string]any
 	var sendErr error
-	if claimed.PreparedChannelDiscordID != "" {
+	appealable := caseSnapshotAppealable(item.TemplateSnapshotJSON)
+	if appealable && s.dashboardBaseURL != "" {
+		if client, ok := s.discord.(DiscordCaseNotificationClient); ok {
+			response, sendErr = client.SendCaseNotification(ctx, item.TargetDiscordUserID, claimed.PreparedChannelDiscordID, message, s.dashboardBaseURL, item.GuildID, item.ID)
+		} else {
+			sendErr = errors.New("Discord appeal notification adapter is unavailable")
+		}
+	} else if claimed.PreparedChannelDiscordID != "" {
 		if prepared, ok := s.discord.(DiscordPreparedDMClient); ok {
 			response, sendErr = prepared.SendPreparedDM(ctx, claimed.PreparedChannelDiscordID, message)
 		} else {
@@ -300,13 +317,33 @@ func redactDiscordError(err error) string {
 // ListFailures returns the active failed-action review queue.
 func (s *ActionService) ListFailures(ctx context.Context, guildContext *GuildStaffContext, limit, offset int) (*model.FailedCaseActionResult, error) {
 	if guildContext == nil || guildContext.Guild == nil || !guildContext.Can(model.PermissionActionCaseRead) {
+		if s != nil && s.store != nil && guildContext != nil && guildContext.Guild != nil && guildContext.Staff != nil {
+			entry := actionControlAudit(ctx, guildContext, string(model.AuditActionActionFailureRead), "list")
+			entry.Result = model.AuditResultDenied
+			entry.FailureReason = "permission_denied"
+			_ = s.store.CreateAuditLogEntry(ctx, entry)
+		}
 		return nil, ErrCasePermissionDenied
 	}
-	return s.store.ListFailedCaseActions(ctx, model.FailedCaseActionFilter{GuildID: guildContext.Guild.ID, Limit: limit, Offset: offset})
+	result, err := s.store.ListFailedCaseActions(ctx, model.FailedCaseActionFilter{GuildID: guildContext.Guild.ID, Limit: limit, Offset: offset})
+	entry := actionControlAudit(ctx, guildContext, string(model.AuditActionActionFailureRead), "list")
+	if err != nil {
+		entry.Result = model.AuditResultFailure
+		entry.FailureReason = "query_failed"
+	} else {
+		entry.Result = model.AuditResultSuccess
+	}
+	if auditErr := s.store.CreateAuditLogEntry(ctx, entry); auditErr != nil && err == nil {
+		return nil, auditErr
+	}
+	return result, err
 }
 
 // Retry performs live preflight before requeueing the immutable failed action.
-func (s *ActionService) Retry(ctx context.Context, guildContext *GuildStaffContext, executionID string) (*model.CaseActionExecution, error) {
+func (s *ActionService) Retry(ctx context.Context, guildContext *GuildStaffContext, executionID string) (updated *model.CaseActionExecution, err error) {
+	defer func() {
+		s.auditControlFailure(ctx, guildContext, string(model.AuditActionActionRetry), executionID, err)
+	}()
 	if guildContext == nil || guildContext.Guild == nil || guildContext.Staff == nil {
 		return nil, ErrCasePermissionDenied
 	}
@@ -336,7 +373,7 @@ func (s *ActionService) Retry(ctx context.Context, guildContext *GuildStaffConte
 	if err := s.authorizer.PreflightCase(ctx, guildContext, item.TargetDiscordUserID, execution.ActionType); err != nil {
 		return nil, err
 	}
-	updated, err := s.store.RetryCaseAction(ctx, model.RetryCaseActionParams{GuildID: item.GuildID, ExecutionID: execution.ID, ActorDiscordUserID: guildContext.Staff.DiscordUserID, Audit: actionControlAudit(ctx, guildContext, "case_action.retry", execution.ID)})
+	updated, err = s.store.RetryCaseAction(ctx, model.RetryCaseActionParams{GuildID: item.GuildID, ExecutionID: execution.ID, ActorDiscordUserID: guildContext.Staff.DiscordUserID, Audit: actionControlAudit(ctx, guildContext, "case_action.retry", execution.ID)})
 	if err == nil && updated != nil && s.scheduler != nil {
 		s.scheduler.Submit(ctx, item.ID)
 	}
@@ -344,7 +381,10 @@ func (s *ActionService) Retry(ctx context.Context, guildContext *GuildStaffConte
 }
 
 // Dismiss preserves attempts while removing a failure from active staff review.
-func (s *ActionService) Dismiss(ctx context.Context, guildContext *GuildStaffContext, executionID string) (*model.CaseActionExecution, error) {
+func (s *ActionService) Dismiss(ctx context.Context, guildContext *GuildStaffContext, executionID string) (updated *model.CaseActionExecution, err error) {
+	defer func() {
+		s.auditControlFailure(ctx, guildContext, string(model.AuditActionActionDismiss), executionID, err)
+	}()
 	if guildContext == nil || guildContext.Guild == nil || guildContext.Staff == nil || !guildContext.Can(model.PermissionActionFailureDismiss) {
 		return nil, ErrCasePermissionDenied
 	}
@@ -357,7 +397,10 @@ func (s *ActionService) Reverse(ctx context.Context, guildContext *GuildStaffCon
 }
 
 // ReverseForAppeal queues a reversal and, when supplied, verifies its accepted case-linked appeal.
-func (s *ActionService) ReverseForAppeal(ctx context.Context, guildContext *GuildStaffContext, caseID, originalExecutionID string, actionType model.ActionType, appealID *string) (*model.CaseActionExecution, error) {
+func (s *ActionService) ReverseForAppeal(ctx context.Context, guildContext *GuildStaffContext, caseID, originalExecutionID string, actionType model.ActionType, appealID *string) (queued *model.CaseActionExecution, err error) {
+	defer func() {
+		s.auditControlFailure(ctx, guildContext, string(model.AuditActionActionReverse), originalExecutionID, err)
+	}()
 	if s.authorizer == nil {
 		return nil, ErrAuthorizationUnavailable
 	}
@@ -374,17 +417,30 @@ func (s *ActionService) ReverseForAppeal(ctx context.Context, guildContext *Guil
 	if err := s.authorizer.PreflightReversal(ctx, guildContext, item.TargetDiscordUserID, actionType); err != nil {
 		return nil, err
 	}
-	queued, err := s.store.QueueCaseReversal(ctx, model.QueueCaseReversalParams{GuildID: item.GuildID, CaseID: item.ID, ActorDiscordUserID: guildContext.Staff.DiscordUserID, OriginalExecutionID: originalExecutionID, ActionType: actionType, AppealID: appealID, Audit: actionControlAudit(ctx, guildContext, "case_action.reverse", originalExecutionID)})
+	queued, err = s.store.QueueCaseReversal(ctx, model.QueueCaseReversalParams{GuildID: item.GuildID, CaseID: item.ID, ActorDiscordUserID: guildContext.Staff.DiscordUserID, OriginalExecutionID: originalExecutionID, ActionType: actionType, AppealID: appealID, Audit: actionControlAudit(ctx, guildContext, "case_action.reverse", originalExecutionID)})
 	if err == nil && queued != nil && s.scheduler != nil {
 		s.scheduler.Submit(ctx, item.ID)
 	}
 	return queued, err
 }
 
+func (s *ActionService) auditControlFailure(ctx context.Context, guildContext *GuildStaffContext, action, resourceID string, operationErr error) {
+	if operationErr == nil || s == nil || s.store == nil || guildContext == nil || guildContext.Guild == nil || guildContext.Staff == nil {
+		return
+	}
+	entry := actionControlAudit(ctx, guildContext, action, resourceID)
+	entry.Result = model.AuditResultFailure
+	if errors.Is(operationErr, ErrCasePermissionDenied) || errors.Is(operationErr, ErrAuthorizationDenied) {
+		entry.Result = model.AuditResultDenied
+	}
+	entry.FailureReason = operationErr.Error()
+	_ = s.store.CreateAuditLogEntry(ctx, entry)
+}
+
 // actionControlAudit constructs immutable staff recovery evidence with current permission bits.
 func actionControlAudit(ctx context.Context, guildContext *GuildStaffContext, action, resourceID string) *model.AuditLogEntry {
 	requestID, correlationID := TraceIDsFromContext(ctx)
-	return &model.AuditLogEntry{GuildID: guildContext.Guild.ID, ActorDiscordUserID: guildContext.Staff.DiscordUserID, ActorPermissionBits: guildContext.PermissionBits, Source: model.AuditSourceAPI, Action: action, ResourceType: "case_action_execution", ResourceID: resourceID, Result: model.AuditResultSuccess, RequestID: requestID, CorrelationID: correlationID, MetadataJSON: "{}"}
+	return &model.AuditLogEntry{GuildID: guildContext.Guild.ID, ActorDiscordUserID: guildContext.Staff.DiscordUserID, ActorPermissionBits: guildContext.PermissionBits, Source: AuditSourceFromContext(ctx), Action: action, ResourceType: "case_action_execution", ResourceID: resourceID, Result: model.AuditResultSuccess, RequestID: requestID, CorrelationID: correlationID, MetadataJSON: "{}"}
 }
 
 // nextRetryTime encapsulates the next retry time rule so callers share one consistent package implementation.

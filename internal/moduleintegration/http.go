@@ -10,6 +10,7 @@ import (
 	"github.com/quackdiscord/bot/internal/httpapi/middleware"
 	httpplatform "github.com/quackdiscord/bot/internal/httpapi/platform"
 	"github.com/quackdiscord/bot/internal/modules/generallogging"
+	"github.com/quackdiscord/bot/internal/modules/honeypot"
 	"github.com/quackdiscord/bot/internal/modules/tickets"
 	"github.com/quackdiscord/bot/internal/quack"
 	"github.com/quackdiscord/bot/internal/quack/model"
@@ -18,7 +19,7 @@ import (
 // RegisterHTTP mounts both optional-module route registrars beneath one live,
 // authenticated guild context and applies QP-B's shared safety primitives.
 func (r *Runtime) RegisterHTTP(group *gin.RouterGroup, services *quack.Services, primitives httpplatform.Primitives) error {
-	if r == nil || r.Tickets == nil || r.Logging == nil {
+	if r == nil || r.Tickets == nil || r.Logging == nil || r.Honeypot == nil {
 		return errors.New("optional module HTTP runtime is not configured")
 	}
 	if group == nil || services == nil {
@@ -34,7 +35,20 @@ func (r *Runtime) RegisterHTTP(group *gin.RouterGroup, services *quack.Services,
 	modulesGroup.Use(middleware.ErrorEnvelope)
 	tickets.RegisterRoutes(modulesGroup, r.Tickets, resolveTicketActor)
 	generallogging.RegisterRoutes(modulesGroup, r.Logging, resolveLoggingActor)
+	honeypot.RegisterRoutes(modulesGroup, r.Honeypot, resolveHoneypotActor)
 	return nil
+}
+
+// resolveHoneypotActor translates one live guild context into Manage Guild authority.
+func resolveHoneypotActor(c *gin.Context) (honeypot.Actor, error) {
+	guildContext := middleware.GetGuildContext(c)
+	if guildContext == nil || guildContext.Guild == nil {
+		return honeypot.Actor{}, errors.New("live guild context is unavailable")
+	}
+	return honeypot.Actor{
+		GuildID: guildContext.Guild.ID, DiscordUserID: guildContext.ActorDiscordUserID,
+		CanManage: guildContext.Can(model.PermissionActionGuildSettingsWrite),
+	}, nil
 }
 
 // moduleRateLimit applies the shared authenticated-member policy to all module

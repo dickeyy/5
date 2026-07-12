@@ -56,7 +56,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Refresh stored guild name, icon, owner, and active state from Discord events.
 - [x] Clean or repair channel references when configured Discord channels are deleted.
 - [x] Document the Discord install permissions and privileged intents required by core and optional modules.
-- [ ] Reduce hard-coded Discord intents to the minimum enabled feature set.
+- [x] Reduce hard-coded Discord intents to the minimum enabled feature set.
 
 ## Discord Identity and Permissions
 
@@ -82,7 +82,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Require normal template application targets to be current human guild members.
 - [x] Keep imported history and explicit reversal flows able to reference departed members without weakening normal target rules.
 - [x] List dashboard guild access for moderators with Quack capabilities instead of requiring `Manage Guild` for every staff entry point.
-- [ ] Provide a member-facing guild/case entry path that does not depend on the banned user still appearing in Discord's guild list.
+- [x] Provide a member-facing guild/case entry path that does not depend on the banned user still appearing in Discord's guild list.
 - [x] Add consistent authorization errors for dashboard and Discord callers.
 - [x] Audit denied sensitive operations with actor, guild, requested capability, request ID, and correlation ID.
 - [x] Add permission-matrix tests covering owner, Administrator, Manage Guild, Moderate Members, Kick Members, Ban Members, former staff, and ordinary members.
@@ -155,7 +155,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Include valid and voided cases in member history with clear labels.
 - [x] Hide moderator identities from member-facing case responses.
 - [x] Hide raw Discord errors, worker IDs, internal retry fields, and technical action payloads from member-facing responses.
-- [ ] Show official reason, visible context, evidence, selected outcome, public history, and appeal state to the member.
+- [x] Show official reason, visible context, evidence, selected outcome, public history, and appeal state to the member.
 - [x] Define and enforce public, staff, and internal case-event response views without reintroducing free-form notes.
 - [x] Audit permission-sensitive case and history reads.
 - [ ] Add concurrency tests for simultaneous case creation and voiding in the same guild.
@@ -250,36 +250,36 @@ Items are grouped by concern, not by implementation order or priority. Completed
 
 - [x] Remove the free-form reason option from `/case add`.
 - [x] Add structured template-context prompts to `/case add`.
-- [ ] Use Discord modals or components for context that cannot fit slash-command options.
+- [x] Use Discord modals or components for context that cannot fit slash-command options.
 - [x] Keep template selection autocomplete limited to active templates.
 - [x] Show required-context validation errors privately.
 - [x] Keep successful case summaries public in the invoking staff channel.
 - [x] Keep public case summaries limited to case number, target, template, level, and action status.
-- [ ] Update the public case summary after asynchronous action and notification outcomes are known.
+- [x] Update the public case summary after asynchronous action and notification outcomes are known.
 - [x] Add `/case view` for authorized staff case detail.
 - [x] Add `/case list` for authorized staff case browsing.
 - [x] Add `/case user` for authorized member history.
-- [ ] Add stable case pagination buttons.
-- [ ] Add case detail embeds that separate validity, action result, appeal state, context, and evidence links.
-- [ ] Add member-history embeds without exposing other guilds or hidden technical details.
+- [x] Add stable case pagination buttons.
+- [x] Add case detail embeds that separate validity, action result, appeal state, context, and evidence links.
+- [x] Add member-history embeds without exposing other guilds or hidden technical details.
 - [x] Add a Discord failed-action review view.
-- [ ] Register real retry, dismiss, and void button handlers.
-- [ ] Require a void reason through a modal before voiding from Discord.
+- [x] Register real retry, dismiss, and void button handlers.
+- [x] Require a void reason through a modal before voiding from Discord.
 - [x] Register the Discord message context command for evidence-backed case creation.
 - [ ] Add an appeal entry button or secure dashboard link to eligible case notifications.
 - [ ] Add Discord views for staff to inspect appeal status and case-linked review history.
-- [ ] Add Discord audit-mirror rendering for important moderation events.
-- [ ] Keep Discord audit-mirror messages separate from general logging output.
-- [ ] Remove legacy direct moderation commands after migration.
-- [ ] Prevent v4 and v5 command-name collisions during coexistence.
-- [ ] Remove placeholder component and modal handlers as real workflows are registered.
+- [x] Add Discord audit-mirror rendering for important moderation events.
+- [x] Keep Discord audit-mirror messages separate from general logging output.
+- [x] Remove legacy direct moderation commands after migration.
+- [x] Prevent v4 and v5 command-name collisions during coexistence.
+- [x] Remove placeholder component and modal handlers as real workflows are registered.
 - [x] Add interaction deduplication using Discord interaction IDs.
-- [ ] Add tests for command definitions, permissions, autocomplete, context modals, message commands, pagination, buttons, deferred edits, and failure recovery.
+- [x] Add tests for command definitions, permissions, autocomplete, context modals, message commands, pagination, buttons, deferred edits, and failure recovery.
 
 ## Authentication and Backend API
 
 - [x] Add member-authenticated routes for listing and reading the caller's own cases.
-- [ ] Add member-authenticated routes for creating, reading, and updating the caller's appeal.
+- [x] Add member-authenticated routes for creating, reading, and updating the caller's appeal.
 - [x] Keep member access independent of current guild membership when a case targets their Discord ID.
 - [ ] Add staff routes for case voiding, failed-action review, retry, dismissal, reversals, and staff statistics.
 - [x] Add admin routes for template import, export, restore, context definitions, and guild settings.
@@ -308,56 +308,56 @@ Items are grouped by concern, not by implementation order or priority. Completed
 
 ## Appeals
 
-- [ ] Replace placeholder appeal records with the final case-linked appeal model.
-- [ ] Add guild-configurable appeal questions and Quack's default appeal form.
-- [ ] Validate appeal question ordering, required fields, and supported simple input types.
-- [ ] Snapshot the appeal form used when a member submits an appeal.
-- [ ] Snapshot case appealability so later template edits do not change existing cases.
-- [ ] Enforce at most one appeal record per case with a database uniqueness constraint.
-- [ ] Allow only the target Discord identity to create and read a member-facing appeal.
-- [ ] Allow banned and departed members to appeal after Discord authentication.
-- [ ] Reject appeals for non-appealable, voided, or unrelated cases with clear errors.
-- [ ] Add appeal submission, staff response, request-more-information, reopen, accept, reject, and close behavior.
-- [ ] Reopen the existing appeal for more information instead of creating another appeal.
-- [ ] Require `Moderate Members` or higher for appeal review.
-- [ ] Record member and staff appeal events as an immutable timeline.
-- [ ] Hide staff identities from the member-facing appeal history while retaining them in audit data.
-- [ ] Make accepting an appeal atomically void the case.
-- [ ] Keep rejected or closed appeals from changing case validity.
-- [ ] Offer timeout removal or unban as a separate staff-confirmed operation after acceptance.
-- [ ] Never silently reverse Discord enforcement when an appeal is accepted.
-- [ ] Notify the member when staff request information or decide the appeal.
+- [x] Replace placeholder appeal records with the final case-linked appeal model.
+- [x] Add guild-configurable appeal questions and Quack's default appeal form.
+- [x] Validate appeal question ordering, required fields, and supported simple input types.
+- [x] Snapshot the appeal form used when a member submits an appeal.
+- [x] Snapshot case appealability so later template edits do not change existing cases.
+- [x] Enforce at most one appeal record per case with a database uniqueness constraint.
+- [x] Allow only the target Discord identity to create and read a member-facing appeal.
+- [x] Allow banned and departed members to appeal after Discord authentication.
+- [x] Reject appeals for non-appealable, voided, or unrelated cases with clear errors.
+- [x] Add appeal submission, staff response, request-more-information, reopen, accept, reject, and close behavior.
+- [x] Reopen the existing appeal for more information instead of creating another appeal.
+- [x] Require `Moderate Members` or higher for appeal review.
+- [x] Record member and staff appeal events as an immutable timeline.
+- [x] Hide staff identities from the member-facing appeal history while retaining them in audit data.
+- [x] Make accepting an appeal atomically void the case.
+- [x] Keep rejected or closed appeals from changing case validity.
+- [x] Offer timeout removal or unban as a separate staff-confirmed operation after acceptance.
+- [x] Never silently reverse Discord enforcement when an appeal is accepted.
+- [x] Notify the member when staff request information or decide the appeal.
 - [ ] Add Discord notification entry links for eligible appeals.
-- [ ] Add staff appeal queue and filtering backend behavior.
-- [ ] Audit appeal reads, submissions, status changes, decisions, and reversal requests.
-- [ ] Add concurrency tests for duplicate submissions and simultaneous appeal decisions.
+- [x] Add staff appeal queue and filtering backend behavior.
+- [x] Audit appeal reads, submissions, status changes, decisions, and reversal requests.
+- [x] Add concurrency tests for duplicate submissions and simultaneous appeal decisions.
 - [ ] Add end-to-end tests for accepted, rejected, reopened, closed, and failed-reversal appeals.
 
 ## Audit Log and Staff Statistics
 
-- [ ] Define the complete set of audit action names and metadata contracts.
-- [ ] Record the correct source for dashboard, Discord, system, import, and honeypot activity.
+- [x] Define the complete set of audit action names and metadata contracts.
+- [x] Record the correct source for dashboard, Discord, system, import, and honeypot activity.
 - [ ] Audit every meaningful successful write.
 - [ ] Audit every failed or denied sensitive write.
 - [ ] Audit permission-sensitive case, history, appeal, template, settings, and module reads.
-- [ ] Audit action attempts, retries, dismissals, reversals, and terminal outcomes.
-- [ ] Audit template archive, restore, import, and export.
+- [x] Audit action attempts, retries, dismissals, reversals, and terminal outcomes.
+- [x] Audit template archive, restore, import, and export.
 - [ ] Audit member appeal activity and staff decisions.
 - [ ] Audit optional-module configuration and automated honeypot cases.
-- [ ] Enforce append-only audit behavior in application and storage interfaces.
-- [ ] Prevent normal repository methods from updating or deleting audit rows.
-- [ ] Redact secrets, tokens, private transport payloads, and unnecessary personal data from audit metadata.
-- [ ] Allow every moderator to read the complete guild audit log.
-- [ ] Add audit filters for actor, source, action, resource, result, case, member, and date.
-- [ ] Add stable audit pagination and ordering.
-- [ ] Add audit-mirror delivery to a configured staff-only Discord channel.
-- [ ] Keep audit-mirror delivery failures visible without blocking the original moderation operation.
-- [ ] Add repair behavior when the audit-mirror channel is removed or becomes inaccessible.
-- [ ] Derive staff case, action, appeal, and outcome statistics from existing records.
-- [ ] Add time-range, template, action, and result breakdowns without creating leaderboards.
-- [ ] Add backend statistics responses for authorized staff use.
-- [ ] Keep statistics guild-scoped and prevent cross-guild aggregation of member history.
-- [ ] Add tests for audit immutability, redaction, permissions, filtering, mirroring, and statistics calculations.
+- [x] Enforce append-only audit behavior in application and storage interfaces.
+- [x] Prevent normal repository methods from updating or deleting audit rows.
+- [x] Redact secrets, tokens, private transport payloads, and unnecessary personal data from audit metadata.
+- [x] Allow every moderator to read the complete guild audit log.
+- [x] Add audit filters for actor, source, action, resource, result, case, member, and date.
+- [x] Add stable audit pagination and ordering.
+- [x] Add audit-mirror delivery to a configured staff-only Discord channel.
+- [x] Keep audit-mirror delivery failures visible without blocking the original moderation operation.
+- [x] Add repair behavior when the audit-mirror channel is removed or becomes inaccessible.
+- [x] Derive staff case, action, appeal, and outcome statistics from existing records.
+- [x] Add time-range, template, action, and result breakdowns without creating leaderboards.
+- [x] Add backend statistics responses for authorized staff use.
+- [x] Keep statistics guild-scoped and prevent cross-guild aggregation of member history.
+- [x] Add tests for audit immutability, redaction, permissions, filtering, mirroring, and statistics calculations.
 
 ## Optional Ticket Module
 
@@ -401,23 +401,25 @@ Items are grouped by concern, not by implementation order or priority. Completed
 
 ## Optional Honeypot Module
 
-- [ ] Write a module-specific product definition for honeypot setup, trigger rules, exemptions, and safety behavior.
-- [ ] Add independent per-guild honeypot enablement and settings.
-- [ ] Allow admins to select a honeypot channel and one active case template.
-- [ ] Validate that the selected template remains active and compatible with automated use.
-- [ ] Handle message events in configured honeypot channels.
-- [ ] Ignore Quack, other bots, and exempt staff according to the module definition.
-- [ ] Prevent recursive triggers from Quack responses or logging output.
-- [ ] Apply the configured template through the normal case creation transaction.
-- [ ] Mark honeypot cases with an explicit automated source.
-- [ ] Use the normal escalation, action, notification, evidence, permission, and audit records.
-- [ ] Define how actor permissions are represented for system-created honeypot cases without granting a fake staff identity.
-- [ ] Handle selected-template archive and honeypot-channel deletion safely.
-- [ ] Add honeypot trigger counts and outcomes to derived module statistics.
-- [ ] Add backend APIs for honeypot settings and status.
-- [ ] Audit honeypot configuration, triggers, failures, and created cases.
-- [ ] Add module-specific v4 honeypot migration with dry-run and idempotency support.
-- [ ] Add setup, exemption, loop-prevention, action, failure, and migration tests.
+- [x] Write a module-specific product definition for honeypot setup, trigger rules, exemptions, and safety behavior.
+- [x] Add independent per-guild honeypot enablement and settings.
+- [x] Allow admins to select a honeypot channel and one active case template.
+- [x] Validate that the selected template remains active and compatible with automated use.
+- [x] Handle message events in configured honeypot channels.
+- [x] Ignore Quack, other bots, and exempt staff according to the module definition.
+- [x] Prevent recursive triggers from Quack responses or logging output.
+- [x] Apply the configured template through the normal case creation transaction.
+- [x] Mark honeypot cases with an explicit automated source.
+- [x] Use the normal escalation, action, notification, evidence, permission, and audit records.
+- [x] Define how actor permissions are represented for system-created honeypot cases without granting a fake staff identity.
+- [x] Wire the production honeypot case adapter through a system-only core boundary that cannot fabricate or reuse a staff identity.
+- [x] Register honeypot routes, migration, gateway projections, drift forwarding, conditional intents, and graceful runtime shutdown centrally.
+- [x] Handle selected-template archive and honeypot-channel deletion safely.
+- [x] Add honeypot trigger counts and outcomes to derived module statistics.
+- [x] Add backend APIs for honeypot settings and status.
+- [x] Audit honeypot configuration, triggers, failures, and created cases.
+- [x] Add module-specific v4 honeypot migration with dry-run and idempotency support.
+- [x] Add setup, exemption, loop-prevention, action, failure, and migration tests.
 
 ## V4 Migration and Coexistence
 
@@ -450,12 +452,12 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Preserve table names, IDs, case numbers, snapshots, action attempts, events, and audit history through the migration foundation.
 - [ ] Add database constraints for one default level per template where feasible.
 - [ ] Add database constraints for zero or one enforcement action per level where feasible.
-- [ ] Add database constraints for one appeal per case.
+- [x] Add database constraints for one appeal per case.
 - [ ] Add uniqueness and index coverage for template identity/version, guild case numbers, member history, audit filters, action claims, evidence, and module settings.
 - [ ] Add mapper tests for every new or changed domain/storage record.
 - [ ] Add MySQL integration tests for JSON fields, indexes, foreign keys, locks, and transaction rollbacks.
 - [ ] Add integration tests proving concurrent case creation keeps unique numbers and correct escalation after the model changes.
-- [ ] Add integration tests proving void and appeal acceptance cannot race with escalation counts.
+- [x] Add integration tests proving void and appeal acceptance cannot race with escalation counts.
 - [ ] Add claim-lease recovery for action executions left running after crashes.
 - [ ] Add safe cleanup or archival policies for expired OAuth state and sessions.
 - [ ] Define backup and restore procedures for MySQL.
@@ -511,7 +513,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [ ] Add case tests for context, evidence, target validation, voiding, replacement, member visibility, and action-independent validity.
 - [ ] Add action tests for every Discord result, retry classification, idempotency boundary, manual control, and reversal.
 - [ ] Add notification tests proving one message at most and accurate outcome rendering.
-- [ ] Add appeal tests for ownership, one-per-case, reopen, decisions, voiding, and reversals.
+- [x] Add appeal tests for ownership, one-per-case, reopen, decisions, voiding, and reversals.
 - [ ] Add audit tests for completeness, denied operations, read events, redaction, immutability, and all-moderator access.
 - [ ] Add backend API contract tests for every staff, admin, member, and module endpoint.
 - [ ] Add full Discord interaction tests for slash commands, message commands, autocomplete, components, modals, deferred edits, and public/private responses.

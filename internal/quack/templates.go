@@ -24,6 +24,7 @@ const (
 var (
 	ErrTemplateValidation                  = errors.New("template validation failed")
 	ErrTemplateNotFound                    = errors.New("case template not found")
+	ErrTemplatePermissionDenied            = errors.New("template permission denied")
 	ErrTemplateCompatibilityReviewRequired = model.ErrTemplateCompatibilityReviewRequired
 )
 
@@ -152,14 +153,26 @@ func NewTemplateService(store Repository) *TemplateService {
 
 // List returns list subject to authorization, ordering, and filtering constraints.
 func (s *TemplateService) List(ctx context.Context, guildContext *GuildStaffContext) ([]TemplateResponse, error) {
+	ctx = ensureTraceContext(ctx)
+	if s == nil || s.store == nil || guildContext == nil || guildContext.Guild == nil || guildContext.Staff == nil {
+		return nil, errors.New("template service is not configured")
+	}
+	if !guildContext.Can(model.PermissionActionCaseTemplateRead) {
+		_ = s.audit(ctx, guildContext, string(model.AuditActionTemplateRead), "case_template", "list", model.AuditResultDenied, ErrTemplatePermissionDenied.Error())
+		return nil, ErrTemplatePermissionDenied
+	}
 	templates, err := s.store.ListCaseTemplates(ctx, guildContext.Guild.ID)
 	if err != nil {
+		_ = s.audit(ctx, guildContext, string(model.AuditActionTemplateRead), "case_template", "list", model.AuditResultFailure, "query_failed")
 		return nil, err
 	}
 
 	out := make([]TemplateResponse, 0, len(templates))
 	for _, template := range templates {
 		out = append(out, templateResponse(template))
+	}
+	if err := s.audit(ctx, guildContext, string(model.AuditActionTemplateRead), "case_template", "list", model.AuditResultSuccess, ""); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -181,15 +194,28 @@ func (s *TemplateService) ListActive(ctx context.Context, guildContext *GuildSta
 
 // Get retrieves get without exposing the underlying adapter implementation.
 func (s *TemplateService) Get(ctx context.Context, guildContext *GuildStaffContext, templateID string) (*TemplateResponse, error) {
+	ctx = ensureTraceContext(ctx)
+	if s == nil || s.store == nil || guildContext == nil || guildContext.Guild == nil || guildContext.Staff == nil {
+		return nil, errors.New("template service is not configured")
+	}
+	if !guildContext.Can(model.PermissionActionCaseTemplateRead) {
+		_ = s.audit(ctx, guildContext, string(model.AuditActionTemplateRead), "case_template", templateID, model.AuditResultDenied, ErrTemplatePermissionDenied.Error())
+		return nil, ErrTemplatePermissionDenied
+	}
 	template, err := s.store.GetCaseTemplateExpanded(ctx, guildContext.Guild.ID, templateID)
 	if err != nil {
+		_ = s.audit(ctx, guildContext, string(model.AuditActionTemplateRead), "case_template", templateID, model.AuditResultFailure, "query_failed")
 		return nil, err
 	}
 	if template == nil {
+		_ = s.audit(ctx, guildContext, string(model.AuditActionTemplateRead), "case_template", templateID, model.AuditResultFailure, "not_found")
 		return nil, ErrTemplateNotFound
 	}
 
 	response := templateResponse(*template)
+	if err := s.audit(ctx, guildContext, string(model.AuditActionTemplateRead), "case_template", templateID, model.AuditResultSuccess, ""); err != nil {
+		return nil, err
+	}
 	return &response, nil
 }
 
@@ -639,7 +665,7 @@ func (s *TemplateService) auditEntry(ctx context.Context, guildContext *GuildSta
 		GuildID:             guildContext.Guild.ID,
 		ActorDiscordUserID:  guildContext.Staff.DiscordUserID,
 		ActorPermissionBits: guildContext.PermissionBits,
-		Source:              model.AuditSourceAPI,
+		Source:              AuditSourceFromContext(ctx),
 		Action:              action,
 		ResourceType:        resourceType,
 		ResourceID:          resourceID,

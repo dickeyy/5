@@ -47,12 +47,17 @@ The current backend already supports important parts of the intended v5 directio
 - Member notification is a case-level post-outcome workflow rather than a
   `send_dm` action. Evidence capture and managed attachment copies share one
   bounded HTTP/Discord service.
+- The QP-D package now provides target-owned case summaries/details, the final
+  case-linked appeal state machine, form snapshots, atomic acceptance/voiding,
+  audited timelines, notification outbox/adapters, and explicit reversal
+  offers without relying on current Discord membership.
+- QI-2 installs the QP-D member/staff routes, appeal migration and outbox,
+  reversal components, QP-E audit/statistics routes and mirror lifecycle, and
+  QP-F honeypot runtime on the live process boundary.
 
 ## Behavior That Must Change
 
-The current implementation differs from the v5 definition in several core rules:
-
-- The current dashboard guild flow is staff-focused and does not yet provide case-owner access for members who left or were banned.
+No P2 integration-owned product mismatch remains in this section.
 
 ## Rejected Concepts to Remove
 
@@ -68,18 +73,17 @@ Historical database compatibility may require a later migration rather than imme
 
 The intended v5 core still requires product behavior that is not complete today:
 
-- Member-facing case access with the agreed transparency and staff-identity rules.
-- A complete case-linked appeal flow.
-- Searchable audit views and optional Discord audit mirroring for all moderators.
-- Derived staff statistics.
 - V4 historical-case import that does not affect escalation.
 - Removal of legacy direct moderation commands after migration.
+
+QP-E's audit/statistics contracts and the separately owned appeal/honeypot
+contracts are installed on the combined QI-2 runtime anchor.
 
 ## Optional Modules Must Stay Separate
 
 Some v4 features remain part of Quack v5 as optional guild modules, not as extensions of the case model. Tickets and general logging now implement this boundary through the isolated module registry, lifecycle, Discord adapter, route, migration, and privacy contracts documented in `docs/modules/optional-tickets-and-logging.md`.
 
-- Honeypots still need to invoke a configured template automatically while keeping the resulting moderation on the normal case, action, notification, and audit flow.
+- Honeypots now invoke a configured template through an injected normal-case application boundary, with system attribution, message deduplication, drift disablement, isolated statistics/migration/runtime contracts, and no direct case or action storage access. QI-2 supplies the production system-only adapter, authoritative Discord projections/validators, central routes and frozen logical-0300 migration, drift forwarding, conditional intents, and bounded runtime lifecycle described in `docs/modules/optional-honeypots.md`.
 
 Purge, lockdown, ping, server information, and similar utilities may be considered later. They should not add fields, permissions, or special cases to the core moderation system.
 

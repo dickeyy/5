@@ -2,15 +2,22 @@ package moduleintegration
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
+	discordadapter "github.com/quackdiscord/bot/internal/discordbot"
+	discordcommands "github.com/quackdiscord/bot/internal/discordbot/commands"
 	"github.com/quackdiscord/bot/internal/discordbot/interactions"
 	"github.com/quackdiscord/bot/internal/discordbot/ui"
+	"github.com/quackdiscord/bot/internal/modules"
 	"github.com/quackdiscord/bot/internal/modules/generallogging"
+	"github.com/quackdiscord/bot/internal/modules/honeypot"
 	"github.com/quackdiscord/bot/internal/modules/tickets"
+	"github.com/quackdiscord/bot/internal/quack"
+	"github.com/quackdiscord/bot/internal/quack/model"
 	"github.com/rs/zerolog/log"
 )
 
@@ -28,6 +35,12 @@ func (r *Runtime) RegisterComponents(registry *interactions.ComponentRegistry) e
 	if err := tickets.RegisterComponents(registry, handlers); err != nil {
 		return err
 	}
+	if err := discordcommands.RegisterCaseComponents(registry); err != nil {
+		return err
+	}
+	if err := discordadapter.RegisterAppealComponents(registry, r.services, r.Appeals); err != nil {
+		return err
+	}
 	if err := registry.RegisterComponent("ticket", "repair", r.repairTicketComponent); err != nil {
 		return err
 	}
@@ -37,7 +50,7 @@ func (r *Runtime) RegisterComponents(registry *interactions.ComponentRegistry) e
 // RegisterGatewayHandlers subscribes optional modules to gateway events without
 // placing their failures on the moderation action queue.
 func (r *Runtime) RegisterGatewayHandlers(session *discordgo.Session) error {
-	if r == nil || r.LoggingQueue == nil || session == nil {
+	if r == nil || r.LoggingQueue == nil || r.HoneypotRuntime == nil || r.HoneypotDiscord == nil || session == nil {
 		return errors.New("optional module gateway runtime is not configured")
 	}
 	session.AddHandler(r.onMessageCreate)
@@ -49,6 +62,7 @@ func (r *Runtime) RegisterGatewayHandlers(session *discordgo.Session) error {
 	session.AddHandler(r.onGuildBanAdd)
 	session.AddHandler(r.onGuildBanRemove)
 	session.AddHandler(r.onGuildUpdate)
+	session.AddHandler(r.onGuildDelete)
 	session.AddHandler(r.onChannelCreate)
 	session.AddHandler(r.onChannelUpdate)
 	session.AddHandler(r.onChannelDelete)
@@ -87,6 +101,7 @@ func (r *Runtime) openTicketComponent(ctx ui.Context) ui.HandlerResult {
 		return ui.Immediate(ui.Error("Quack could not verify your ticket access."))
 	}
 	return ui.Async(ui.DeferEphemeral(), func(taskCtx context.Context, responder ui.Responder) error {
+		taskCtx = quack.ContextWithAuditSource(taskCtx, model.AuditSourceDiscord)
 		ticket, err := r.TicketDiscord.Open(taskCtx, actor)
 		if err != nil {
 			_, _ = responder.EditOriginal(ui.ErrorEdit(ticketErrorMessage(err)))
@@ -106,6 +121,7 @@ func (r *Runtime) ticketQueueComponent(ctx ui.Context) ui.HandlerResult {
 		return ui.Immediate(ui.Error("You do not have access to the ticket queue."))
 	}
 	return ui.Async(ui.DeferEphemeral(), func(taskCtx context.Context, responder ui.Responder) error {
+		taskCtx = quack.ContextWithAuditSource(taskCtx, model.AuditSourceDiscord)
 		queue, err := r.Tickets.Queue(taskCtx, actor, tickets.StatusOpen, 25)
 		if err != nil {
 			_, _ = responder.EditOriginal(ui.ErrorEdit(ticketErrorMessage(err)))
@@ -130,6 +146,7 @@ func (r *Runtime) viewTicketComponent(ctx ui.Context) ui.HandlerResult {
 		return ui.Immediate(ui.Error("That ticket is unavailable."))
 	}
 	return ui.Async(ui.DeferEphemeral(), func(taskCtx context.Context, responder ui.Responder) error {
+		taskCtx = quack.ContextWithAuditSource(taskCtx, model.AuditSourceDiscord)
 		ticket, events, err := r.Tickets.Detail(taskCtx, actor, ticketID)
 		if err != nil {
 			_, _ = responder.EditOriginal(ui.ErrorEdit(ticketErrorMessage(err)))
@@ -153,6 +170,7 @@ func (r *Runtime) repairTicketComponent(ctx ui.Context) ui.HandlerResult {
 		return ui.Immediate(ui.Error("You do not have permission to repair that ticket."))
 	}
 	return ui.Async(ui.DeferEphemeral(), func(taskCtx context.Context, responder ui.Responder) error {
+		taskCtx = quack.ContextWithAuditSource(taskCtx, model.AuditSourceDiscord)
 		if err := r.TicketDiscord.RepairPermissions(taskCtx, actor, ticketID); err != nil {
 			_, _ = responder.EditOriginal(ui.ErrorEdit(ticketErrorMessage(err)))
 			return nil
@@ -204,6 +222,7 @@ func (r *Runtime) submitTicketReplyModal(ctx ui.Context) ui.HandlerResult {
 	}
 	body := modalText(data.Components, "body")
 	return ui.Async(ui.DeferEphemeral(), func(taskCtx context.Context, responder ui.Responder) error {
+		taskCtx = quack.ContextWithAuditSource(taskCtx, model.AuditSourceDiscord)
 		if err := r.TicketDiscord.Reply(taskCtx, actor, customID.Payload, body); err != nil {
 			_, _ = responder.EditOriginal(ui.ErrorEdit(ticketErrorMessage(err)))
 			return nil
@@ -220,6 +239,7 @@ func (r *Runtime) closeTicketComponent(ctx ui.Context) ui.HandlerResult {
 		return ui.Immediate(ui.Error("You do not have permission to close that ticket."))
 	}
 	return ui.Async(ui.DeferEphemeral(), func(taskCtx context.Context, responder ui.Responder) error {
+		taskCtx = quack.ContextWithAuditSource(taskCtx, model.AuditSourceDiscord)
 		if _, err := r.TicketDiscord.Close(taskCtx, actor, ticketID); err != nil {
 			_, _ = responder.EditOriginal(ui.ErrorEdit(ticketErrorMessage(err)))
 			return nil
@@ -297,6 +317,9 @@ func ticketErrorMessage(err error) string {
 
 // submit enqueues general logging without blocking the gateway or moderation.
 func (r *Runtime) submit(event generallogging.Event) {
+	if r == nil || r.LoggingQueue == nil {
+		return
+	}
 	if err := r.LoggingQueue.Submit(event); err != nil && !errors.Is(err, generallogging.ErrQueueFull) {
 		log.Error().Err(err).Msg("Failed to queue general logging event")
 	}
@@ -310,6 +333,7 @@ func (r *Runtime) internalGuildID(discordGuildID string) (string, bool) {
 
 // onMessageCreate retains bounded context only when logging is enabled.
 func (r *Runtime) onMessageCreate(_ *discordgo.Session, event *discordgo.MessageCreate) {
+	r.submitHoneypotMessage(event)
 	if event == nil || event.Message == nil || event.GuildID == "" || (event.Author != nil && event.Author.Bot) {
 		return
 	}
@@ -318,6 +342,42 @@ func (r *Runtime) onMessageCreate(_ *discordgo.Session, event *discordgo.Message
 		return
 	}
 	_ = r.Logging.CacheMessage(context.Background(), cachedMessage(guildID, event.Message))
+}
+
+// submitHoneypotMessage performs live member/permission projection only for an
+// enabled guild, then submits to the module's isolated bounded runtime.
+func (r *Runtime) submitHoneypotMessage(event *discordgo.MessageCreate) {
+	if r == nil || r.registry == nil || r.session == nil || r.HoneypotRuntime == nil || event == nil || event.Message == nil || event.GuildID == "" {
+		return
+	}
+	ctx := context.Background()
+	guildID, ok := r.internalGuildID(event.GuildID)
+	if !ok {
+		return
+	}
+	configuration, err := r.registry.Configuration(ctx, guildID, modules.Honeypots)
+	if err != nil || configuration == nil || !configuration.Enabled {
+		return
+	}
+	channel, err := r.session.Channel(event.ChannelID)
+	if err != nil || channel == nil || channel.GuildID != event.GuildID || event.Author == nil {
+		return
+	}
+	guild, err := r.session.Guild(event.GuildID)
+	if err != nil || guild == nil {
+		return
+	}
+	member, err := r.session.GuildMember(event.GuildID, event.Author.ID)
+	if err != nil || member == nil {
+		return
+	}
+	message, err := projectHoneypotMessage(guildID, event, guild, channel, member, currentBotID(r.session))
+	if err != nil {
+		return
+	}
+	if err := r.HoneypotRuntime.Submit(message); err != nil && !errors.Is(err, honeypot.ErrQueueFull) {
+		log.Error().Err(err).Str("guild_id", event.GuildID).Msg("Failed to queue honeypot event")
+	}
 }
 
 // onMessageUpdate queues an edit and refreshes bounded cache context.
@@ -419,6 +479,28 @@ func (r *Runtime) onGuildUpdate(_ *discordgo.Session, event *discordgo.GuildUpda
 	}
 }
 
+// onGuildDelete disables the departed guild's honeypot while retaining its
+// configuration for an explicit repair after a future rejoin.
+func (r *Runtime) onGuildDelete(_ *discordgo.Session, event *discordgo.GuildDelete) {
+	if r == nil || r.registry == nil || r.HoneypotDiscord == nil || event == nil || event.Guild == nil || event.Unavailable {
+		return
+	}
+	ctx := context.Background()
+	guildID, err := r.resolver.internalIDAny(ctx, event.ID)
+	if err != nil {
+		return
+	}
+	configuration, err := r.registry.Configuration(ctx, guildID, modules.Honeypots)
+	if err != nil || configuration == nil || !configuration.Enabled {
+		return
+	}
+	var settings honeypot.Settings
+	if json.Unmarshal([]byte(configuration.ConfigJSON), &settings) != nil || settings.ChannelDiscordID == "" {
+		return
+	}
+	_ = r.HoneypotDiscord.HandleDeletedChannel(ctx, guildID, settings.ChannelDiscordID)
+}
+
 // onChannelCreate queues configured channel creation logging.
 func (r *Runtime) onChannelCreate(_ *discordgo.Session, event *discordgo.ChannelCreate) {
 	if event != nil {
@@ -455,16 +537,23 @@ func (r *Runtime) onChannelDelete(_ *discordgo.Session, event *discordgo.Channel
 		return
 	}
 	ctx := context.Background()
-	_ = r.TicketDiscord.HandleDeletedEntryChannel(ctx, guildID, event.ID)
+	if r.TicketDiscord != nil {
+		_ = r.TicketDiscord.HandleDeletedEntryChannel(ctx, guildID, event.ID)
+	}
+	if r.HoneypotDiscord != nil {
+		_ = r.HoneypotDiscord.HandleDeletedChannel(ctx, guildID, event.ID)
+	}
 	var ticket struct {
 		ID      string
 		GuildID string
 	}
 	result := r.db.WithContext(ctx).Table("tickets").Select("id, guild_id").Where("guild_id = ? AND thread_discord_channel_id = ?", guildID, event.ID).Limit(1).Find(&ticket)
-	if result.Error == nil && result.RowsAffected == 1 {
+	if r.TicketDiscord != nil && result.Error == nil && result.RowsAffected == 1 {
 		_ = r.TicketDiscord.HandleDeletedChannel(ctx, ticket.GuildID, ticket.ID, event.ID)
 	}
-	_, _, _ = r.Logging.RepairDeletedChannel(ctx, generallogging.Actor{GuildID: guildID, DiscordUserID: "quack-system", CanManage: true}, event.ID)
+	if r.Logging != nil {
+		_, _, _ = r.Logging.RepairDeletedChannel(ctx, generallogging.Actor{GuildID: guildID, DiscordUserID: "quack-system", CanManage: true}, event.ID)
+	}
 }
 
 // cachedMessage copies the bounded subset allowed by logging privacy settings.

@@ -283,6 +283,14 @@ type caseCreatePreflight struct {
 	Captured                                       CapturedEvidence
 }
 
+// caseCreateAttribution distinguishes a live staff request from the one
+// product-approved system automation path without widening generic case APIs.
+type caseCreateAttribution struct {
+	actorType   string
+	auditSource model.AuditSource
+	system      bool
+}
+
 // NewCaseService constructs case service with required dependencies explicit so callers control lifecycle and substitution.
 func NewCaseService(store Repository, scheduler ...CaseWorkScheduler) *CaseService {
 	service := &CaseService{store: store}
@@ -300,9 +308,51 @@ func (s *CaseService) WithEvidenceCapture(evidence *EvidenceService) *CaseServic
 	return s
 }
 
-// Create applies a template to a user inside the guild-scoped transaction boundary. The lock keeps escalation history and case numbering consistent, while scheduling occurs only after the transaction commits.
+// Create applies a staff-attributed template to a user inside the guild-scoped
+// transaction boundary. The lock keeps escalation history and case numbering
+// consistent, while scheduling occurs only after the transaction commits.
 func (s *CaseService) Create(ctx context.Context, guildContext *GuildStaffContext, input CaseInput) (*CaseResponse, error) {
+	if input.Source == model.CaseSourceHoneypot {
+		return nil, validationCaseError("honeypot cases require the system application boundary")
+	}
+	return s.createWithAttribution(ctx, guildContext, input, caseCreateAttribution{actorType: "staff", auditSource: model.AuditSourceAPI})
+}
+
+// CreateSystemHoneypot applies one honeypot template through the ordinary case
+// transaction while attributing the operation to Quack itself. It is intended
+// only for the injected optional-module adapter and rejects every other source.
+func (s *CaseService) CreateSystemHoneypot(ctx context.Context, guildID string, input CaseInput) (*CaseResponse, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("case service is not configured")
+	}
+	if s.authorizer == nil {
+		return nil, ErrAuthorizationUnavailable
+	}
+	if input.Source != model.CaseSourceHoneypot {
+		return nil, validationCaseError("system case creation is restricted to the honeypot source")
+	}
+	guild, err := s.store.GetGuildByID(ctx, strings.TrimSpace(guildID))
+	if err != nil {
+		return nil, err
+	}
+	if guild == nil || !guild.IsActive {
+		return nil, validationCaseError("active guild is required")
+	}
+	systemContext := &GuildStaffContext{
+		Guild: guild,
+		Staff: &model.StaffMember{},
+		Permissions: map[model.PermissionAction]bool{
+			model.PermissionActionCaseCreate: true,
+		},
+	}
+	return s.createWithAttribution(ctx, systemContext, input, caseCreateAttribution{actorType: "system", auditSource: model.AuditSourceSystem, system: true})
+}
+
+// createWithAttribution owns the shared moderation path for staff and the
+// narrowly scoped honeypot system boundary.
+func (s *CaseService) createWithAttribution(ctx context.Context, guildContext *GuildStaffContext, input CaseInput, attribution caseCreateAttribution) (*CaseResponse, error) {
 	ctx = ensureTraceContext(ctx)
+	ctx = ContextWithAuditSource(ctx, AuditSourceForCaseSource(input.Source))
 	if s == nil || s.store == nil {
 		return nil, errors.New("case service is not configured")
 	}
@@ -335,7 +385,7 @@ func (s *CaseService) Create(ctx context.Context, guildContext *GuildStaffContex
 	var err error
 	for attempt := 0; attempt < 4; attempt++ {
 		var preflight *caseCreatePreflight
-		preflight, err = s.preflightCreate(ctx, guildContext, input)
+		preflight, err = s.preflightCreate(ctx, guildContext, input, attribution)
 		if err != nil {
 			break
 		}
@@ -343,7 +393,7 @@ func (s *CaseService) Create(ctx context.Context, guildContext *GuildStaffContex
 			transactionalService := *s
 			transactionalService.store = transactionalStore
 			var createErr error
-			created, createErr = transactionalService.create(ctx, guildContext, input, preflight)
+			created, createErr = transactionalService.create(ctx, guildContext, input, preflight, attribution)
 			return createErr
 		})
 		if errors.Is(err, errCasePreflightStale) {
@@ -354,10 +404,10 @@ func (s *CaseService) Create(ctx context.Context, guildContext *GuildStaffContex
 	if err != nil {
 		var authorizationErr *AuthorizationError
 		if errors.As(err, &authorizationErr) && s.authorizer != nil {
-			_ = s.authorizer.auditAuthorizationDenialWithMetadata(ctx, guildContext, authorizationErr.Capability, authorizationSource(input.Source), authorizationErr.Reason, authorizationErr.MetadataJSON)
+			_ = s.authorizer.auditAuthorizationDenialWithMetadata(ctx, guildContext, authorizationErr.Capability, AuditSourceFromContext(ctx), authorizationErr.Reason, authorizationErr.MetadataJSON)
 		}
 		if errors.Is(err, ErrCaseValidation) || errors.Is(err, ErrCasePermissionDenied) || errors.Is(err, ErrCaseTemplateNotAvailable) || errors.Is(err, errCasePreflightStale) {
-			_ = s.audit(ctx, guildContext, "case.create", "case", "unknown", model.AuditResultFailure, err.Error())
+			_ = s.auditWithAttribution(ctx, guildContext, attribution, "case.create", "case", "unknown", model.AuditResultFailure, err.Error())
 		}
 		if errors.Is(err, errCasePreflightStale) {
 			err = validationCaseError("case state changed repeatedly; retry the request")
@@ -374,7 +424,7 @@ func (s *CaseService) Create(ctx context.Context, guildContext *GuildStaffContex
 }
 
 // preflightCreate performs live authorization and evidence capture before the atomic case transaction.
-func (s *CaseService) preflightCreate(ctx context.Context, guildContext *GuildStaffContext, input CaseInput) (*caseCreatePreflight, error) {
+func (s *CaseService) preflightCreate(ctx context.Context, guildContext *GuildStaffContext, input CaseInput, attribution caseCreateAttribution) (*caseCreatePreflight, error) {
 	if guildContext == nil || guildContext.Guild == nil || guildContext.Staff == nil || !guildContext.Can(model.PermissionActionCaseCreate) {
 		return nil, ErrCasePermissionDenied
 	}
@@ -398,7 +448,13 @@ func (s *CaseService) preflightCreate(ctx context.Context, guildContext *GuildSt
 		actionType = selected.Actions[0].ActionType
 	}
 	if s.authorizer != nil {
-		if err := s.authorizer.PreflightCase(ctx, guildContext, targetID, actionType); err != nil {
+		var err error
+		if attribution.system {
+			err = s.authorizer.PreflightSystemCase(ctx, guildContext, targetID, actionType)
+		} else {
+			err = s.authorizer.PreflightCase(ctx, guildContext, targetID, actionType)
+		}
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -425,7 +481,7 @@ func (s *CaseService) preflightCreate(ctx context.Context, guildContext *GuildSt
 		}
 		captured, captureErr := s.evidence.Capture(ctx, guildContext.Guild.DiscordGuildID, targetID, channelID, links, hasFallback)
 		if captureErr != nil {
-			_ = s.audit(ctx, guildContext, "evidence.capture", "case_evidence", "unknown", model.AuditResultFailure, captureErr.Error())
+			_ = s.auditWithAttribution(ctx, guildContext, attribution, "evidence.capture", "case_evidence", "unknown", model.AuditResultFailure, captureErr.Error())
 			return nil, validationCaseError(captureErr.Error())
 		}
 		if captured != nil {
@@ -439,6 +495,9 @@ func (s *CaseService) preflightCreate(ctx context.Context, guildContext *GuildSt
 func (s *CaseService) List(ctx context.Context, guildContext *GuildStaffContext, input CaseListInput) (*CaseListResponse, error) {
 	params, limit, offset, err := s.caseListParams(guildContext, input)
 	if err != nil {
+		if errors.Is(err, ErrCasePermissionDenied) {
+			_ = s.audit(ctx, guildContext, string(model.AuditActionCaseSearch), "case", "list", model.AuditResultDenied, "permission_denied")
+		}
 		return nil, err
 	}
 
@@ -466,6 +525,7 @@ func (s *CaseService) List(ctx context.Context, guildContext *GuildStaffContext,
 // Get retrieves get without exposing the underlying adapter implementation.
 func (s *CaseService) Get(ctx context.Context, guildContext *GuildStaffContext, caseRef string) (*CaseDetailResponse, error) {
 	if err := s.requireCaseRead(guildContext); err != nil {
+		_ = s.audit(ctx, guildContext, string(model.AuditActionCaseRead), "case", strings.TrimSpace(caseRef), model.AuditResultDenied, "permission_denied")
 		return nil, err
 	}
 	caseRef = strings.TrimSpace(caseRef)
@@ -631,7 +691,7 @@ func validActionExecutionStatus(value model.ActionExecutionStatus) bool {
 // validAppealStatus reports whether a staff appeal-status filter is supported.
 func validAppealStatus(value model.AppealStatus) bool {
 	switch value {
-	case model.AppealStatusPending, model.AppealStatusAccepted, model.AppealStatusRejected, model.AppealStatusClosed:
+	case model.AppealStatusPending, model.AppealStatusNeedsInformation, model.AppealStatusAccepted, model.AppealStatusRejected, model.AppealStatusClosed:
 		return true
 	default:
 		return false
@@ -639,7 +699,17 @@ func validAppealStatus(value model.AppealStatus) bool {
 }
 
 // Void preserves the case and correction reason while removing it from future escalation.
-func (s *CaseService) Void(ctx context.Context, guildContext *GuildStaffContext, caseRef, reason string, replacementCaseID *string) (*CaseResponse, error) {
+func (s *CaseService) Void(ctx context.Context, guildContext *GuildStaffContext, caseRef, reason string, replacementCaseID *string) (response *CaseResponse, err error) {
+	defer func() {
+		if err == nil || s == nil || s.store == nil || guildContext == nil || guildContext.Guild == nil || guildContext.Staff == nil {
+			return
+		}
+		result := model.AuditResultFailure
+		if errors.Is(err, ErrCasePermissionDenied) || errors.Is(err, ErrAuthorizationDenied) {
+			result = model.AuditResultDenied
+		}
+		_ = s.audit(ctx, guildContext, string(model.AuditActionCaseVoid), "case", strings.TrimSpace(caseRef), result, err.Error())
+	}()
 	if s == nil || s.store == nil {
 		return nil, errors.New("case service is not configured")
 	}
@@ -674,8 +744,8 @@ func (s *CaseService) Void(ctx context.Context, guildContext *GuildStaffContext,
 	if err != nil {
 		return nil, err
 	}
-	response := caseResponseFromModel(*voided, actions)
-	return &response, nil
+	result := caseResponseFromModel(*voided, actions)
+	return &result, nil
 }
 
 // MemberCaseDetail is the privacy-safe projection available only to the target Discord identity.
@@ -696,6 +766,30 @@ type MemberCaseDetail struct {
 	Events            []CaseEventResponse        `json:"history"`
 	Notification      *CaseNotificationResponse  `json:"notification,omitempty"`
 	Appealable        bool                       `json:"appealable"`
+	AppealID          string                     `json:"appeal_id,omitempty"`
+	AppealStatus      model.AppealStatus         `json:"appeal_status,omitempty"`
+}
+
+// MemberCaseSummary is the deliberately small list projection that cannot expose moderator or adapter internals.
+type MemberCaseSummary struct {
+	ID            string             `json:"id"`
+	GuildID       string             `json:"guild_id"`
+	CaseNumber    uint64             `json:"case_number"`
+	Reason        string             `json:"official_reason"`
+	Validity      model.CaseValidity `json:"validity"`
+	CreatedAt     time.Time          `json:"created_at"`
+	SelectedLevel *CaseSelectedLevel `json:"selected_outcome,omitempty"`
+	Appealable    bool               `json:"appealable"`
+	AppealID      string             `json:"appeal_id,omitempty"`
+	AppealStatus  model.AppealStatus `json:"appeal_status,omitempty"`
+}
+
+// MemberCaseListResponse returns only target-owned privacy-safe summaries.
+type MemberCaseListResponse struct {
+	Cases  []MemberCaseSummary `json:"cases"`
+	Total  int64               `json:"total"`
+	Limit  int                 `json:"limit"`
+	Offset int                 `json:"offset"`
 }
 
 // MemberEnforcementOutcome exposes only the configured action and public result.
@@ -705,7 +799,7 @@ type MemberEnforcementOutcome struct {
 }
 
 // ListMemberCases returns only cases targeting the authenticated Discord identity and does not require current guild membership.
-func (s *CaseService) ListMemberCases(ctx context.Context, guildID, memberDiscordUserID string, input CaseListInput) (*CaseListResponse, error) {
+func (s *CaseService) ListMemberCases(ctx context.Context, guildID, memberDiscordUserID string, input CaseListInput) (*MemberCaseListResponse, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("case service is not configured")
 	}
@@ -722,18 +816,22 @@ func (s *CaseService) ListMemberCases(ctx context.Context, guildID, memberDiscor
 	if err != nil {
 		return nil, err
 	}
-	responses := make([]CaseResponse, 0, len(result.Cases))
+	responses := make([]MemberCaseSummary, 0, len(result.Cases))
 	for _, item := range result.Cases {
-		response := caseResponseFromModel(item, nil)
-		response.ModeratorDiscordUserID = ""
-		response.Metadata = nil
-		response.Actions = nil
-		responses = append(responses, response)
+		appeal, appealErr := s.store.GetAppealByCaseID(ctx, item.ID)
+		if appealErr != nil {
+			return nil, appealErr
+		}
+		appealID, appealStatus := "", model.AppealStatus("")
+		if appeal != nil {
+			appealID, appealStatus = appeal.ID, appeal.Status
+		}
+		responses = append(responses, MemberCaseSummary{ID: item.ID, GuildID: item.GuildID, CaseNumber: item.CaseNumber, Reason: item.Reason, Validity: item.Validity, CreatedAt: item.CreatedAt, SelectedLevel: selectedLevelResponse(item.TemplateSnapshotJSON), Appealable: caseSnapshotAppealable(item.TemplateSnapshotJSON) && item.Validity == model.CaseValidityValid && appeal == nil, AppealID: appealID, AppealStatus: appealStatus})
 	}
 	if err := s.memberReadAudit(ctx, guildID, memberDiscordUserID, "member_case.list", "guild", guildID); err != nil {
 		return nil, err
 	}
-	return &CaseListResponse{Cases: responses, Total: result.Total, Limit: limit, Offset: offset}, nil
+	return &MemberCaseListResponse{Cases: responses, Total: result.Total, Limit: limit, Offset: offset}, nil
 }
 
 // GetMemberCase returns a privacy-safe case detail only when the authenticated identity owns the case.
@@ -791,7 +889,15 @@ func (s *CaseService) GetMemberCase(ctx context.Context, caseID, memberDiscordUs
 	if len(actions) > 0 {
 		enforcement = &MemberEnforcementOutcome{ActionType: actions[0].ActionType, Status: actions[0].Status}
 	}
-	return &MemberCaseDetail{ID: item.ID, GuildID: item.GuildID, CaseNumber: item.CaseNumber, TemplateID: item.TemplateID, Reason: item.Reason, Validity: item.Validity, VoidedReason: item.VoidedReason, ReplacementCaseID: item.ReplacementCaseID, CreatedAt: item.CreatedAt, ContextValues: parseCaseContextValues(item.ContextValuesJSON), SelectedLevel: selectedLevelResponse(item.TemplateSnapshotJSON), Enforcement: enforcement, Evidence: caseEvidenceResponses(evidence, attachments, true), Events: caseEventResponses(publicEvents), Notification: caseNotificationResponse(notification, true), Appealable: appealable}, nil
+	appeal, err := s.store.GetAppealByCaseID(ctx, item.ID)
+	if err != nil {
+		return nil, err
+	}
+	appealID, appealStatus := "", model.AppealStatus("")
+	if appeal != nil {
+		appealID, appealStatus = appeal.ID, appeal.Status
+	}
+	return &MemberCaseDetail{ID: item.ID, GuildID: item.GuildID, CaseNumber: item.CaseNumber, TemplateID: item.TemplateID, Reason: item.Reason, Validity: item.Validity, VoidedReason: item.VoidedReason, ReplacementCaseID: item.ReplacementCaseID, CreatedAt: item.CreatedAt, ContextValues: parseCaseContextValues(item.ContextValuesJSON), SelectedLevel: selectedLevelResponse(item.TemplateSnapshotJSON), Enforcement: enforcement, Evidence: caseEvidenceResponses(evidence, attachments, true), Events: caseEventResponses(publicEvents), Notification: caseNotificationResponse(notification, true), Appealable: appealable && item.Validity == model.CaseValidityValid && appeal == nil, AppealID: appealID, AppealStatus: appealStatus}, nil
 }
 
 // memberReadAudit records target-owned reads without requiring a current staff or guild membership cache.
@@ -815,7 +921,7 @@ func (s *CaseService) requireCaseRead(guildContext *GuildStaffContext) error {
 }
 
 // create validates and materializes a case within an already locked transaction, including the selected escalation level, immutable template snapshot, initial event, actions, and audit entry.
-func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContext, input CaseInput, preflight *caseCreatePreflight) (*model.CreatedCase, error) {
+func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContext, input CaseInput, preflight *caseCreatePreflight, attribution caseCreateAttribution) (*model.CreatedCase, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("case service is not configured")
 	}
@@ -897,13 +1003,17 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 	}
 	_, correlationID := TraceIDsFromContext(ctx)
 
+	actorDiscordUserID := guildContext.Staff.DiscordUserID
+	if attribution.system {
+		actorDiscordUserID = ""
+	}
 	caseModel := model.Case{
 		GuildID:                 guildContext.Guild.ID,
 		TemplateID:              &template.Template.ID,
 		TemplateVersion:         template.Template.Version,
 		TemplateSnapshotJSON:    snapshotJSON,
 		TargetDiscordUserID:     targetDiscordUserID,
-		ModeratorDiscordUserID:  guildContext.Staff.DiscordUserID,
+		ModeratorDiscordUserID:  actorDiscordUserID,
 		Reason:                  reason,
 		Validity:                model.CaseValidityValid,
 		Source:                  source,
@@ -952,8 +1062,8 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 
 	event := model.CaseEvent{
 		EventType:          model.CaseEventCreated,
-		ActorDiscordUserID: guildContext.Staff.DiscordUserID,
-		ActorType:          "staff",
+		ActorDiscordUserID: actorDiscordUserID,
+		ActorType:          attribution.actorType,
 		Visibility:         model.EventVisibilityPublic,
 		Body:               fmt.Sprintf("Case created from template %s", template.Template.Slug),
 		MetadataJSON:       "{}",
@@ -966,7 +1076,7 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 		Evidence:         captured.Snapshots,
 		Attachments:      captured.Attachments,
 		Notification:     notification,
-		Audit:            s.auditEntry(ctx, guildContext, "case.create", "case", "", model.AuditResultSuccess, ""),
+		Audit:            s.auditEntryWithAttribution(ctx, guildContext, attribution, "case.create", "case", "", model.AuditResultSuccess, ""),
 	}
 	if len(captured.Snapshots) > 0 {
 		result := model.AuditResultSuccess
@@ -975,7 +1085,7 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 			result = model.AuditResultFailure
 			failure = "partial evidence capture"
 		}
-		entry := s.auditEntry(ctx, guildContext, "evidence.capture", "case_evidence", "", result, failure)
+		entry := s.auditEntryWithAttribution(ctx, guildContext, attribution, "evidence.capture", "case_evidence", "", result, failure)
 		if entry != nil {
 			entry.MetadataJSON = mustMarshalJSONObject(map[string]any{"snapshot_count": len(captured.Snapshots), "attachment_count": len(captured.Attachments), "partial": len(captured.Warnings) > 0})
 			params.AdditionalAudits = append(params.AdditionalAudits, *entry)
@@ -1458,7 +1568,13 @@ func irreversibleAction(actionType model.ActionType) bool {
 
 // audit records audit so moderation changes remain attributable.
 func (s *CaseService) audit(ctx context.Context, guildContext *GuildStaffContext, action, resourceType, resourceID string, result model.AuditResult, failureReason string) error {
-	entry := s.auditEntry(ctx, guildContext, action, resourceType, resourceID, result, failureReason)
+	return s.auditWithAttribution(ctx, guildContext, caseCreateAttribution{actorType: "staff", auditSource: model.AuditSourceAPI}, action, resourceType, resourceID, result, failureReason)
+}
+
+// auditWithAttribution appends case evidence without inventing a Discord actor
+// for system automation.
+func (s *CaseService) auditWithAttribution(ctx context.Context, guildContext *GuildStaffContext, attribution caseCreateAttribution, action, resourceType, resourceID string, result model.AuditResult, failureReason string) error {
+	entry := s.auditEntryWithAttribution(ctx, guildContext, attribution, action, resourceType, resourceID, result, failureReason)
 	if entry == nil {
 		return nil
 	}
@@ -1467,16 +1583,28 @@ func (s *CaseService) audit(ctx context.Context, guildContext *GuildStaffContext
 
 // auditEntry records audit entry so moderation changes remain attributable.
 func (s *CaseService) auditEntry(ctx context.Context, guildContext *GuildStaffContext, action, resourceType, resourceID string, result model.AuditResult, failureReason string) *model.AuditLogEntry {
+	return s.auditEntryWithAttribution(ctx, guildContext, caseCreateAttribution{actorType: "staff", auditSource: model.AuditSourceAPI}, action, resourceType, resourceID, result, failureReason)
+}
+
+// auditEntryWithAttribution builds the atomic case audit row for either a
+// current staff actor or Quack's restricted honeypot system actor.
+func (s *CaseService) auditEntryWithAttribution(ctx context.Context, guildContext *GuildStaffContext, attribution caseCreateAttribution, action, resourceType, resourceID string, result model.AuditResult, failureReason string) *model.AuditLogEntry {
 	if guildContext == nil || guildContext.Guild == nil || guildContext.Staff == nil {
 		return nil
 	}
 	requestID, correlationID := TraceIDsFromContext(ctx)
+	actorDiscordUserID := guildContext.Staff.DiscordUserID
+	permissionBits := guildContext.PermissionBits
+	if attribution.system {
+		actorDiscordUserID = ""
+		permissionBits = 0
+	}
 
 	entry := &model.AuditLogEntry{
 		GuildID:             guildContext.Guild.ID,
-		ActorDiscordUserID:  guildContext.Staff.DiscordUserID,
-		ActorPermissionBits: guildContext.PermissionBits,
-		Source:              model.AuditSourceAPI,
+		ActorDiscordUserID:  actorDiscordUserID,
+		ActorPermissionBits: permissionBits,
+		Source:              AuditSourceFromContext(ctx),
 		Action:              action,
 		ResourceType:        resourceType,
 		ResourceID:          resourceID,

@@ -39,6 +39,7 @@ type Repository interface {
 	ListCasesFiltered(context.Context, model.ListCasesParams) (*model.ListCasesResult, error)
 	GetCaseByIDOrNumber(context.Context, string, string) (*model.Case, error)
 	GetCaseByID(context.Context, string) (*model.Case, error)
+	GetAppealByCaseID(context.Context, string) (*model.Appeal, error)
 	GetCaseByIdempotencyKey(context.Context, string, string) (*model.Case, error)
 	VoidCase(context.Context, model.VoidCaseParams) (*model.Case, error)
 	TargetCaseSummary(context.Context, string, string) (*model.TargetCaseSummary, error)

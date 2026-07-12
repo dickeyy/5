@@ -63,9 +63,10 @@ type UpdateCaseTemplateParams struct {
 
 // ListAuditLogEntriesParams groups the validated inputs needed for list audit log entries params.
 type ListAuditLogEntriesParams struct {
-	GuildID, ActorDiscordUserID, Action, ResourceType, ResourceID string
-	Result                                                        AuditResult
-	Limit, Offset                                                 int
+	GuildID, ActorDiscordUserID, Source, Action, ResourceType, ResourceID string
+	CaseID, MemberDiscordUserID, CreatedAfter, CreatedBefore, BeforeID    string
+	Result                                                                AuditResult
+	Limit, Offset                                                         int
 }
 
 // ListAuditLogEntriesResult captures the outcome of list audit log entries result for the caller.
