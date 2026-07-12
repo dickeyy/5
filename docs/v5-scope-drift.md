@@ -57,7 +57,12 @@ The current backend already supports important parts of the intended v5 directio
 
 ## Behavior That Must Change
 
-No P2 integration-owned product mismatch remains in this section.
+The live template storage record still embeds GORM's soft-delete field. Even
+though migration compatibility must preserve historical `deleted_at` values,
+current v5 storage must not retain an implicit delete lifecycle alongside the
+product's explicit archive and restore lifecycle. QP-G owns the final storage
+adjudication; this entry remains open until its accepted head proves live reads
+and writes use archive state only while frozen compatibility data is preserved.
 
 ## Rejected Concepts to Remove
 
