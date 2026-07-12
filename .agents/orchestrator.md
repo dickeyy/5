@@ -63,12 +63,19 @@ Every implementation slice must complete this lifecycle:
     - ambiguous: investigate before deciding.
 12. Push required fixes.
 13. Re-run validation after fixes.
-14. Return a structured completion report to the orchestrator.
+14. Do not request another Codex review after the fixes. One Codex review
+    request per PR is the default and expected lifecycle.
+15. A second `@codex review` request is allowed only when the review fixes are
+    a large, substantive rework of the PR (for example, they materially change
+    its architecture, public behavior, or most of its implementation). Record
+    the reason for the exception in the PR and report it to the orchestrator.
+16. Return a structured completion report to the orchestrator.
 
 ## Orchestrator validation gate
 
 The orchestrator may validate a slice only after its subagent has completed the
-Codex review-and-fix lifecycle.
+single Codex review-and-fix lifecycle, except for a documented large-rework
+second-review exception.
 
 For each submitted slice, the orchestrator must independently verify:
 
@@ -77,6 +84,8 @@ For each submitted slice, the orchestrator must independently verify:
 - tests and required validation commands;
 - PR and Codex review status;
 - disposition of every review finding;
+- that the PR received no more than one Codex review request unless a documented
+  large-rework exception justified a second request;
 - absence of unjustified scope expansion;
 - documentation and TODO updates;
 - whether the slice exposes additional v5 work.
@@ -93,7 +102,8 @@ Quack v5 is ready only when:
 - every material discrepancy in `v5-scope-drift.md` is resolved or intentionally
   accepted and documented;
 - implementation behavior has been checked against all requirements in `v5.md`;
-- all slice PRs completed the Codex review-and-fix lifecycle;
+- all slice PRs completed the single Codex review-and-fix lifecycle, except for
+  documented large-rework second-review exceptions;
 - all required tests, builds, linting, type checking, migrations, and end-to-end
   validation pass;
 - no unresolved P0 or P1 Codex review findings remain;

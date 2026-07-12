@@ -70,6 +70,15 @@ gh pr comment "$PR_NUMBER" --body '@codex review'
 
 Do not rely on text in the pull-request body to trigger the review.
 
+Request Codex review exactly once per PR by default. After the review arrives,
+triage all findings, apply required fixes, validate, commit, and push without
+posting another `@codex review` comment.
+
+Request a second review only when the fixes are a large, substantive rework of
+the PR, such as materially changing its architecture, public behavior, or most
+of its implementation. Record the reason for that exception in the PR and
+report it to the orchestrator.
+
 ## Review polling
 
 Poll GitHub approximately every five minutes.
@@ -122,6 +131,9 @@ After fixes:
 3. inspect the diff;
 4. commit and push;
 
+Do not request another Codex review after pushing these fixes unless the
+documented large-rework exception applies.
+
 ## Return format
 
 Return only after the review lifecycle is complete.
@@ -134,7 +146,7 @@ Report:
 - commits;
 - acceptance criteria status;
 - validation commands and results;
-- Codex review rounds;
+- Codex review request count and any documented large-rework exception;
 - findings and dispositions;
 - files changed;
 - newly discovered work;
