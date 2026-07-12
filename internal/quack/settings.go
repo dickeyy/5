@@ -61,20 +61,27 @@ func NewGuildSettingsService(store Repository) *GuildSettingsService {
 
 // Get returns guild settings to current Manage Guild authorities.
 func (s *GuildSettingsService) Get(ctx context.Context, guildContext *GuildStaffContext) (*GuildSettingsResponse, error) {
+	ctx = ensureTraceContext(ctx)
 	if s == nil || s.store == nil || guildContext == nil || guildContext.Guild == nil {
 		return nil, errors.New("guild settings service is not configured")
 	}
 	if !guildContext.Can(model.PermissionActionGuildSettingsRead) {
+		_ = s.audit(ctx, guildContext, string(model.AuditActionSettingsRead), model.AuditResultDenied, ErrGuildSettingsPermissionDenied.Error())
 		return nil, ErrGuildSettingsPermissionDenied
 	}
 	settings, err := s.store.GetGuildSettings(ctx, guildContext.Guild.ID)
 	if err != nil {
+		_ = s.audit(ctx, guildContext, string(model.AuditActionSettingsRead), model.AuditResultFailure, "query_failed")
 		return nil, err
 	}
 	if settings == nil {
+		_ = s.audit(ctx, guildContext, string(model.AuditActionSettingsRead), model.AuditResultFailure, "not_found")
 		return nil, ErrGuildSettingsNotFound
 	}
 	response := guildSettingsResponse(*settings)
+	if err := s.audit(ctx, guildContext, string(model.AuditActionSettingsRead), model.AuditResultSuccess, ""); err != nil {
+		return nil, err
+	}
 	return &response, nil
 }
 
@@ -246,7 +253,7 @@ func (s *GuildSettingsService) auditEntry(ctx context.Context, guildContext *Gui
 	requestID, correlationID := TraceIDsFromContext(ctx)
 	return &model.AuditLogEntry{
 		GuildID: guildContext.Guild.ID, ActorDiscordUserID: guildContext.Staff.DiscordUserID,
-		ActorPermissionBits: guildContext.PermissionBits, Source: model.AuditSourceAPI,
+		ActorPermissionBits: guildContext.PermissionBits, Source: AuditSourceFromContext(ctx),
 		Action: action, ResourceType: "guild_settings", Result: result, FailureReason: failureReason,
 		RequestID: requestID, CorrelationID: correlationID, MetadataJSON: "{}",
 	}
