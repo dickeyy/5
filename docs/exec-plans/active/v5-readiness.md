@@ -268,7 +268,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 
 #### V5-001C - Simplify case validity, sources, reason, and event model
 
-- Status: IN_PROGRESS
+- Status: REVIEW_WAIT
 - Assignment: fresh implementation subagent `/root/slice_v5_001c` using
   `v5-implementation-slice`; the initially reused V5-001 owner was interrupted
   before editing and the worktree was verified clean when the one-agent-per-slice
@@ -276,6 +276,12 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 - Branch: `slice/v5-001c-case-validity`
 - Worktree: `/tmp/quack-v5-worktrees/v5-001c`
 - Base/PR target: `slice/v5-001-template-model` at accepted head `6e5f206`
+- Commit: `609ee76` (mechanically staged, committed, and pushed by the
+  orchestrator after the fresh owner completed implementation and validation
+  but its external Git write was policy-rejected; the subagent-owned diff was
+  not changed).
+- PR/review: [PR #3](https://github.com/dickeyy/5/pull/3); exactly one standalone
+  `@codex review` posted 2026-07-11 and awaiting completion.
 - Implementation decision 2026-07-11: migration 0003 preserves legacy private-note
   and generic status-change event rows byte-for-byte and inventories them in
   migration-owned compatibility bookkeeping, while the live v5 event query and
@@ -817,8 +823,8 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 | --- | --- | --- | --- | --- | --- |
 | V5-000 | ACCEPTED | orchestration worktree | n/a | n/a | passed |
 | V5-001M | ACCEPTED | `slice/v5-001m-versioned-migrations` | [#1](https://github.com/dickeyy/5/pull/1) | 1 default + 1 large-rework exception; extra request ignored | passed round 2 |
-| V5-001 | FIXING | `slice/v5-001-template-model` | [#2](https://github.com/dickeyy/5/pull/2) | 1 complete, no findings | rejected round 1 |
-| V5-001C | PLANNED | pending | pending | 0 | pending |
+| V5-001 | ACCEPTED | `slice/v5-001-template-model` | [#2](https://github.com/dickeyy/5/pull/2) | 1 complete, no findings | passed round 2 |
+| V5-001C | REVIEW_WAIT | `slice/v5-001c-case-validity` | [#3](https://github.com/dickeyy/5/pull/3) | 1 requested | pending |
 | V5-002 | PLANNED | pending | pending | 0 | pending |
 | V5-003 | PLANNED | pending | pending | 0 | pending |
 | V5-004 | PLANNED | pending | pending | 0 | pending |
@@ -935,9 +941,10 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 - 2026-07-11: Appeals and tickets are persistence placeholders only; general
   logging, honeypots, staff statistics, member-owned case APIs, and v4 import
   have no running service implementation. Owned by V5-013 through V5-023.
-- 2026-07-11: Existing Discord case tests require the rejected reason override,
-  and action tests validate pre-enforcement/generated `send_dm` behavior. Green
-  baseline tests therefore prove regression stability, not v5 conformance.
+- 2026-07-11: V5-001C removes the rejected Discord reason override and replaces
+  those stale tests with the immutable template reason contract. Action tests
+  still validate pre-enforcement/generated `send_dm` behavior; that remaining
+  discovery is owned by V5-012.
 - 2026-07-11: V5-001M Codex round 1 found no issues, but independent validation
   caught a failing real-MySQL test plus checksum-integrity and partial-rollback
   recovery gaps. Review success is not substituted for orchestrator acceptance.
