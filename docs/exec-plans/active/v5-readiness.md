@@ -1102,7 +1102,7 @@ by the macro-package ledger.
 | QI-2 | ACCEPTED | `integration/qi-2-p2` at `6b999c1` | [#13](https://github.com/dickeyy/5/pull/13) | 1 complete; P1 fixed | focused/MySQL/race/full/vet/build green |
 | QP-G | ACCEPTED | `package/qp-g-v4-storage` at `17f938b` | [#14](https://github.com/dickeyy/5/pull/14) | 1 complete; P2 fixed, P1 transferred | focused/race/MySQL/Redis/full/vet/build green |
 | QP-H | ACCEPTED | `package/qp-h-ops-security` at `44f18c9` | [#15](https://github.com/dickeyy/5/pull/15) | 1 complete; two P2s fixed | fairness follow-up focused/race/MySQL green; infra untouched |
-| QP-I | IN_PROGRESS | `final/qp-i-readiness` integration `73236be` | pending | 0 | strict final harness green; evidence finalization/review pending |
+| QP-I | ACCEPTED | `final/qp-i-readiness` at `4eba1ea` | [#16](https://github.com/dickeyy/5/pull/16) | 1 complete; three P2s fixed | strict final harness and post-fix targeted/race/vet/docs gates green |
 
 QP-I combined accepted QP-G/QP-H heads, registered physical migrations 0010/
 0011 as logical 0400 then 0410, and passed combined focused plus final real-MySQL
@@ -1125,6 +1125,16 @@ harness then passed focused, race, repository-wide test/vet/build, MySQL-enabled
 full-suite, project-native Redis persistence, and diff gates. The native probe
 replaced an unnecessary host `redis-cli` dependency after all Go gates had
 already passed. QP-I is finalizing its checklist/verdict before publication.
+
+QP-I accepted at final head `4eba1ea` on PR #16 after exactly one Codex review.
+All three valid P2 findings were fixed and their threads resolved: strict JSONL
+trailing-data rejection, side-effect-free malformed/empty dry-runs, and exact
+case-create endpoint-policy matching. Post-fix focused/race/vet/script/diff
+evidence is green; no actionable P0/P1 remains. `TODO.md` has zero unchecked
+entries, with live-guild rehearsal explicitly deferred/NOT EXECUTED for lack of
+authorization and safe credentials. `docs/v5-readiness.md` therefore concludes
+**NOT READY** solely because that real Discord evidence has no accepted release
+exception. No PR was merged and no release infrastructure was changed.
 
 ## Decisions
 
