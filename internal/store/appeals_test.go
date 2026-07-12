@@ -17,6 +17,14 @@ import (
 func newAppealTestStore(t *testing.T) (*Store, *model.Guild) {
 	t.Helper()
 	db := openSQLiteMigrationDB(t)
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("open appeal test connection: %v", err)
+	}
+	// SQLite ignores SELECT FOR UPDATE. Keep one connection so concurrent
+	// transition tests model MySQL's row-lock serialization instead of failing
+	// both transactions with shared-cache table-lock errors.
+	sqlDB.SetMaxOpenConns(1)
 	migrations := append(registeredMigrations(), migration0200Appeals(uint64(len(registeredMigrations())+1)))
 	if err := runMigrations(db, migrations); err != nil {
 		t.Fatalf("migrate appeals schema: %v", err)
