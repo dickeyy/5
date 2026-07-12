@@ -285,23 +285,23 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [ ] Add admin routes for template import, export, restore, context definitions, and guild settings.
 - [ ] Add backend routes for audit-mirror configuration.
 - [ ] Add backend routes for optional-module settings and status without implementing dashboard UI.
-- [ ] Standardize structured API error responses with stable error codes, request IDs, and correlation IDs.
-- [ ] Keep status codes and error bodies consistent across validation, authentication, authorization, conflict, and dependency failures.
+- [x] Standardize structured API error responses with stable error codes, request IDs, and correlation IDs.
+- [x] Keep status codes and error bodies consistent across validation, authentication, authorization, conflict, and dependency failures.
 - [ ] Add complete contract tests for staff, admin, member, former-member, and unauthenticated API access.
 - [ ] Document the dashboard-facing request and response contracts maintained by this repository.
-- [ ] Add configurable CORS origins for non-local environments.
-- [ ] Validate production CORS configuration and fail closed for unknown origins.
-- [ ] Add CSRF protection for cookie-authenticated mutating requests.
-- [ ] Set explicit secure cookie attributes for production, including `Secure`, `HttpOnly`, and an intentional `SameSite` policy.
-- [ ] Add session revocation behavior for logout, compromised sessions, and account changes.
-- [ ] Add Discord OAuth token refresh or a clear forced-reauthentication flow.
-- [ ] Handle revoked Discord OAuth grants without returning internal errors.
+- [x] Add configurable CORS origins for non-local environments.
+- [x] Validate production CORS configuration and fail closed for unknown origins.
+- [x] Add CSRF protection for cookie-authenticated mutating requests.
+- [x] Set explicit secure cookie attributes for production, including `Secure`, `HttpOnly`, and an intentional `SameSite` policy.
+- [x] Add session revocation behavior for logout, compromised sessions, and account changes.
+- [x] Add Discord OAuth token refresh or a clear forced-reauthentication flow.
+- [x] Handle revoked Discord OAuth grants without returning internal errors.
 - [ ] Add rate limits for OAuth, member reads, template writes, case creation, retries, and evidence capture.
-- [ ] Add HTTP request-body limits appropriate for JSON and evidence metadata.
-- [ ] Add HTTP read-header, read, write, and idle timeouts.
-- [ ] Add standard security headers where appropriate for the API.
-- [ ] Log authentication failures and permission denials with trace IDs without logging tokens or cookies.
-- [ ] Redact OAuth tokens, session IDs, cookies, and secrets from logs and error payloads.
+- [x] Add HTTP request-body limits appropriate for JSON and evidence metadata.
+- [x] Add HTTP read-header, read, write, and idle timeouts.
+- [x] Add standard security headers where appropriate for the API.
+- [x] Log authentication failures and permission denials with trace IDs without logging tokens or cookies.
+- [x] Redact OAuth tokens, session IDs, cookies, and secrets from logs and error payloads.
 - [ ] Add API idempotency for case creation and other externally retried writes.
 - [ ] Add pagination limits and defensive query bounds to every list endpoint.
 - [ ] Add malformed JSON, oversized request, expired session, revoked token, and cross-guild access tests.
