@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -117,6 +118,79 @@ func TestMigration0002PreservesAndQuarantinesIncompatibleTemplates(t *testing.T)
 	assertTemplateArchiveState(t, db, windowID, true)
 	assertTemplateArchiveState(t, db, softDeletedID, true)
 	assertTemplateDeletedState(t, db, softDeletedID, false)
+}
+
+func TestMigration0002QuarantinedPolicyCannotCrossLiveReadBoundary(t *testing.T) {
+	db := openSQLiteMigrationDB(t)
+	if err := runMigrations(db, []migration{migration0001InitialV5Schema()}); err != nil {
+		t.Fatalf("apply frozen baseline: %v", err)
+	}
+
+	invalidID := insertMigration0002Template(t, db, "invalid-policy", true, 0)
+	validArchivedID := insertMigration0002Template(t, db, "valid-archived", true, 0)
+	archivedAt := time.Now().UTC().Add(-time.Hour)
+	if err := db.Model(&CaseTemplateRecord{}).Where("id IN ?", []string{invalidID, validArchivedID}).UpdateColumn("archived_at", archivedAt).Error; err != nil {
+		t.Fatalf("archive compatibility fixtures: %v", err)
+	}
+
+	var invalidLevel CaseTemplateLevelRecord
+	if err := db.Where("template_id = ?", invalidID).First(&invalidLevel).Error; err != nil {
+		t.Fatalf("load invalid template level: %v", err)
+	}
+	if err := db.Model(&CaseTemplateLevelRecord{}).Where("id = ?", invalidLevel.ID).UpdateColumn("is_default", false).Error; err != nil {
+		t.Fatalf("remove invalid template default: %v", err)
+	}
+	secondAction := CaseTemplateLevelActionRecord{
+		ULIDModelRecord:  ULIDModelRecord{ID: "second-invalid-action00000", CreatedAt: archivedAt, UpdatedAt: archivedAt},
+		LevelID:          invalidLevel.ID,
+		Position:         2,
+		ActionType:       "kick_user",
+		ConfigJSON:       `{}`,
+		IdempotencyScope: "case",
+		Enabled:          true,
+	}
+	if err := db.Select("*").Create(&secondAction).Error; err != nil {
+		t.Fatalf("create preserved second action: %v", err)
+	}
+
+	if err := runMigrations(db, registeredMigrations()); err != nil {
+		t.Fatalf("apply template compatibility migration: %v", err)
+	}
+
+	repositories := New(db, nil)
+	got, err := repositories.GetCaseTemplateExpanded(context.Background(), "00000000000000000000000001", invalidID)
+	if got != nil {
+		t.Fatalf("quarantined policy crossed live read boundary: %+v", got)
+	}
+	if !errors.Is(err, model.ErrTemplateCompatibilityReviewRequired) {
+		t.Fatalf("expected compatibility review error, got %v", err)
+	}
+	var compatibilityError *model.TemplateCompatibilityReviewError
+	if !errors.As(err, &compatibilityError) {
+		t.Fatalf("expected typed compatibility error, got %T", err)
+	}
+	if compatibilityError.TemplateID != invalidID || !strings.Contains(compatibilityError.Reason, "level has multiple actions") || !strings.Contains(compatibilityError.Reason, "template does not have exactly one default level") {
+		t.Fatalf("expected explicit policy defects, got %+v", compatibilityError)
+	}
+
+	var preservedLevels, preservedActions int64
+	if err := db.Model(&CaseTemplateLevelRecord{}).Where("template_id = ?", invalidID).Count(&preservedLevels).Error; err != nil {
+		t.Fatalf("count preserved levels: %v", err)
+	}
+	if err := db.Model(&CaseTemplateLevelActionRecord{}).Where("level_id = ?", invalidLevel.ID).Count(&preservedActions).Error; err != nil {
+		t.Fatalf("count preserved actions: %v", err)
+	}
+	if preservedLevels != 1 || preservedActions != 2 {
+		t.Fatalf("migration rewrote quarantined policy: levels=%d actions=%d", preservedLevels, preservedActions)
+	}
+
+	validArchived, err := repositories.GetCaseTemplateExpanded(context.Background(), "00000000000000000000000001", validArchivedID)
+	if err != nil {
+		t.Fatalf("get valid archived template: %v", err)
+	}
+	if validArchived == nil || validArchived.Template.ID != validArchivedID || validArchived.Template.ArchivedAt == nil {
+		t.Fatalf("expected readable valid archived template, got %+v", validArchived)
+	}
 }
 
 func TestMigration0002ActionCompatibility(t *testing.T) {

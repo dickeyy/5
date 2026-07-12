@@ -15,13 +15,17 @@ on a clean database. It never drops or renames an application table or column.
 
 Migration 0002 separates the simplified live template model from frozen
 compatibility storage. It preserves every template, level, action, case
-snapshot, and audit row. Active templates that used disabled flags, escalation
+snapshot, and audit row. Templates that used disabled flags, escalation
 windows, legacy soft deletion, multiple actions, duplicate/default threshold
 defects, action-level notifications, public execution controls, unsupported
-actions, or settings that cannot be mapped safely are archived for administrator
-review. The migration records only its prior archive/deletion state and reasons in
-`quack_v5_0002_template_compatibility`; its reviewed inverse restores those
-timestamps and removes only that bookkeeping table.
+actions, or settings that cannot be mapped safely are quarantined for
+administrator review and archived when they were active. The migration records
+only prior archive/deletion state and reasons in
+`quack_v5_0002_template_compatibility`. Detail reads of quarantined templates
+return an explicit compatibility-review-required conflict instead of projecting
+invalid legacy levels or actions through the live v5 contract. Valid archived
+templates remain readable. The reviewed inverse restores recorded timestamps
+and removes only the migration-owned bookkeeping table.
 
 ## Forward procedure
 

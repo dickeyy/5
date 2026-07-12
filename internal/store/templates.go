@@ -315,6 +315,18 @@ func getCaseTemplateExpanded(db *gorm.DB, guildID, templateID string) (*Expanded
 		return nil, fmt.Errorf("get case template: %w", err)
 	}
 
+	var compatibility migration0002TemplateCompatibility
+	compatibilityResult := db.Where("template_id = ?", templateRecord.ID).Limit(1).Find(&compatibility)
+	if compatibilityResult.Error != nil {
+		return nil, fmt.Errorf("get case template compatibility state: %w", compatibilityResult.Error)
+	}
+	if compatibilityResult.RowsAffected > 0 {
+		return nil, &model.TemplateCompatibilityReviewError{
+			TemplateID: templateRecord.ID,
+			Reason:     compatibility.Reason,
+		}
+	}
+
 	template := caseTemplateModelFromRecord(templateRecord)
 	var levelRecords []CaseTemplateLevelRecord
 	if err := db.Where("template_id = ?", template.ID).Order("position ASC").Find(&levelRecords).Error; err != nil {

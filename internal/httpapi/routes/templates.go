@@ -102,6 +102,17 @@ func writeTemplateError(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case errors.Is(err, quack.ErrTemplateNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	case errors.Is(err, quack.ErrTemplateCompatibilityReviewRequired):
+		var compatibilityError *quack.TemplateCompatibilityReviewError
+		if errors.As(err, &compatibilityError) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":                quack.ErrTemplateCompatibilityReviewRequired.Error(),
+				"template_id":          compatibilityError.TemplateID,
+				"compatibility_reason": compatibilityError.Reason,
+			})
+			return
+		}
+		c.JSON(http.StatusConflict, gin.H{"error": quack.ErrTemplateCompatibilityReviewRequired.Error()})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "template operation failed"})
 	}

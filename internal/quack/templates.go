@@ -21,9 +21,13 @@ const (
 )
 
 var (
-	ErrTemplateValidation = errors.New("template validation failed")
-	ErrTemplateNotFound   = errors.New("case template not found")
+	ErrTemplateValidation                  = errors.New("template validation failed")
+	ErrTemplateNotFound                    = errors.New("case template not found")
+	ErrTemplateCompatibilityReviewRequired = model.ErrTemplateCompatibilityReviewRequired
 )
+
+// TemplateCompatibilityReviewError aliases the domain error returned when preserved legacy policy cannot be projected as a valid live template.
+type TemplateCompatibilityReviewError = model.TemplateCompatibilityReviewError
 
 var templateSlugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{1,63}$`)
 

@@ -14,7 +14,7 @@ import (
 const migration0002Definition = `simplify-template-model-v1
 mode: preserve-and-quarantine
 live model: archive is the only availability signal; levels have all-time distinct thresholds and zero or one timeout, kick, or ban action
-compatibility: retain every legacy template, level, action, case snapshot, and audit row; archive active templates whose removed settings cannot be represented safely; convert legacy soft deletion into archive state
+compatibility: retain every legacy template, level, action, case snapshot, and audit row; quarantine templates whose removed settings cannot be represented safely; archive active incompatible templates; convert legacy soft deletion into archive state
 bookkeeping: quack_v5_0002_template_compatibility records prior archive/deletion state and quarantine reasons
 rollback: restore recorded archive/deletion timestamps and remove only migration-owned bookkeeping`
 
@@ -36,7 +36,7 @@ func migration0002SimplifyTemplateModel() migration {
 	}
 }
 
-// migration0002TemplateCompatibility records only archive changes owned by migration 0002.
+// migration0002TemplateCompatibility records quarantine reasons and reversible availability state owned by migration 0002.
 type migration0002TemplateCompatibility struct {
 	TemplateID         string `gorm:"type:char(26);primaryKey"`
 	PreviousArchivedAt *time.Time
@@ -93,7 +93,7 @@ type migration0002Action struct {
 // TableName keeps migration reads on the existing v5 action table.
 func (migration0002Action) TableName() string { return "case_template_level_actions" }
 
-// applyTemplateModelCompatibility archives active templates whose removed behavior cannot be honored safely.
+// applyTemplateModelCompatibility inventories every incompatible template and archives those that are still active.
 func applyTemplateModelCompatibility(db *gorm.DB) error {
 	migrator := withMySQLTableOptions(db).Migrator()
 	if !migrator.HasTable(&migration0002TemplateCompatibility{}) {
@@ -107,9 +107,6 @@ func applyTemplateModelCompatibility(db *gorm.DB) error {
 		return fmt.Errorf("list templates for compatibility: %w", err)
 	}
 	for _, template := range templates {
-		if template.ArchivedAt != nil && !template.DeletedAt.Valid {
-			continue
-		}
 		reasons, err := migration0002TemplateReasons(db, template)
 		if err != nil {
 			return err
