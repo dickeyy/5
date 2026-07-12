@@ -280,6 +280,13 @@ QP-I absorbs V5-026. It integrates the final accepted heads, runs systematic
 E2E/rehearsal gates, and writes `docs/v5-readiness.md` with the READY/NOT READY
 verdict. It does not redefine readiness around missing external authorization.
 
+QP-I started concurrently from accepted QI-2 head `6b999c1` with fresh owner
+`/root/qp_i_final_readiness`, branch `final/qp-i-readiness`, and worktree
+`/tmp/quack-v5-worktrees/qp-i`. During P3 it exclusively owns the final evidence
+matrix, TODO/scope-drift ledgers, central migration registration, and E2E/
+rehearsal harnesses. It will combine only accepted QP-G/QP-H heads before final
+composition, repository-wide gates, PR, and one-review lifecycle.
+
 ## Dependency waves and slices
 
 Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
@@ -1066,7 +1073,7 @@ by the macro-package ledger.
 | QI-2 | ACCEPTED | `integration/qi-2-p2` at `6b999c1` | [#13](https://github.com/dickeyy/5/pull/13) | 1 complete; P1 fixed | focused/MySQL/race/full/vet/build green |
 | QP-G | IN_PROGRESS | `package/qp-g-v4-storage` from `6b999c1` | pending | 0 | absorbs V5-023/024 |
 | QP-H | IN_PROGRESS | `package/qp-h-ops-security` from `6b999c1` | pending | 0 | absorbs remaining V5-017/025 |
-| QP-I | PLANNED | pending | pending | 0 | absorbs V5-026 and final readiness |
+| QP-I | IN_PROGRESS | `final/qp-i-readiness` from `6b999c1` | pending | 0 | parallel evidence/E2E scaffold; awaits accepted QP-G/QP-H heads |
 
 ## Decisions
 
