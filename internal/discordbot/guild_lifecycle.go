@@ -11,7 +11,8 @@ import (
 
 // GuildLifecycleHandler translates Discord guild and channel events into idempotent core lifecycle operations.
 type GuildLifecycleHandler struct {
-	Guilds *quack.GuildService
+	Guilds   *quack.GuildService
+	Evidence *quack.EvidenceService
 }
 
 // RegisterGuildLifecycle installs lifecycle handlers before the gateway opens so initial GuildCreate events cannot be missed.
@@ -22,7 +23,7 @@ func RegisterGuildLifecycle(session *discordgo.Session, services *quack.Services
 	if services == nil || services.Guilds == nil {
 		return errors.New("guild service is not configured")
 	}
-	handler := &GuildLifecycleHandler{Guilds: services.Guilds}
+	handler := &GuildLifecycleHandler{Guilds: services.Guilds, Evidence: services.Evidence}
 	session.AddHandler(handler.HandleGuildCreate)
 	session.AddHandler(handler.HandleGuildUpdate)
 	session.AddHandler(handler.HandleGuildDelete)
@@ -36,8 +37,15 @@ func (h *GuildLifecycleHandler) HandleGuildCreate(_ *discordgo.Session, event *d
 		return
 	}
 	input := guildLifecycleInput(event.Guild, channelIDs(event.Channels))
-	if _, err := h.Guilds.BootstrapDiscordGuild(context.Background(), input); err != nil {
+	result, err := h.Guilds.BootstrapDiscordGuild(context.Background(), input)
+	if err != nil {
 		log.Error().Err(err).Str("guild_id", event.ID).Msg("Failed to bootstrap Discord guild")
+		return
+	}
+	if h.Evidence != nil && result != nil {
+		if _, err := h.Evidence.EnsureGuildEvidenceChannel(context.Background(), result.Guild, result.Settings); err != nil {
+			log.Error().Err(err).Str("guild_id", event.ID).Msg("Failed to ensure managed evidence channel")
+		}
 	}
 }
 
@@ -46,8 +54,15 @@ func (h *GuildLifecycleHandler) HandleGuildUpdate(_ *discordgo.Session, event *d
 	if h == nil || h.Guilds == nil || event == nil || event.Guild == nil || event.Unavailable {
 		return
 	}
-	if _, err := h.Guilds.BootstrapDiscordGuild(context.Background(), guildLifecycleInput(event.Guild, nil)); err != nil {
+	result, err := h.Guilds.BootstrapDiscordGuild(context.Background(), guildLifecycleInput(event.Guild, nil))
+	if err != nil {
 		log.Error().Err(err).Str("guild_id", event.ID).Msg("Failed to refresh Discord guild")
+		return
+	}
+	if h.Evidence != nil && result != nil {
+		if _, err := h.Evidence.EnsureGuildEvidenceChannel(context.Background(), result.Guild, result.Settings); err != nil {
+			log.Error().Err(err).Str("guild_id", event.ID).Msg("Detected managed evidence channel drift")
+		}
 	}
 }
 
@@ -68,6 +83,11 @@ func (h *GuildLifecycleHandler) HandleChannelDelete(_ *discordgo.Session, event 
 	}
 	if _, err := h.Guilds.ClearDeletedChannel(context.Background(), event.GuildID, event.ID); err != nil {
 		log.Error().Err(err).Str("guild_id", event.GuildID).Str("channel_id", event.ID).Msg("Failed to clear deleted Discord channel reference")
+	}
+	if h.Evidence != nil {
+		if _, err := h.Evidence.RepairDiscordGuildEvidenceChannel(context.Background(), event.GuildID); err != nil {
+			log.Error().Err(err).Str("guild_id", event.GuildID).Msg("Failed to repair managed evidence channel after deletion")
+		}
 	}
 }
 

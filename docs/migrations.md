@@ -50,6 +50,15 @@ history row. Its reviewed inverse drops only `guild_settings`; rerunning forward
 re-seeds one row per guild. SQLite and isolated real-MySQL coverage exercise
 forward, rerun, preservation, rollback, and reapplication.
 
+Migration 0005 adds the core moderation runtime without rewriting existing
+history. It creates ordered template-context definitions, immutable message and
+attachment evidence, and exactly-one case notifications. Additive case columns
+hold context, void/replacement links, and nullable idempotency keys. Action
+columns add leases, fencing, dismissal, and original-execution/accepted-appeal
+reversal links. Existing templates require no new context, existing cases are
+backfilled with an empty context array, and existing actions remain claimable.
+Its reviewed inverse drops only migration-owned tables and additive columns.
+
 ## Forward procedure
 
 1. Back up MySQL and verify the backup before deploying schema-changing code.

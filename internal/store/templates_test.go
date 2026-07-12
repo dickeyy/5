@@ -113,8 +113,8 @@ func TestCaseTemplateStorageArchiveHidesFromListButDetailStillWorks(t *testing.T
 	if err != nil {
 		t.Fatalf("list templates: %v", err)
 	}
-	if len(list) != 0 {
-		t.Fatalf("expected archived template hidden from list")
+	if len(list) != 1 || list[0].Template.ArchivedAt == nil {
+		t.Fatalf("expected archived template retained in authorized list")
 	}
 
 	detail, err := store.GetCaseTemplateExpanded(ctx, guildID, created.Template.ID)

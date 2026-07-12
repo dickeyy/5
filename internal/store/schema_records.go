@@ -71,6 +71,17 @@ type CaseTemplateRecord struct {
 	DeletedAt              gorm.DeletedAt `gorm:"index"`
 }
 
+// CaseTemplateContextFieldRecord persists an ordered template context definition.
+type CaseTemplateContextFieldRecord struct {
+	ULIDModelRecord
+	TemplateID string                 `gorm:"type:char(26);not null;uniqueIndex:idx_template_context_key,priority:1;uniqueIndex:idx_template_context_position,priority:1;index"`
+	Key        string                 `gorm:"size:64;not null;uniqueIndex:idx_template_context_key,priority:2"`
+	Label      string                 `gorm:"size:191;not null"`
+	FieldType  model.ContextFieldType `gorm:"size:32;not null"`
+	Position   int                    `gorm:"not null;uniqueIndex:idx_template_context_position,priority:2"`
+	Required   bool                   `gorm:"not null;default:false"`
+}
+
 // CaseTemplateLevelRecord is the GORM persistence representation of case template level; domain models remain storage-agnostic.
 type CaseTemplateLevelRecord struct {
 	ULIDModelRecord
@@ -105,7 +116,7 @@ type CaseTemplateLevelActionRecord struct {
 // CaseRecord is the GORM persistence representation of case; domain models remain storage-agnostic.
 type CaseRecord struct {
 	ULIDModelRecord
-	GuildID                 string             `gorm:"type:char(26);not null;index:idx_case_guild_case_number,priority:1,unique;index:idx_case_guild_target,priority:1;index:idx_case_guild_mod,priority:1;index:idx_case_guild_status,priority:1"`
+	GuildID                 string             `gorm:"type:char(26);not null;index:idx_case_guild_case_number,priority:1,unique;index:idx_case_guild_target,priority:1;index:idx_case_guild_mod,priority:1;index:idx_case_guild_status,priority:1;uniqueIndex:idx_case_guild_idempotency,priority:1"`
 	CaseNumber              uint64             `gorm:"type:bigint unsigned;not null;index:idx_case_guild_case_number,priority:2,unique"`
 	TemplateID              *string            `gorm:"type:char(26);index"`
 	TemplateVersion         uint               `gorm:"not null;default:1"`
@@ -120,31 +131,92 @@ type CaseRecord struct {
 	ContextMessageDiscordID string             `gorm:"size:32"`
 	ContextURL              string             `gorm:"size:1024"`
 	MetadataJSON            string             `gorm:"type:json;not null"`
+	ContextValuesJSON       string             `gorm:"type:json"`
+	VoidedReason            string             `gorm:"type:text"`
+	VoidedByDiscordUserID   string             `gorm:"size:32;not null;default:''"`
+	VoidedAt                *time.Time         `gorm:"index"`
+	ReplacementCaseID       *string            `gorm:"type:char(26);index"`
+	ReplacesCaseID          *string            `gorm:"type:char(26);index"`
+	IdempotencyKey          *string            `gorm:"size:191;uniqueIndex:idx_case_guild_idempotency,priority:2"`
 }
 
 // CaseActionExecutionRecord is the GORM persistence representation of case action execution; domain models remain storage-agnostic.
 type CaseActionExecutionRecord struct {
 	ULIDModelRecord
-	CaseID             string                      `gorm:"type:char(26);not null;index:idx_action_execution_case_position,priority:1;index"`
-	TemplateActionID   *string                     `gorm:"type:char(26);index"`
-	Position           int                         `gorm:"not null;index:idx_action_execution_case_position,priority:2"`
-	ActionType         model.ActionType            `gorm:"size:64;not null;index"`
-	Status             model.ActionExecutionStatus `gorm:"size:32;not null;default:'pending';index:idx_action_execution_status_retry,priority:1"`
-	IdempotencyKey     string                      `gorm:"size:191;not null;uniqueIndex"`
-	ConfigSnapshotJSON string                      `gorm:"type:json;not null"`
-	NotifyUser         bool                        `gorm:"not null;default:false"`
-	NotificationType   string                      `gorm:"size:64"`
-	AttemptCount       uint8                       `gorm:"not null;default:0"`
-	MaxRetries         uint8                       `gorm:"not null;default:0"`
-	RetryBackoffMS     int                         `gorm:"not null;default:0"`
-	SafeForRetry       bool                        `gorm:"not null;default:true"`
-	Irreversible       bool                        `gorm:"not null;default:false"`
-	LastErrorCode      string                      `gorm:"size:64"`
-	LastError          string                      `gorm:"type:text"`
-	StartedAt          *time.Time
-	FinishedAt         *time.Time
-	NextRetryAt        *time.Time `gorm:"index:idx_action_execution_status_retry,priority:2"`
-	CorrelationID      string     `gorm:"size:128;index"`
+	CaseID                   string                      `gorm:"type:char(26);not null;index:idx_action_execution_case_position,priority:1;index"`
+	TemplateActionID         *string                     `gorm:"type:char(26);index"`
+	Position                 int                         `gorm:"not null;index:idx_action_execution_case_position,priority:2"`
+	ActionType               model.ActionType            `gorm:"size:64;not null;index"`
+	Status                   model.ActionExecutionStatus `gorm:"size:32;not null;default:'pending';index:idx_action_execution_status_retry,priority:1"`
+	IdempotencyKey           string                      `gorm:"size:191;not null;uniqueIndex"`
+	ConfigSnapshotJSON       string                      `gorm:"type:json;not null"`
+	NotifyUser               bool                        `gorm:"not null;default:false"`
+	NotificationType         string                      `gorm:"size:64"`
+	AttemptCount             uint8                       `gorm:"not null;default:0"`
+	MaxRetries               uint8                       `gorm:"not null;default:0"`
+	RetryBackoffMS           int                         `gorm:"not null;default:0"`
+	SafeForRetry             bool                        `gorm:"not null;default:true"`
+	Irreversible             bool                        `gorm:"not null;default:false"`
+	LastErrorCode            string                      `gorm:"size:64"`
+	LastError                string                      `gorm:"type:text"`
+	StartedAt                *time.Time
+	FinishedAt               *time.Time
+	NextRetryAt              *time.Time `gorm:"index:idx_action_execution_status_retry,priority:2"`
+	CorrelationID            string     `gorm:"size:128;index"`
+	LeaseToken               string     `gorm:"size:64;index"`
+	LeaseExpiresAt           *time.Time `gorm:"index"`
+	DismissedAt              *time.Time `gorm:"index"`
+	DismissedByDiscordUserID string     `gorm:"size:32;not null;default:''"`
+	ReversalOfExecutionID    *string    `gorm:"type:char(26);index"`
+	ReversalAppealID         *string    `gorm:"type:char(26);index"`
+}
+
+// CaseEvidenceSnapshotRecord persists immutable Discord message evidence.
+type CaseEvidenceSnapshotRecord struct {
+	ULIDModelRecord
+	CaseID              string    `gorm:"type:char(26);not null;index"`
+	GuildID             string    `gorm:"type:char(26);not null;index"`
+	ChannelDiscordID    string    `gorm:"size:32;not null"`
+	MessageDiscordID    string    `gorm:"size:32;not null"`
+	AuthorDiscordUserID string    `gorm:"size:32;not null"`
+	MessageURL          string    `gorm:"size:1024;not null"`
+	Content             string    `gorm:"type:text;not null"`
+	MessageCreatedAt    time.Time `gorm:"not null"`
+	MessageEditedAt     *time.Time
+	EmbedsJSON          string `gorm:"type:json;not null"`
+	CaptureOutcome      string `gorm:"size:32;not null"`
+	CaptureWarning      string `gorm:"type:text;not null"`
+}
+
+// CaseEvidenceAttachmentRecord persists original metadata and optional managed copy references.
+type CaseEvidenceAttachmentRecord struct {
+	ULIDModelRecord
+	EvidenceID                   string `gorm:"type:char(26);not null;index"`
+	Filename                     string `gorm:"size:255;not null"`
+	ContentType                  string `gorm:"size:191;not null"`
+	SizeBytes                    int64  `gorm:"not null"`
+	OriginalURL                  string `gorm:"size:2048;not null"`
+	PreservedURL                 string `gorm:"size:2048;not null"`
+	PreservedMessageDiscordID    string `gorm:"size:32;not null"`
+	PreservedAttachmentDiscordID string `gorm:"size:32;not null"`
+	CopyOutcome                  string `gorm:"size:32;not null"`
+	Warning                      string `gorm:"type:text;not null"`
+}
+
+// CaseNotificationRecord persists the single automatic case notification and its fenced delivery state.
+type CaseNotificationRecord struct {
+	ULIDModelRecord
+	CaseID                   string                   `gorm:"type:char(26);not null;uniqueIndex"`
+	Status                   model.NotificationStatus `gorm:"size:32;not null;index"`
+	PreparedChannelDiscordID string                   `gorm:"size:32;not null"`
+	RenderedMessage          string                   `gorm:"type:text;not null"`
+	DeliveryMessageDiscordID string                   `gorm:"size:32;not null"`
+	AttemptCount             uint8                    `gorm:"not null;default:0"`
+	LastErrorCode            string                   `gorm:"size:64;not null"`
+	LastError                string                   `gorm:"type:text;not null"`
+	LeaseToken               string                   `gorm:"size:64;index"`
+	LeaseExpiresAt           *time.Time               `gorm:"index"`
+	SentAt                   *time.Time
 }
 
 // CaseActionAttemptRecord is the GORM persistence representation of case action attempt; domain models remain storage-agnostic.
@@ -250,11 +322,15 @@ func schemaModels() []any {
 		&GuildRecord{},
 		&StaffMemberRecord{},
 		&CaseTemplateRecord{},
+		&CaseTemplateContextFieldRecord{},
 		&CaseTemplateLevelRecord{},
 		&CaseTemplateLevelActionRecord{},
 		&CaseRecord{},
 		&CaseActionExecutionRecord{},
 		&CaseActionAttemptRecord{},
+		&CaseEvidenceSnapshotRecord{},
+		&CaseEvidenceAttachmentRecord{},
+		&CaseNotificationRecord{},
 		&CaseEventRecord{},
 		&AppealRecord{},
 		&AppealEventRecord{},
@@ -273,6 +349,9 @@ func (StaffMemberRecord) TableName() string { return "staff_members" }
 // TableName preserves the pre-refactor table name so migrations and existing v5 data remain compatible.
 func (CaseTemplateRecord) TableName() string { return "case_templates" }
 
+// TableName returns the migration-owned template context table.
+func (CaseTemplateContextFieldRecord) TableName() string { return "case_template_context_fields" }
+
 // TableName preserves the pre-refactor table name so migrations and existing v5 data remain compatible.
 func (CaseTemplateLevelRecord) TableName() string { return "case_template_levels" }
 
@@ -287,6 +366,15 @@ func (CaseActionExecutionRecord) TableName() string { return "case_action_execut
 
 // TableName preserves the pre-refactor table name so migrations and existing v5 data remain compatible.
 func (CaseActionAttemptRecord) TableName() string { return "case_action_attempts" }
+
+// TableName returns the migration-owned case evidence table.
+func (CaseEvidenceSnapshotRecord) TableName() string { return "case_evidence_snapshots" }
+
+// TableName returns the migration-owned attachment table.
+func (CaseEvidenceAttachmentRecord) TableName() string { return "case_evidence_attachments" }
+
+// TableName returns the migration-owned notification table.
+func (CaseNotificationRecord) TableName() string { return "case_notifications" }
 
 // TableName preserves the pre-refactor table name so migrations and existing v5 data remain compatible.
 func (CaseEventRecord) TableName() string { return "case_events" }

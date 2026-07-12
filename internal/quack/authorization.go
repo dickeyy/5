@@ -137,6 +137,55 @@ func (s *GuildService) PreflightCase(ctx context.Context, guildContext *GuildSta
 	return nil
 }
 
+// PreflightReversal refreshes current authority while allowing unban to reference a departed member.
+func (s *GuildService) PreflightReversal(ctx context.Context, guildContext *GuildStaffContext, targetDiscordUserID string, actionType model.ActionType) error {
+	if actionType != model.ActionRemoveTimeout && actionType != model.ActionUnbanUser {
+		return caseDenial(actionType, "invalid_reversal")
+	}
+	if s == nil || s.store == nil || s.discord == nil || guildContext == nil || guildContext.Guild == nil {
+		return ErrAuthorizationUnavailable
+	}
+	actorID := guildContext.ActorDiscordUserID
+	if actorID == "" && guildContext.Staff != nil {
+		actorID = guildContext.Staff.DiscordUserID
+	}
+	snapshot, err := s.discord.GuildAuthorization(ctx, guildContext.Guild.DiscordGuildID, actorID, targetDiscordUserID)
+	if err != nil || snapshot == nil {
+		return ErrAuthorizationUnavailable
+	}
+	guildContext.Live = *snapshot
+	guildContext.PermissionBits = snapshot.Actor.PermissionBits
+	role := discordRoleContext(snapshot.Actor.PermissionBits, snapshot.Guild.OwnerID == actorID)
+	guildContext.Permissions = role.permissions
+	guildContext.IsAdmin = role.isAdmin
+	guildContext.IsModerator = role.isModerator
+	if !snapshot.Actor.Present || !guildContext.Can(model.PermissionActionCaseCreate) {
+		return caseDenial(actionType, authorizationReasonPermissionRequired)
+	}
+	if !snapshot.Bot.Present {
+		return caseDenial(actionType, authorizationReasonBotMembership)
+	}
+	required := actionPermission(actionType)
+	if !hasDiscordPermission(snapshot.Actor.PermissionBits, required) && actorID != snapshot.Guild.OwnerID {
+		return caseDenial(actionType, authorizationReasonPermissionRequired)
+	}
+	if !hasDiscordPermission(snapshot.Bot.PermissionBits, required) {
+		return caseDenial(actionType, authorizationReasonBotPermission)
+	}
+	if actionType == model.ActionRemoveTimeout {
+		if snapshot.Target == nil || !snapshot.Target.Present {
+			return caseDenial(actionType, authorizationReasonTargetRequired)
+		}
+		if actorID != snapshot.Guild.OwnerID && snapshot.Target.TopRolePosition >= snapshot.Actor.TopRolePosition {
+			return caseDenial(actionType, authorizationReasonActorHierarchy)
+		}
+		if snapshot.Target.TopRolePosition >= snapshot.Bot.TopRolePosition {
+			return caseDenial(actionType, authorizationReasonBotHierarchy)
+		}
+	}
+	return nil
+}
+
 // hasDiscordPermission applies Discord's Administrator implication before checking a specific permission.
 func hasDiscordPermission(bits, required uint64) bool {
 	return hasAllBits(bits, permissionAdministrator) || hasAllBits(bits, required)
@@ -181,6 +230,10 @@ func actionPermission(actionType model.ActionType) uint64 {
 	case model.ActionKickUser:
 		return permissionKickMembers
 	case model.ActionBanUser:
+		return permissionBanMembers
+	case model.ActionRemoveTimeout:
+		return permissionModerateMembers
+	case model.ActionUnbanUser:
 		return permissionBanMembers
 	default:
 		return 0

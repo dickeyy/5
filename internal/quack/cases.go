@@ -17,6 +17,7 @@ var (
 	ErrCaseTemplateNotAvailable = errors.New("case template not available")
 	ErrCasePermissionDenied     = errors.New("case permission denied")
 	ErrCaseNotFound             = errors.New("case not found")
+	errCasePreflightStale       = errors.New("case preflight became stale")
 )
 
 // CaseService owns case authorization, escalation selection, snapshots, auditing, and action scheduling.
@@ -24,17 +25,37 @@ type CaseService struct {
 	store      Repository
 	scheduler  CaseWorkScheduler
 	authorizer *GuildService
+	evidence   *EvidenceService
 }
 
 // CaseInput groups the validated inputs needed for case input.
 type CaseInput struct {
-	TemplateID              string           `json:"template_id"`
-	TargetDiscordUserID     string           `json:"target_discord_user_id"`
-	Source                  model.CaseSource `json:"source"`
-	ContextChannelDiscordID string           `json:"context_channel_discord_id"`
-	ContextMessageDiscordID string           `json:"context_message_discord_id"`
-	ContextURL              string           `json:"context_url"`
-	Metadata                json.RawMessage  `json:"metadata"`
+	TemplateID              string                  `json:"template_id"`
+	TargetDiscordUserID     string                  `json:"target_discord_user_id"`
+	Source                  model.CaseSource        `json:"source"`
+	ContextChannelDiscordID string                  `json:"context_channel_discord_id"`
+	ContextMessageDiscordID string                  `json:"context_message_discord_id"`
+	ContextURL              string                  `json:"context_url"`
+	Metadata                json.RawMessage         `json:"metadata"`
+	ContextValues           []CaseContextValueInput `json:"context_values"`
+	EvidenceLinks           []string                `json:"evidence_links"`
+	ReplacesCaseID          string                  `json:"replaces_case_id,omitempty"`
+	IdempotencyKey          string                  `json:"-"`
+}
+
+// CaseContextValueInput carries one typed value keyed by its template definition.
+type CaseContextValueInput struct {
+	Key   string          `json:"key"`
+	Value json.RawMessage `json:"value"`
+}
+
+// CaseContextValueResponse is the immutable member-visible definition/value pair stored with the case.
+type CaseContextValueResponse struct {
+	Key       string                 `json:"key"`
+	Label     string                 `json:"label"`
+	FieldType model.ContextFieldType `json:"type"`
+	Required  bool                   `json:"required"`
+	Value     any                    `json:"value"`
 }
 
 // CaseListInput groups the validated inputs needed for case list input.
@@ -45,6 +66,11 @@ type CaseListInput struct {
 	ModeratorDiscordUserID string
 	TemplateID             string
 	Validity               string
+	CaseNumber             string
+	ActionResult           string
+	AppealStatus           string
+	CreatedAfter           string
+	CreatedBefore          string
 }
 
 // CaseListResponse is the transport-neutral representation returned for case list response.
@@ -61,6 +87,8 @@ type CaseDetailResponse struct {
 	TemplateSnapshot *CaseTemplateSnapshotResponse `json:"template_snapshot,omitempty"`
 	Actions          []CaseActionDetailResponse    `json:"actions"`
 	Events           []CaseEventResponse           `json:"events"`
+	Evidence         []CaseEvidenceResponse        `json:"evidence"`
+	Notification     *CaseNotificationResponse     `json:"notification,omitempty"`
 }
 
 // CaseProfileResponse is the transport-neutral representation returned for case profile response.
@@ -81,24 +109,53 @@ type CaseProfileSummary struct {
 
 // CaseResponse is the transport-neutral representation returned for case response.
 type CaseResponse struct {
-	CreatedAt               time.Time            `json:"created_at"`
-	UpdatedAt               time.Time            `json:"updated_at"`
-	ID                      string               `json:"id"`
-	GuildID                 string               `json:"guild_id"`
-	CaseNumber              uint64               `json:"case_number"`
-	TemplateID              *string              `json:"template_id"`
-	TemplateVersion         uint                 `json:"template_version"`
-	TargetDiscordUserID     string               `json:"target_discord_user_id"`
-	ModeratorDiscordUserID  string               `json:"moderator_discord_user_id"`
-	Reason                  string               `json:"reason"`
-	Validity                model.CaseValidity   `json:"validity"`
-	Source                  model.CaseSource     `json:"source"`
-	ContextChannelDiscordID string               `json:"context_channel_discord_id,omitempty"`
-	ContextMessageDiscordID string               `json:"context_message_discord_id,omitempty"`
-	ContextURL              string               `json:"context_url,omitempty"`
-	Metadata                any                  `json:"metadata"`
-	SelectedLevel           *CaseSelectedLevel   `json:"selected_level,omitempty"`
-	Actions                 []CaseActionResponse `json:"actions"`
+	CreatedAt               time.Time                  `json:"created_at"`
+	UpdatedAt               time.Time                  `json:"updated_at"`
+	ID                      string                     `json:"id"`
+	GuildID                 string                     `json:"guild_id"`
+	CaseNumber              uint64                     `json:"case_number"`
+	TemplateID              *string                    `json:"template_id"`
+	TemplateVersion         uint                       `json:"template_version"`
+	TargetDiscordUserID     string                     `json:"target_discord_user_id"`
+	ModeratorDiscordUserID  string                     `json:"moderator_discord_user_id"`
+	Reason                  string                     `json:"reason"`
+	Validity                model.CaseValidity         `json:"validity"`
+	Source                  model.CaseSource           `json:"source"`
+	ContextChannelDiscordID string                     `json:"context_channel_discord_id,omitempty"`
+	ContextMessageDiscordID string                     `json:"context_message_discord_id,omitempty"`
+	ContextURL              string                     `json:"context_url,omitempty"`
+	Metadata                any                        `json:"metadata"`
+	ContextValues           []CaseContextValueResponse `json:"context_values"`
+	VoidedReason            string                     `json:"voided_reason,omitempty"`
+	VoidedAt                *time.Time                 `json:"voided_at,omitempty"`
+	ReplacementCaseID       *string                    `json:"replacement_case_id,omitempty"`
+	ReplacesCaseID          *string                    `json:"replaces_case_id,omitempty"`
+	SelectedLevel           *CaseSelectedLevel         `json:"selected_level,omitempty"`
+	Actions                 []CaseActionResponse       `json:"actions"`
+}
+
+// CaseEvidenceAttachmentResponse exposes stable evidence references without leaking the staff-only channel identity.
+type CaseEvidenceAttachmentResponse struct {
+	Filename, ContentType, OriginalURL, PreservedURL, CopyOutcome, Warning string
+	SizeBytes                                                              int64
+}
+
+// CaseEvidenceResponse exposes an immutable message snapshot and bounded attachment metadata.
+type CaseEvidenceResponse struct {
+	ID, AuthorDiscordUserID, MessageURL, Content, CaptureOutcome, CaptureWarning string
+	MessageCreatedAt                                                             time.Time
+	MessageEditedAt                                                              *time.Time
+	Embeds                                                                       any
+	Attachments                                                                  []CaseEvidenceAttachmentResponse
+}
+
+// CaseNotificationResponse exposes delivery state separately from enforcement.
+type CaseNotificationResponse struct {
+	Status        model.NotificationStatus `json:"status"`
+	AttemptCount  uint8                    `json:"attempt_count"`
+	LastErrorCode string                   `json:"last_error_code,omitempty"`
+	LastError     string                   `json:"last_error,omitempty"`
+	SentAt        *time.Time               `json:"sent_at,omitempty"`
 }
 
 // CaseSelectedLevel groups the case selected level state used to keep this package's responsibilities explicit.
@@ -167,16 +224,20 @@ type CaseEventResponse struct {
 
 // CaseTemplateSnapshotResponse is the transport-neutral representation returned for case template snapshot response.
 type CaseTemplateSnapshotResponse struct {
-	Template      templateSnapshotTemplate `json:"template"`
-	SelectedLevel CaseSelectedLevel        `json:"selected_level"`
-	Actions       []templateSnapshotAction `json:"actions"`
+	Template      templateSnapshotTemplate       `json:"template"`
+	SelectedLevel CaseSelectedLevel              `json:"selected_level"`
+	Actions       []templateSnapshotAction       `json:"actions"`
+	ContextFields []TemplateContextFieldResponse `json:"context_fields"`
+	ContextValues []CaseContextValueResponse     `json:"context_values"`
 }
 
 // templateSnapshot groups the template snapshot state used to keep this package's responsibilities explicit.
 type templateSnapshot struct {
-	Template      templateSnapshotTemplate `json:"template"`
-	SelectedLevel CaseSelectedLevel        `json:"selected_level"`
-	Actions       []templateSnapshotAction `json:"actions"`
+	Template      templateSnapshotTemplate       `json:"template"`
+	SelectedLevel CaseSelectedLevel              `json:"selected_level"`
+	Actions       []templateSnapshotAction       `json:"actions"`
+	ContextFields []TemplateContextFieldResponse `json:"context_fields"`
+	ContextValues []CaseContextValueResponse     `json:"context_values"`
 }
 
 // templateSnapshotTemplate groups the template snapshot template state used to keep this package's responsibilities explicit.
@@ -186,6 +247,7 @@ type templateSnapshotTemplate struct {
 	Name           string `json:"name"`
 	Version        uint   `json:"version"`
 	ReasonTemplate string `json:"reason_template"`
+	Appealable     bool   `json:"appealable"`
 }
 
 // templateSnapshotAction identifies the supported template snapshot action values stored and exchanged by Quack.
@@ -204,6 +266,13 @@ type selectedTemplateLevel struct {
 	MatchedCaseCount int64
 }
 
+type caseCreatePreflight struct {
+	TemplateID, SelectedLevelID, ContextValuesJSON string
+	TemplateVersion                                uint
+	ActionType                                     model.ActionType
+	Captured                                       CapturedEvidence
+}
+
 // NewCaseService constructs case service with required dependencies explicit so callers control lifecycle and substitution.
 func NewCaseService(store Repository, scheduler ...CaseWorkScheduler) *CaseService {
 	service := &CaseService{store: store}
@@ -211,6 +280,14 @@ func NewCaseService(store Repository, scheduler ...CaseWorkScheduler) *CaseServi
 		service.scheduler = scheduler[0]
 	}
 	return service
+}
+
+// WithEvidenceCapture configures the shared pre-commit evidence service.
+func (s *CaseService) WithEvidenceCapture(evidence *EvidenceService) *CaseService {
+	if s != nil {
+		s.evidence = evidence
+	}
+	return s
 }
 
 // Create applies a template to a user inside the guild-scoped transaction boundary. The lock keeps escalation history and case numbering consistent, while scheduling occurs only after the transaction commits.
@@ -222,21 +299,58 @@ func (s *CaseService) Create(ctx context.Context, guildContext *GuildStaffContex
 	if guildContext == nil || guildContext.Guild == nil {
 		return nil, validationCaseError("missing guild context")
 	}
+	key := strings.TrimSpace(input.IdempotencyKey)
+	if len(key) > 191 {
+		return nil, validationCaseError("idempotency key is too long")
+	}
+	input.IdempotencyKey = key
+	if key != "" {
+		existing, getErr := s.store.GetCaseByIdempotencyKey(ctx, guildContext.Guild.ID, key)
+		if getErr != nil {
+			return nil, getErr
+		}
+		if existing != nil {
+			if existing.TargetDiscordUserID != strings.TrimSpace(input.TargetDiscordUserID) || (existing.TemplateID != nil && *existing.TemplateID != strings.TrimSpace(input.TemplateID)) {
+				return nil, validationCaseError("idempotency key was already used for another case request")
+			}
+			actions, listErr := s.store.ListCaseActionExecutions(ctx, existing.ID)
+			if listErr != nil {
+				return nil, listErr
+			}
+			response := caseResponseFromModel(*existing, actions)
+			return &response, nil
+		}
+	}
 	var created *model.CreatedCase
-	err := s.store.WithGuildCaseLock(ctx, guildContext.Guild.ID, func(transactionalStore Repository) error {
-		transactionalService := *s
-		transactionalService.store = transactionalStore
-		var createErr error
-		created, createErr = transactionalService.create(ctx, guildContext, input)
-		return createErr
-	})
+	var err error
+	for attempt := 0; attempt < 4; attempt++ {
+		var preflight *caseCreatePreflight
+		preflight, err = s.preflightCreate(ctx, guildContext, input)
+		if err != nil {
+			break
+		}
+		err = s.store.WithGuildCaseLock(ctx, guildContext.Guild.ID, func(transactionalStore Repository) error {
+			transactionalService := *s
+			transactionalService.store = transactionalStore
+			var createErr error
+			created, createErr = transactionalService.create(ctx, guildContext, input, preflight)
+			return createErr
+		})
+		if errors.Is(err, errCasePreflightStale) {
+			continue
+		}
+		break
+	}
 	if err != nil {
 		var authorizationErr *AuthorizationError
 		if errors.As(err, &authorizationErr) && s.authorizer != nil {
 			_ = s.authorizer.auditAuthorizationDenialWithMetadata(ctx, guildContext, authorizationErr.Capability, authorizationSource(input.Source), authorizationErr.Reason, authorizationErr.MetadataJSON)
 		}
-		if errors.Is(err, ErrCaseValidation) || errors.Is(err, ErrCasePermissionDenied) || errors.Is(err, ErrCaseTemplateNotAvailable) {
+		if errors.Is(err, ErrCaseValidation) || errors.Is(err, ErrCasePermissionDenied) || errors.Is(err, ErrCaseTemplateNotAvailable) || errors.Is(err, errCasePreflightStale) {
 			_ = s.audit(ctx, guildContext, "case.create", "case", "unknown", model.AuditResultFailure, err.Error())
+		}
+		if errors.Is(err, errCasePreflightStale) {
+			err = validationCaseError("case state changed repeatedly; retry the request")
 		}
 		return nil, err
 	}
@@ -247,6 +361,68 @@ func (s *CaseService) Create(ctx context.Context, guildContext *GuildStaffContex
 
 	response := caseResponse(*created)
 	return &response, nil
+}
+
+// preflightCreate performs live authorization and evidence capture before the atomic case transaction.
+func (s *CaseService) preflightCreate(ctx context.Context, guildContext *GuildStaffContext, input CaseInput) (*caseCreatePreflight, error) {
+	if guildContext == nil || guildContext.Guild == nil || guildContext.Staff == nil || !guildContext.Can(model.PermissionActionCaseCreate) {
+		return nil, ErrCasePermissionDenied
+	}
+	templateID, targetID := strings.TrimSpace(input.TemplateID), strings.TrimSpace(input.TargetDiscordUserID)
+	if templateID == "" || targetID == "" {
+		return nil, validationCaseError("template_id and target_discord_user_id are required")
+	}
+	template, err := s.store.GetCaseTemplateExpanded(ctx, guildContext.Guild.ID, templateID)
+	if err != nil {
+		return nil, err
+	}
+	if template == nil || template.Template.ArchivedAt != nil {
+		return nil, ErrCaseTemplateNotAvailable
+	}
+	selected, err := s.selectTemplateLevel(ctx, guildContext.Guild.ID, targetID, template)
+	if err != nil {
+		return nil, err
+	}
+	actionType := model.ActionType("")
+	if len(selected.Actions) == 1 {
+		actionType = selected.Actions[0].ActionType
+	}
+	if s.authorizer != nil {
+		if err := s.authorizer.PreflightCase(ctx, guildContext, targetID, actionType); err != nil {
+			return nil, err
+		}
+	}
+	valuesJSON, links, hasFallback, err := validateCaseContextValues(template.ContextFields, input.ContextValues)
+	if err != nil {
+		return nil, err
+	}
+	links = append(links, input.EvidenceLinks...)
+	if strings.TrimSpace(input.ContextURL) != "" {
+		links = append(links, input.ContextURL)
+	}
+	result := &caseCreatePreflight{TemplateID: template.Template.ID, TemplateVersion: template.Template.Version, SelectedLevelID: selected.Level.ID, ActionType: actionType, ContextValuesJSON: valuesJSON}
+	if len(links) > 0 {
+		if s.evidence == nil {
+			return nil, validationCaseError("evidence capture is not configured")
+		}
+		settings, settingsErr := s.store.GetGuildSettings(ctx, guildContext.Guild.ID)
+		if settingsErr != nil {
+			return nil, settingsErr
+		}
+		channelID := ""
+		if settings != nil {
+			channelID = settings.ManagedEvidenceChannelDiscordID
+		}
+		captured, captureErr := s.evidence.Capture(ctx, guildContext.Guild.DiscordGuildID, targetID, channelID, links, hasFallback)
+		if captureErr != nil {
+			_ = s.audit(ctx, guildContext, "evidence.capture", "case_evidence", "unknown", model.AuditResultFailure, captureErr.Error())
+			return nil, validationCaseError(captureErr.Error())
+		}
+		if captured != nil {
+			result.Captured = *captured
+		}
+	}
+	return result, nil
 }
 
 // List returns list subject to authorization, ordering, and filtering constraints.
@@ -263,6 +439,9 @@ func (s *CaseService) List(ctx context.Context, guildContext *GuildStaffContext,
 
 	responses, err := s.caseResponsesForModels(ctx, result.Cases)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.audit(ctx, guildContext, "case.search", "case", "list", model.AuditResultSuccess, ""); err != nil {
 		return nil, err
 	}
 
@@ -310,12 +489,25 @@ func (s *CaseService) Get(ctx context.Context, guildContext *GuildStaffContext, 
 		return nil, err
 	}
 
+	evidence, attachments, err := s.store.ListCaseEvidence(ctx, caseModel.ID)
+	if err != nil {
+		return nil, err
+	}
+	notification, err := s.store.GetCaseNotification(ctx, caseModel.ID)
+	if err != nil {
+		return nil, err
+	}
 	base := caseResponseFromModel(*caseModel, actions)
+	if err := s.audit(ctx, guildContext, "case.read", "case", caseModel.ID, model.AuditResultSuccess, ""); err != nil {
+		return nil, err
+	}
 	return &CaseDetailResponse{
 		CaseResponse:     base,
 		TemplateSnapshot: templateSnapshotResponse(caseModel.TemplateSnapshotJSON),
 		Actions:          caseActionDetailResponses(actions, attempts),
 		Events:           caseEventResponses(events),
+		Evidence:         caseEvidenceResponses(evidence, attachments, false),
+		Notification:     caseNotificationResponse(notification, false),
 	}, nil
 }
 
@@ -333,6 +525,9 @@ func (s *CaseService) UserHistory(ctx context.Context, guildContext *GuildStaffC
 	}
 	summary, err := s.store.TargetCaseSummary(ctx, guildContext.Guild.ID, targetDiscordUserID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.audit(ctx, guildContext, "case.history.read", "member", targetDiscordUserID, model.AuditResultSuccess, ""); err != nil {
 		return nil, err
 	}
 
@@ -364,6 +559,29 @@ func (s *CaseService) caseListParams(guildContext *GuildStaffContext, input Case
 	if validity != "" && !validCaseValidity(validity) {
 		return model.ListCasesParams{}, 0, 0, validationCaseError("validity is invalid")
 	}
+	caseNumber := strings.TrimSpace(input.CaseNumber)
+	if caseNumber != "" {
+		parsed, parseErr := strconv.ParseUint(caseNumber, 10, 64)
+		if parseErr != nil || parsed == 0 {
+			return model.ListCasesParams{}, 0, 0, validationCaseError("case_number is invalid")
+		}
+	}
+	actionResult := strings.TrimSpace(input.ActionResult)
+	if actionResult != "" && !validActionExecutionStatus(model.ActionExecutionStatus(actionResult)) {
+		return model.ListCasesParams{}, 0, 0, validationCaseError("action_result is invalid")
+	}
+	appealStatus := strings.TrimSpace(input.AppealStatus)
+	if appealStatus != "" && !validAppealStatus(model.AppealStatus(appealStatus)) {
+		return model.ListCasesParams{}, 0, 0, validationCaseError("appeal_status is invalid")
+	}
+	createdAfter, err := normalizeOptionalTime(input.CreatedAfter)
+	if err != nil {
+		return model.ListCasesParams{}, 0, 0, err
+	}
+	createdBefore, err := normalizeOptionalTime(input.CreatedBefore)
+	if err != nil {
+		return model.ListCasesParams{}, 0, 0, err
+	}
 
 	return model.ListCasesParams{
 		GuildID:                guildContext.Guild.ID,
@@ -371,9 +589,205 @@ func (s *CaseService) caseListParams(guildContext *GuildStaffContext, input Case
 		ModeratorDiscordUserID: strings.TrimSpace(input.ModeratorDiscordUserID),
 		TemplateID:             strings.TrimSpace(input.TemplateID),
 		Validity:               validity,
-		Limit:                  limit,
-		Offset:                 offset,
+		CaseNumber:             caseNumber, ActionResult: actionResult, AppealStatus: appealStatus, CreatedAfter: createdAfter, CreatedBefore: createdBefore,
+		Limit:  limit,
+		Offset: offset,
 	}, limit, offset, nil
+}
+
+// normalizeOptionalTime validates stable RFC3339 staff-search boundaries.
+func normalizeOptionalTime(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return "", validationCaseError("date filter must use RFC3339")
+	}
+	return parsed.UTC().Format(time.RFC3339Nano), nil
+}
+
+// validActionExecutionStatus reports whether a staff action-result filter is supported.
+func validActionExecutionStatus(value model.ActionExecutionStatus) bool {
+	switch value {
+	case model.ActionExecutionPending, model.ActionExecutionRunning, model.ActionExecutionSucceeded, model.ActionExecutionFailed, model.ActionExecutionRetrying, model.ActionExecutionSkipped, model.ActionExecutionCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+// validAppealStatus reports whether a staff appeal-status filter is supported.
+func validAppealStatus(value model.AppealStatus) bool {
+	switch value {
+	case model.AppealStatusPending, model.AppealStatusAccepted, model.AppealStatusRejected, model.AppealStatusClosed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Void preserves the case and correction reason while removing it from future escalation.
+func (s *CaseService) Void(ctx context.Context, guildContext *GuildStaffContext, caseRef, reason string, replacementCaseID *string) (*CaseResponse, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("case service is not configured")
+	}
+	if guildContext == nil || guildContext.Guild == nil || guildContext.Staff == nil {
+		return nil, validationCaseError("missing guild context")
+	}
+	if !guildContext.Can(model.PermissionActionCaseVoid) {
+		return nil, ErrCasePermissionDenied
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return nil, validationCaseError("void reason is required")
+	}
+	if replacementCaseID != nil {
+		return nil, validationCaseError("create the replacement after voiding this case")
+	}
+	item, err := s.store.GetCaseByIDOrNumber(ctx, guildContext.Guild.ID, strings.TrimSpace(caseRef))
+	if err != nil {
+		return nil, err
+	}
+	if item == nil {
+		return nil, ErrCaseNotFound
+	}
+	voided, err := s.store.VoidCase(ctx, model.VoidCaseParams{GuildID: guildContext.Guild.ID, CaseID: item.ID, ActorDiscordUserID: guildContext.Staff.DiscordUserID, Reason: reason, ReplacementCaseID: replacementCaseID, Audit: s.auditEntry(ctx, guildContext, "case.void", "case", item.ID, model.AuditResultSuccess, "")})
+	if err != nil {
+		return nil, err
+	}
+	if voided == nil {
+		return nil, ErrCaseNotFound
+	}
+	actions, err := s.store.ListCaseActionExecutions(ctx, voided.ID)
+	if err != nil {
+		return nil, err
+	}
+	response := caseResponseFromModel(*voided, actions)
+	return &response, nil
+}
+
+// MemberCaseDetail is the privacy-safe projection available only to the target Discord identity.
+type MemberCaseDetail struct {
+	ID                string                     `json:"id"`
+	GuildID           string                     `json:"guild_id"`
+	CaseNumber        uint64                     `json:"case_number"`
+	TemplateID        *string                    `json:"template_id"`
+	Reason            string                     `json:"official_reason"`
+	Validity          model.CaseValidity         `json:"validity"`
+	VoidedReason      string                     `json:"voided_reason,omitempty"`
+	ReplacementCaseID *string                    `json:"replacement_case_id,omitempty"`
+	CreatedAt         time.Time                  `json:"created_at"`
+	ContextValues     []CaseContextValueResponse `json:"context"`
+	SelectedLevel     *CaseSelectedLevel         `json:"selected_outcome"`
+	Enforcement       *MemberEnforcementOutcome  `json:"enforcement,omitempty"`
+	Evidence          []CaseEvidenceResponse     `json:"evidence"`
+	Events            []CaseEventResponse        `json:"history"`
+	Notification      *CaseNotificationResponse  `json:"notification,omitempty"`
+	Appealable        bool                       `json:"appealable"`
+}
+
+// MemberEnforcementOutcome exposes only the configured action and public result.
+type MemberEnforcementOutcome struct {
+	ActionType model.ActionType            `json:"action_type"`
+	Status     model.ActionExecutionStatus `json:"status"`
+}
+
+// ListMemberCases returns only cases targeting the authenticated Discord identity and does not require current guild membership.
+func (s *CaseService) ListMemberCases(ctx context.Context, guildID, memberDiscordUserID string, input CaseListInput) (*CaseListResponse, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("case service is not configured")
+	}
+	guildID = strings.TrimSpace(guildID)
+	memberDiscordUserID = strings.TrimSpace(memberDiscordUserID)
+	if guildID == "" || memberDiscordUserID == "" {
+		return nil, validationCaseError("guild and member identity are required")
+	}
+	limit, offset, err := pagination(input.Limit, input.Offset)
+	if err != nil {
+		return nil, err
+	}
+	result, err := s.store.ListCasesFiltered(ctx, model.ListCasesParams{GuildID: guildID, TargetDiscordUserID: memberDiscordUserID, Limit: limit, Offset: offset})
+	if err != nil {
+		return nil, err
+	}
+	responses := make([]CaseResponse, 0, len(result.Cases))
+	for _, item := range result.Cases {
+		response := caseResponseFromModel(item, nil)
+		response.ModeratorDiscordUserID = ""
+		response.Metadata = nil
+		response.Actions = nil
+		responses = append(responses, response)
+	}
+	if err := s.memberReadAudit(ctx, guildID, memberDiscordUserID, "member_case.list", "guild", guildID); err != nil {
+		return nil, err
+	}
+	return &CaseListResponse{Cases: responses, Total: result.Total, Limit: limit, Offset: offset}, nil
+}
+
+// GetMemberCase returns a privacy-safe case detail only when the authenticated identity owns the case.
+func (s *CaseService) GetMemberCase(ctx context.Context, caseID, memberDiscordUserID string) (*MemberCaseDetail, error) {
+	item, err := s.store.GetCaseByID(ctx, strings.TrimSpace(caseID))
+	if err != nil {
+		return nil, err
+	}
+	if item == nil {
+		return nil, ErrCaseNotFound
+	}
+	if item.TargetDiscordUserID != strings.TrimSpace(memberDiscordUserID) {
+		requestID, correlationID := TraceIDsFromContext(ctx)
+		_ = s.store.CreateAuditLogEntry(ctx, &model.AuditLogEntry{GuildID: item.GuildID, ActorDiscordUserID: strings.TrimSpace(memberDiscordUserID), Source: model.AuditSourceWeb, Action: "member_case.read", ResourceType: "case", ResourceID: item.ID, Result: model.AuditResultDenied, FailureReason: "not_case_target", RequestID: requestID, CorrelationID: correlationID, MetadataJSON: "{}"})
+		return nil, ErrCaseNotFound
+	}
+	if err := s.memberReadAudit(ctx, item.GuildID, memberDiscordUserID, "member_case.read", "case", item.ID); err != nil {
+		return nil, err
+	}
+	evidence, attachments, err := s.store.ListCaseEvidence(ctx, item.ID)
+	if err != nil {
+		return nil, err
+	}
+	events, err := s.store.ListCaseEvents(ctx, item.ID)
+	if err != nil {
+		return nil, err
+	}
+	publicEvents := make([]model.CaseEvent, 0, len(events))
+	for _, event := range events {
+		if event.Visibility == model.EventVisibilityPublic {
+			event.ActorDiscordUserID = ""
+			event.MetadataJSON = "{}"
+			publicEvents = append(publicEvents, event)
+		}
+	}
+	notification, err := s.store.GetCaseNotification(ctx, item.ID)
+	if err != nil {
+		return nil, err
+	}
+	appealable := false
+	if snapshot := templateSnapshotResponse(item.TemplateSnapshotJSON); snapshot != nil {
+		var raw struct {
+			Template struct {
+				Appealable bool `json:"appealable"`
+			} `json:"template"`
+		}
+		_ = json.Unmarshal([]byte(item.TemplateSnapshotJSON), &raw)
+		appealable = raw.Template.Appealable
+	}
+	actions, err := s.store.ListCaseActionExecutions(ctx, item.ID)
+	if err != nil {
+		return nil, err
+	}
+	var enforcement *MemberEnforcementOutcome
+	if len(actions) > 0 {
+		enforcement = &MemberEnforcementOutcome{ActionType: actions[0].ActionType, Status: actions[0].Status}
+	}
+	return &MemberCaseDetail{ID: item.ID, GuildID: item.GuildID, CaseNumber: item.CaseNumber, TemplateID: item.TemplateID, Reason: item.Reason, Validity: item.Validity, VoidedReason: item.VoidedReason, ReplacementCaseID: item.ReplacementCaseID, CreatedAt: item.CreatedAt, ContextValues: parseCaseContextValues(item.ContextValuesJSON), SelectedLevel: selectedLevelResponse(item.TemplateSnapshotJSON), Enforcement: enforcement, Evidence: caseEvidenceResponses(evidence, attachments, true), Events: caseEventResponses(publicEvents), Notification: caseNotificationResponse(notification, true), Appealable: appealable}, nil
+}
+
+// memberReadAudit records target-owned reads without requiring a current staff or guild membership cache.
+func (s *CaseService) memberReadAudit(ctx context.Context, guildID, actorID, action, resourceType, resourceID string) error {
+	requestID, correlationID := TraceIDsFromContext(ctx)
+	return s.store.CreateAuditLogEntry(ctx, &model.AuditLogEntry{GuildID: guildID, ActorDiscordUserID: actorID, Source: model.AuditSourceWeb, Action: action, ResourceType: resourceType, ResourceID: resourceID, Result: model.AuditResultSuccess, RequestID: requestID, CorrelationID: correlationID, MetadataJSON: "{}"})
 }
 
 // requireCaseRead encapsulates the require case read rule so callers share one consistent package implementation.
@@ -391,7 +805,7 @@ func (s *CaseService) requireCaseRead(guildContext *GuildStaffContext) error {
 }
 
 // create validates and materializes a case within an already locked transaction, including the selected escalation level, immutable template snapshot, initial event, actions, and audit entry.
-func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContext, input CaseInput) (*model.CreatedCase, error) {
+func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContext, input CaseInput, preflight *caseCreatePreflight) (*model.CreatedCase, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("case service is not configured")
 	}
@@ -400,6 +814,19 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 	}
 	if !guildContext.Can(model.PermissionActionCaseCreate) {
 		return nil, ErrCasePermissionDenied
+	}
+	if input.IdempotencyKey != "" {
+		existing, err := s.store.GetCaseByIdempotencyKey(ctx, guildContext.Guild.ID, input.IdempotencyKey)
+		if err != nil {
+			return nil, err
+		}
+		if existing != nil {
+			actions, actionErr := s.store.ListCaseActionExecutions(ctx, existing.ID)
+			if actionErr != nil {
+				return nil, actionErr
+			}
+			return &model.CreatedCase{Case: *existing, ActionExecutions: actions}, nil
+		}
 	}
 
 	templateID := strings.TrimSpace(input.TemplateID)
@@ -441,17 +868,20 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 	if err != nil {
 		return nil, err
 	}
-	if s.authorizer != nil {
-		actionType := model.ActionType("")
-		if len(selectedLevel.Actions) == 1 {
-			actionType = selectedLevel.Actions[0].ActionType
-		}
-		if err := s.authorizer.PreflightCase(ctx, guildContext, targetDiscordUserID, actionType); err != nil {
-			return nil, err
-		}
+	if preflight == nil {
+		return nil, validationCaseError("case preflight is required")
 	}
+	actualAction := model.ActionType("")
+	if len(selectedLevel.Actions) == 1 {
+		actualAction = selectedLevel.Actions[0].ActionType
+	}
+	if preflight.TemplateID != template.Template.ID || preflight.TemplateVersion != template.Template.Version || preflight.SelectedLevelID != selectedLevel.Level.ID || preflight.ActionType != actualAction {
+		return nil, errCasePreflightStale
+	}
+	contextValuesJSON := preflight.ContextValuesJSON
+	captured := preflight.Captured
 
-	snapshotJSON, err := buildTemplateSnapshot(template.Template, *selectedLevel)
+	snapshotJSON, err := buildTemplateSnapshot(template.Template, template.ContextFields, contextValuesJSON, *selectedLevel)
 	if err != nil {
 		return nil, err
 	}
@@ -472,43 +902,76 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 		ContextMessageDiscordID: strings.TrimSpace(input.ContextMessageDiscordID),
 		ContextURL:              strings.TrimSpace(input.ContextURL),
 		MetadataJSON:            metadataJSON,
+		ContextValuesJSON:       contextValuesJSON,
+	}
+	if input.IdempotencyKey != "" {
+		key := input.IdempotencyKey
+		caseModel.IdempotencyKey = &key
+	}
+	if replacement := strings.TrimSpace(input.ReplacesCaseID); replacement != "" {
+		prior, getErr := s.store.GetCaseByIDOrNumber(ctx, guildContext.Guild.ID, replacement)
+		if getErr != nil {
+			return nil, getErr
+		}
+		if prior == nil || prior.Validity != model.CaseValidityVoided {
+			return nil, validationCaseError("replacement must reference a voided case in this guild")
+		}
+		caseModel.ReplacesCaseID = &prior.ID
 	}
 
-	actionExecutions := make([]model.CaseActionExecution, 0, len(selectedLevel.Actions)+1)
-	if selectedLevel.Level.NotifyUser {
-		actionExecutions = append(actionExecutions, warningNotificationExecution(caseModel))
-	}
+	actionExecutions := make([]model.CaseActionExecution, 0, len(selectedLevel.Actions))
 	for _, action := range selectedLevel.Actions {
 		templateActionID := action.ID
 		actionExecutions = append(actionExecutions, model.CaseActionExecution{
 			TemplateActionID:   &templateActionID,
-			Position:           1,
+			Position:           0,
 			ActionType:         action.ActionType,
 			Status:             model.ActionExecutionPending,
 			ConfigSnapshotJSON: action.ConfigJSON,
 			MaxRetries:         action.MaxRetries,
 			RetryBackoffMS:     1000,
-			SafeForRetry:       !irreversibleAction(action.ActionType),
+			SafeForRetry:       true,
 			Irreversible:       irreversibleAction(action.ActionType),
 			CorrelationID:      correlationID,
 		})
+	}
+	var notification *model.CaseNotification
+	if selectedLevel.Level.NotifyUser {
+		notification = &model.CaseNotification{Status: model.NotificationPending}
 	}
 
 	event := model.CaseEvent{
 		EventType:          model.CaseEventCreated,
 		ActorDiscordUserID: guildContext.Staff.DiscordUserID,
 		ActorType:          "staff",
-		Visibility:         model.EventVisibilityStaff,
+		Visibility:         model.EventVisibilityPublic,
 		Body:               fmt.Sprintf("Case created from template %s", template.Template.Slug),
 		MetadataJSON:       "{}",
 	}
 
-	return s.store.CreateCase(ctx, model.CreateCaseParams{
+	params := model.CreateCaseParams{
 		Case:             caseModel,
 		Event:            event,
 		ActionExecutions: actionExecutions,
+		Evidence:         captured.Snapshots,
+		Attachments:      captured.Attachments,
+		Notification:     notification,
 		Audit:            s.auditEntry(ctx, guildContext, "case.create", "case", "", model.AuditResultSuccess, ""),
-	})
+	}
+	if len(captured.Snapshots) > 0 {
+		result := model.AuditResultSuccess
+		failure := ""
+		if len(captured.Warnings) > 0 {
+			result = model.AuditResultFailure
+			failure = "partial evidence capture"
+		}
+		entry := s.auditEntry(ctx, guildContext, "evidence.capture", "case_evidence", "", result, failure)
+		if entry != nil {
+			entry.MetadataJSON = mustMarshalJSONObject(map[string]any{"snapshot_count": len(captured.Snapshots), "attachment_count": len(captured.Attachments), "partial": len(captured.Warnings) > 0})
+			params.AdditionalAudits = append(params.AdditionalAudits, *entry)
+		}
+	}
+	return s.store.CreateCase(ctx, params)
 }
 
 // selectTemplateLevel chooses the highest escalation whose all-time historical-case threshold is met, falling back to the default level.
@@ -519,16 +982,16 @@ func (s *CaseService) selectTemplateLevel(ctx context.Context, guildID, targetDi
 
 	var fallback *selectedTemplateLevel
 	var best *selectedTemplateLevel
+	matchedCaseCount, err := s.matchingTemplateCaseCount(ctx, guildID, targetDiscordUserID, template.Template.ID)
+	if err != nil {
+		return nil, err
+	}
 	for _, expandedLevel := range template.Levels {
 		level := expandedLevel.Level
 		if len(expandedLevel.Actions) > 1 {
 			return nil, validationCaseError("template level has more than one enforcement action")
 		}
 		if level.IsDefault {
-			matchedCaseCount, err := s.matchingTemplateCaseCount(ctx, guildID, targetDiscordUserID, template.Template.ID)
-			if err != nil {
-				return nil, err
-			}
 			fallback = &selectedTemplateLevel{
 				Level:            level,
 				Actions:          expandedLevel.Actions,
@@ -541,10 +1004,6 @@ func (s *CaseService) selectTemplateLevel(ctx context.Context, guildID, targetDi
 			return nil, validationCaseError("escalation level trigger_case_count must be positive")
 		}
 
-		matchedCaseCount, err := s.matchingTemplateCaseCount(ctx, guildID, targetDiscordUserID, template.Template.ID)
-		if err != nil {
-			return nil, err
-		}
 		if matchedCaseCount < int64(level.TriggerCaseCount) {
 			continue
 		}
@@ -582,7 +1041,7 @@ func (s *CaseService) matchingTemplateCaseCount(ctx context.Context, guildID, ta
 }
 
 // buildTemplateSnapshot builds template snapshot from validated domain state.
-func buildTemplateSnapshot(template model.CaseTemplate, selectedLevel selectedTemplateLevel) (string, error) {
+func buildTemplateSnapshot(template model.CaseTemplate, fields []model.CaseTemplateContextField, valuesJSON string, selectedLevel selectedTemplateLevel) (string, error) {
 	snapshot := templateSnapshot{
 		Template: templateSnapshotTemplate{
 			ID:             template.ID,
@@ -590,12 +1049,18 @@ func buildTemplateSnapshot(template model.CaseTemplate, selectedLevel selectedTe
 			Name:           template.Name,
 			Version:        template.Version,
 			ReasonTemplate: template.ReasonTemplate,
+			Appealable:     template.Appealable,
 		},
 		SelectedLevel: CaseSelectedLevel{
 			TemplateLevelDetails: templateLevelDetails(selectedLevel.Level),
 			MatchedCaseCount:     selectedLevel.MatchedCaseCount,
 		},
-		Actions: make([]templateSnapshotAction, 0, len(selectedLevel.Actions)),
+		Actions:       make([]templateSnapshotAction, 0, len(selectedLevel.Actions)),
+		ContextFields: make([]TemplateContextFieldResponse, 0, len(fields)),
+	}
+	_ = json.Unmarshal([]byte(valuesJSON), &snapshot.ContextValues)
+	for _, field := range fields {
+		snapshot.ContextFields = append(snapshot.ContextFields, TemplateContextFieldResponse{ID: field.ID, Key: field.Key, Label: field.Label, FieldType: field.FieldType, Position: field.Position, Required: field.Required})
 	}
 
 	for _, action := range selectedLevel.Actions {
@@ -614,30 +1079,6 @@ func buildTemplateSnapshot(template model.CaseTemplate, selectedLevel selectedTe
 		return "", fmt.Errorf("marshal case template snapshot: %w", err)
 	}
 	return string(body), nil
-}
-
-// warningNotificationExecution encapsulates the warning notification execution rule so callers share one consistent package implementation.
-func warningNotificationExecution(caseModel model.Case) model.CaseActionExecution {
-	return model.CaseActionExecution{
-		Position:           0,
-		ActionType:         model.ActionSendDM,
-		Status:             model.ActionExecutionPending,
-		ConfigSnapshotJSON: warningNotificationConfig(caseModel.Reason),
-		NotificationType:   string(model.NotificationWarning),
-		SafeForRetry:       true,
-		CorrelationID:      caseModel.CorrelationID,
-	}
-}
-
-// warningNotificationConfig encapsulates the warning notification config rule so callers share one consistent package implementation.
-func warningNotificationConfig(reason string) string {
-	body, err := json.Marshal(map[string]any{
-		"message": fmt.Sprintf("You received a warning in this server: %s", reason),
-	})
-	if err != nil {
-		return "{}"
-	}
-	return string(body)
 }
 
 // caseResponse converts case response into its transport presentation without leaking transport types into the core.
@@ -663,9 +1104,9 @@ func caseResponseFromModel(caseModel model.Case, actionExecutions []model.CaseAc
 		ContextChannelDiscordID: caseModel.ContextChannelDiscordID,
 		ContextMessageDiscordID: caseModel.ContextMessageDiscordID,
 		ContextURL:              caseModel.ContextURL,
-		Metadata:                parseJSON(caseModel.MetadataJSON),
-		SelectedLevel:           selectedLevelResponse(caseModel.TemplateSnapshotJSON),
-		Actions:                 make([]CaseActionResponse, 0, len(actionExecutions)),
+		Metadata:                parseJSON(caseModel.MetadataJSON), ContextValues: parseCaseContextValues(caseModel.ContextValuesJSON), VoidedReason: caseModel.VoidedReason, VoidedAt: caseModel.VoidedAt, ReplacementCaseID: caseModel.ReplacementCaseID, ReplacesCaseID: caseModel.ReplacesCaseID,
+		SelectedLevel: selectedLevelResponse(caseModel.TemplateSnapshotJSON),
+		Actions:       make([]CaseActionResponse, 0, len(actionExecutions)),
 	}
 
 	for _, action := range actionExecutions {
@@ -776,9 +1217,11 @@ func selectedLevelResponse(snapshotJSON string) *CaseSelectedLevel {
 // templateSnapshotResponse converts template snapshot response into its transport presentation without leaking transport types into the core.
 func templateSnapshotResponse(snapshotJSON string) *CaseTemplateSnapshotResponse {
 	var stored struct {
-		Template      templateSnapshotTemplate `json:"template"`
-		SelectedLevel CaseSelectedLevel        `json:"selected_level"`
-		Actions       []json.RawMessage        `json:"actions"`
+		Template      templateSnapshotTemplate       `json:"template"`
+		SelectedLevel CaseSelectedLevel              `json:"selected_level"`
+		Actions       []json.RawMessage              `json:"actions"`
+		ContextFields []TemplateContextFieldResponse `json:"context_fields"`
+		ContextValues []CaseContextValueResponse     `json:"context_values"`
 	}
 	if err := json.Unmarshal([]byte(snapshotJSON), &stored); err != nil || stored.Template.ID == "" {
 		return nil
@@ -787,6 +1230,7 @@ func templateSnapshotResponse(snapshotJSON string) *CaseTemplateSnapshotResponse
 		Template:      stored.Template,
 		SelectedLevel: stored.SelectedLevel,
 		Actions:       make([]templateSnapshotAction, 0, len(stored.Actions)),
+		ContextFields: stored.ContextFields, ContextValues: stored.ContextValues,
 	}
 	for _, raw := range stored.Actions {
 		var action templateSnapshotAction
@@ -806,6 +1250,129 @@ func templateSnapshotResponse(snapshotJSON string) *CaseTemplateSnapshotResponse
 		snapshot.Actions = append(snapshot.Actions, action)
 	}
 	return &snapshot
+}
+
+// validateCaseContextValues binds submitted values to the immutable template definitions and returns message links for shared capture.
+func validateCaseContextValues(fields []model.CaseTemplateContextField, inputs []CaseContextValueInput) (string, []string, bool, error) {
+	byKey := make(map[string]json.RawMessage, len(inputs))
+	for _, input := range inputs {
+		key := strings.ToLower(strings.TrimSpace(input.Key))
+		if key == "" {
+			return "", nil, false, validationCaseError("context value key is required")
+		}
+		if _, duplicate := byKey[key]; duplicate {
+			return "", nil, false, validationCaseError("duplicate context value")
+		}
+		byKey[key] = input.Value
+	}
+	values := make([]CaseContextValueResponse, 0, len(fields))
+	links := []string{}
+	hasFallback := false
+	for _, field := range fields {
+		raw, provided := byKey[field.Key]
+		if !provided || len(raw) == 0 || string(raw) == "null" {
+			if field.Required {
+				return "", nil, false, validationCaseError("required context value is missing: " + field.Key)
+			}
+			values = append(values, CaseContextValueResponse{Key: field.Key, Label: field.Label, FieldType: field.FieldType, Required: field.Required, Value: nil})
+			continue
+		}
+		var value any
+		switch field.FieldType {
+		case model.ContextFieldShortText, model.ContextFieldLongText, model.ContextFieldMessageLink:
+			var text string
+			if json.Unmarshal(raw, &text) != nil {
+				return "", nil, false, validationCaseError("context value has wrong type: " + field.Key)
+			}
+			text = strings.TrimSpace(text)
+			limit := 4000
+			if field.FieldType == model.ContextFieldShortText {
+				limit = 500
+			}
+			if text == "" && field.Required {
+				return "", nil, false, validationCaseError("required context value is empty: " + field.Key)
+			}
+			if len([]rune(text)) > limit {
+				return "", nil, false, validationCaseError("context value is too long: " + field.Key)
+			}
+			value = text
+			if field.FieldType == model.ContextFieldMessageLink && text != "" {
+				links = append(links, text)
+			} else if text != "" {
+				hasFallback = true
+			}
+		case model.ContextFieldBoolean:
+			var boolean bool
+			if json.Unmarshal(raw, &boolean) != nil {
+				return "", nil, false, validationCaseError("context value has wrong type: " + field.Key)
+			}
+			value = boolean
+			hasFallback = true
+		case model.ContextFieldNumber:
+			var number json.Number
+			decoder := json.NewDecoder(strings.NewReader(string(raw)))
+			decoder.UseNumber()
+			if decoder.Decode(&number) != nil {
+				return "", nil, false, validationCaseError("context value has wrong type: " + field.Key)
+			}
+			if _, err := number.Float64(); err != nil {
+				return "", nil, false, validationCaseError("context number is invalid: " + field.Key)
+			}
+			value = number
+			hasFallback = true
+		default:
+			return "", nil, false, validationCaseError("context field type is invalid")
+		}
+		values = append(values, CaseContextValueResponse{Key: field.Key, Label: field.Label, FieldType: field.FieldType, Required: field.Required, Value: value})
+		delete(byKey, field.Key)
+	}
+	if len(byKey) > 0 {
+		return "", nil, false, validationCaseError("unknown context value")
+	}
+	body, err := json.Marshal(values)
+	if err != nil {
+		return "", nil, false, err
+	}
+	return string(body), links, hasFallback, nil
+}
+
+// parseCaseContextValues safely decodes the immutable member-visible context snapshot.
+func parseCaseContextValues(body string) []CaseContextValueResponse {
+	var values []CaseContextValueResponse
+	if json.Unmarshal([]byte(body), &values) != nil {
+		return []CaseContextValueResponse{}
+	}
+	return values
+}
+
+// caseEvidenceResponses applies staff or member evidence projection rules.
+func caseEvidenceResponses(snapshots []model.CaseEvidenceSnapshot, attachments []model.CaseEvidenceAttachment, member bool) []CaseEvidenceResponse {
+	byEvidence := map[string][]CaseEvidenceAttachmentResponse{}
+	for _, item := range attachments {
+		original := item.OriginalURL
+		if member && item.PreservedURL != "" {
+			original = ""
+		}
+		byEvidence[item.EvidenceID] = append(byEvidence[item.EvidenceID], CaseEvidenceAttachmentResponse{Filename: item.Filename, ContentType: item.ContentType, SizeBytes: item.SizeBytes, OriginalURL: original, PreservedURL: item.PreservedURL, CopyOutcome: item.CopyOutcome, Warning: item.Warning})
+	}
+	out := make([]CaseEvidenceResponse, 0, len(snapshots))
+	for _, item := range snapshots {
+		out = append(out, CaseEvidenceResponse{ID: item.ID, AuthorDiscordUserID: item.AuthorDiscordUserID, MessageURL: item.MessageURL, Content: item.Content, MessageCreatedAt: item.MessageCreatedAt, MessageEditedAt: item.MessageEditedAt, Embeds: parseJSON(item.EmbedsJSON), CaptureOutcome: item.CaptureOutcome, CaptureWarning: item.CaptureWarning, Attachments: byEvidence[item.ID]})
+	}
+	return out
+}
+
+// caseNotificationResponse hides internal delivery diagnostics from affected members.
+func caseNotificationResponse(item *model.CaseNotification, member bool) *CaseNotificationResponse {
+	if item == nil {
+		return nil
+	}
+	response := &CaseNotificationResponse{Status: item.Status, AttemptCount: item.AttemptCount, LastErrorCode: item.LastErrorCode, LastError: item.LastError, SentAt: item.SentAt}
+	if member {
+		response.LastErrorCode = ""
+		response.LastError = ""
+	}
+	return response
 }
 
 // pagination encapsulates the pagination rule so callers share one consistent package implementation.

@@ -47,9 +47,9 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Make starter-template cases appealable and member notifications enabled at every level.
 - [x] Store whether the one-time starter-policy review notice has been shown.
 - [x] Expose the starter-policy notice through the backend for the dashboard setup flow.
-- [ ] Create and permission the staff-only evidence channel during guild setup.
-- [ ] Detect and report evidence-channel permission drift.
-- [ ] Add a safe repair flow for a missing, deleted, or misconfigured evidence channel.
+- [x] Create and permission the staff-only evidence channel during guild setup.
+- [x] Detect and report evidence-channel permission drift.
+- [x] Add a safe repair flow for a missing, deleted, or misconfigured evidence channel.
 - [x] Handle Discord guild create, update, leave, and rejoin events.
 - [x] Preserve guild history when Quack leaves instead of hard-deleting guild data.
 - [x] Define and implement reactivation behavior when Quack rejoins a known guild.
@@ -71,7 +71,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Require `Moderate Members` for selected timeout actions.
 - [x] Require `Kick Members` for selected kick actions.
 - [x] Require `Ban Members` for selected ban actions.
-- [ ] Require the matching current Discord permission for every manual action retry or reversal.
+- [x] Require the matching current Discord permission for every manual action retry or reversal.
 - [x] Check the moderator's role hierarchy against the target before punitive case creation.
 - [x] Check the Quack bot's role hierarchy against the target before punitive case creation.
 - [x] Check the Quack bot's action-specific Discord permissions before case creation.
@@ -80,7 +80,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Reject normal cases targeting bot accounts, including Quack.
 - [x] Reject normal cases targeting the guild owner.
 - [x] Require normal template application targets to be current human guild members.
-- [ ] Keep imported history and explicit reversal flows able to reference departed members without weakening normal target rules.
+- [x] Keep imported history and explicit reversal flows able to reference departed members without weakening normal target rules.
 - [x] List dashboard guild access for moderators with Quack capabilities instead of requiring `Manage Guild` for every staff entry point.
 - [ ] Provide a member-facing guild/case entry path that does not depend on the banned user still appearing in Discord's guild list.
 - [x] Add consistent authorization errors for dashboard and Discord callers.
@@ -90,16 +90,16 @@ Items are grouped by concern, not by implementation order or priority. Completed
 
 ## Templates and Escalation
 
-- [ ] Add simple structured template context-field definitions.
-- [ ] Support short-text context fields.
-- [ ] Support long-text context fields.
-- [ ] Support boolean context fields.
-- [ ] Support number context fields.
-- [ ] Support Discord-message-link context fields.
-- [ ] Support required and optional context fields.
-- [ ] Include context definitions in template create, update, get, list, import, export, and snapshot contracts.
-- [ ] Validate context-field names, labels, types, ordering, and required flags.
-- [ ] Treat all submitted context fields as member-visible.
+- [x] Add simple structured template context-field definitions.
+- [x] Support short-text context fields.
+- [x] Support long-text context fields.
+- [x] Support boolean context fields.
+- [x] Support number context fields.
+- [x] Support Discord-message-link context fields.
+- [x] Support required and optional context fields.
+- [x] Include context definitions in template create, update, get, list, import, export, and snapshot contracts.
+- [x] Validate context-field names, labels, types, ordering, and required flags.
+- [x] Treat all submitted context fields as member-visible.
 - [x] Keep the official template reason fixed during case creation.
 - [x] Require exactly one default level on every template.
 - [x] Allow the default level to create a case without an enforcement action.
@@ -108,164 +108,164 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Select the highest reached threshold and continue using it until a higher threshold is reached.
 - [x] Count the new case when evaluating escalation.
 - [x] Count matching non-voided cases across all versions of the same template identity.
-- [ ] Exclude voided and imported-v4 historical cases from escalation.
+- [x] Exclude voided and imported-v4 historical cases from escalation.
 - [x] Preserve immutable case snapshots when templates are edited.
 - [x] Ensure template edits increment the version without creating a new escalation identity.
-- [ ] Implement reversible template archive behavior.
-- [ ] Implement template restore behavior.
-- [ ] Keep archived templates readable but unavailable for new cases.
-- [ ] Prevent archived templates from appearing in Discord autocomplete.
-- [ ] Add template export with policy fields only.
-- [ ] Exclude guild IDs, Discord channel IDs, history, audit data, and secrets from template exports.
-- [ ] Add template import validation and confirmation.
-- [ ] Create a new guild-owned template identity for every import.
-- [ ] Make valid imported templates active immediately after confirmation.
+- [x] Implement reversible template archive behavior.
+- [x] Implement template restore behavior.
+- [x] Keep archived templates readable but unavailable for new cases.
+- [x] Prevent archived templates from appearing in Discord autocomplete.
+- [x] Add template export with policy fields only.
+- [x] Exclude guild IDs, Discord channel IDs, history, audit data, and secrets from template exports.
+- [x] Add template import validation and confirmation.
+- [x] Create a new guild-owned template identity for every import.
+- [x] Make valid imported templates active immediately after confirmation.
 - [x] Validate timeout duration as a required setting for timeout levels.
 - [x] Validate Discord-supported message-history deletion values for ban levels.
 - [x] Validate the safe retry-count limit.
-- [ ] Audit template create, update, archive, restore, import, and export success and failure.
+- [x] Audit template create, update, archive, restore, import, and export success and failure.
 - [ ] Add backend contract tests for every template request and response shape.
-- [ ] Add template-version and cross-version escalation tests.
-- [ ] Add archive/restore and import/export round-trip tests.
+- [x] Add template-version and cross-version escalation tests.
+- [x] Add archive/restore and import/export round-trip tests.
 
 ## Case Creation and History
 
-- [ ] Replace reason-override inputs with structured context submissions.
-- [ ] Validate every required template context field before creating a case.
-- [ ] Reject unknown, duplicate, or incorrectly typed context values.
-- [ ] Snapshot submitted context with the case.
-- [ ] Snapshot the selected level and its zero or one action with the case.
-- [ ] Keep case creation, escalation selection, numbering, snapshot, event, action row, notification work record, and audit insertion atomic.
+- [x] Replace reason-override inputs with structured context submissions.
+- [x] Validate every required template context field before creating a case.
+- [x] Reject unknown, duplicate, or incorrectly typed context values.
+- [x] Snapshot submitted context with the case.
+- [x] Snapshot the selected level and its zero or one action with the case.
+- [x] Keep case creation, escalation selection, numbering, snapshot, event, action row, notification work record, and audit insertion atomic.
 - [x] Validate target membership, actor permission, bot permission, and both role hierarchies before committing the case.
-- [ ] Keep case numbers unique, sequential per guild, and never reusable after voiding or import.
-- [ ] Add case void service behavior with a required reason.
-- [ ] Add case void storage behavior and immutable case event.
-- [ ] Remove voided cases from future escalation counts without deleting their records.
+- [x] Keep case numbers unique, sequential per guild, and never reusable after voiding or import.
+- [x] Add case void service behavior with a required reason.
+- [x] Add case void storage behavior and immutable case event.
+- [x] Remove voided cases from future escalation counts without deleting their records.
 - [ ] Add backend endpoints for voiding cases.
-- [ ] Prevent edits that change a case target, template, selected level, reason, or action.
-- [ ] Preserve an explicit replacement-case reference when staff recreate an incorrect case.
-- [ ] Keep terminal action failures from automatically voiding the case.
-- [ ] Separate action progress and appeal progress from case validity in all case responses.
-- [ ] Add staff case search by case number, member, moderator, template, validity, action result, appeal status, and date.
-- [ ] Add staff case pagination and stable sorting for large guilds.
-- [ ] Add staff member-history summaries derived from valid and voided cases.
-- [ ] Add member-owned case list and case-detail services.
-- [ ] Authorize member case access by target Discord identity rather than current guild membership.
-- [ ] Allow banned and departed members to read only cases targeting their Discord identity.
-- [ ] Include valid and voided cases in member history with clear labels.
-- [ ] Hide moderator identities from member-facing case responses.
-- [ ] Hide raw Discord errors, worker IDs, internal retry fields, and technical action payloads from member-facing responses.
+- [x] Prevent edits that change a case target, template, selected level, reason, or action.
+- [x] Preserve an explicit replacement-case reference when staff recreate an incorrect case.
+- [x] Keep terminal action failures from automatically voiding the case.
+- [x] Separate action progress and appeal progress from case validity in all case responses.
+- [x] Add staff case search by case number, member, moderator, template, validity, action result, appeal status, and date.
+- [x] Add staff case pagination and stable sorting for large guilds.
+- [x] Add staff member-history summaries derived from valid and voided cases.
+- [x] Add member-owned case list and case-detail services.
+- [x] Authorize member case access by target Discord identity rather than current guild membership.
+- [x] Allow banned and departed members to read only cases targeting their Discord identity.
+- [x] Include valid and voided cases in member history with clear labels.
+- [x] Hide moderator identities from member-facing case responses.
+- [x] Hide raw Discord errors, worker IDs, internal retry fields, and technical action payloads from member-facing responses.
 - [ ] Show official reason, visible context, evidence, selected outcome, public history, and appeal state to the member.
-- [ ] Define and enforce public, staff, and internal case-event response views without reintroducing free-form notes.
-- [ ] Audit permission-sensitive case and history reads.
+- [x] Define and enforce public, staff, and internal case-event response views without reintroducing free-form notes.
+- [x] Audit permission-sensitive case and history reads.
 - [ ] Add concurrency tests for simultaneous case creation and voiding in the same guild.
-- [ ] Add authorization tests proving members cannot enumerate other users or guild records.
+- [x] Add authorization tests proving members cannot enumerate other users or guild records.
 
 ## Evidence Capture and Preservation
 
-- [ ] Add domain models and storage records for message evidence snapshots.
-- [ ] Add domain models and storage records for attachment metadata and preserved copies.
-- [ ] Link evidence records to a case without embedding transport-specific Discord objects in the core.
-- [ ] Add a shared evidence-capture service used by Discord and HTTP case creation.
-- [ ] Parse and validate Discord message links.
-- [ ] Verify that a pasted message belongs to the selected guild.
-- [ ] Verify that Quack can access the linked channel and message.
-- [ ] Fetch live message text, author, timestamps, IDs, embeds, and attachments.
-- [ ] Snapshot message content before case creation commits.
-- [ ] Add a Discord message context action for starting a case from a live message.
-- [ ] Derive the target member from the selected message author in the context-action flow.
+- [x] Add domain models and storage records for message evidence snapshots.
+- [x] Add domain models and storage records for attachment metadata and preserved copies.
+- [x] Link evidence records to a case without embedding transport-specific Discord objects in the core.
+- [x] Add a shared evidence-capture service used by Discord and HTTP case creation.
+- [x] Parse and validate Discord message links.
+- [x] Verify that a pasted message belongs to the selected guild.
+- [x] Verify that Quack can access the linked channel and message.
+- [x] Fetch live message text, author, timestamps, IDs, embeds, and attachments.
+- [x] Snapshot message content before case creation commits.
+- [x] Add a Discord message context action for starting a case from a live message.
+- [x] Derive the target member from the selected message author in the context-action flow.
 - [ ] Add template selection and structured-context collection after the message context action.
-- [ ] Allow pasted message links in Discord case creation.
-- [ ] Allow pasted message links through backend case-creation contracts used by the dashboard.
-- [ ] Re-upload supported attachments to the managed staff-only evidence channel.
-- [ ] Store copied evidence message and attachment references.
-- [ ] Enforce Discord upload size and file-type limits without blocking unrelated case creation.
-- [ ] Preserve filename, content type, size, and original URL when an attachment cannot be copied.
-- [ ] Warn staff when attachment bytes were not preserved.
-- [ ] Require explicit visible context when a linked message is already deleted or inaccessible.
-- [ ] Prevent evidence capture from silently changing the case target.
-- [ ] Present captured evidence to the affected member through an authorized backend response.
-- [ ] Avoid exposing the staff-only evidence channel or unrelated evidence records to members.
-- [ ] Handle expired Discord attachment URLs by resolving the managed evidence copy when available.
-- [ ] Define evidence behavior when the managed channel is deleted between capture and read.
-- [ ] Audit evidence capture success, partial capture, and failure.
-- [ ] Add limits for message length, embed count, attachment count, and total capture work.
+- [x] Allow pasted message links in Discord case creation.
+- [x] Allow pasted message links through backend case-creation contracts used by the dashboard.
+- [x] Re-upload supported attachments to the managed staff-only evidence channel.
+- [x] Store copied evidence message and attachment references.
+- [x] Enforce Discord upload size and file-type limits without blocking unrelated case creation.
+- [x] Preserve filename, content type, size, and original URL when an attachment cannot be copied.
+- [x] Warn staff when attachment bytes were not preserved.
+- [x] Require explicit visible context when a linked message is already deleted or inaccessible.
+- [x] Prevent evidence capture from silently changing the case target.
+- [x] Present captured evidence to the affected member through an authorized backend response.
+- [x] Avoid exposing the staff-only evidence channel or unrelated evidence records to members.
+- [x] Handle expired Discord attachment URLs by resolving the managed evidence copy when available.
+- [x] Define evidence behavior when the managed channel is deleted between capture and read.
+- [x] Audit evidence capture success, partial capture, and failure.
+- [x] Add limits for message length, embed count, attachment count, and total capture work.
 - [ ] Add tests for live messages, deleted messages, inaccessible channels, wrong-guild links, oversized files, unsupported files, and partial capture.
 
 ## Discord Enforcement Actions
 
-- [ ] Expand the Discord action port beyond direct messages to timeout, kick, ban, timeout removal, and unban operations.
-- [ ] Implement real `timeout_user` execution.
-- [ ] Implement real `kick_user` execution.
-- [ ] Implement real `ban_user` execution.
-- [ ] Apply the template-defined timeout duration exactly.
-- [ ] Apply the template-defined ban message-history deletion window exactly.
-- [ ] Generate Discord audit-log reasons from the case number and official reason.
-- [ ] Classify Discord validation, permission, hierarchy, unknown-member, rate-limit, server, timeout, and network failures.
-- [ ] Mark only known-safe failures as automatically retryable.
-- [ ] Never automatically retry uncertain irreversible kick or ban outcomes.
-- [ ] Enforce the admin-configured retry-count limit for safe automatic retries.
-- [ ] Keep retry timing and backoff internal to Quack.
-- [ ] Add execution timeouts for outbound Discord calls.
-- [ ] Add idempotency protection around every enforcement attempt.
-- [ ] Prevent duplicate execution when the same case is submitted repeatedly.
-- [ ] Prevent duplicate execution when Discord or the HTTP caller retries a case-creation request.
-- [ ] Recover action rows left in `running` after a worker crash by using a bounded claim lease.
-- [ ] Record every action attempt, response summary, error classification, and final outcome.
-- [ ] Redact secrets and unnecessary Discord payload data from action attempts and audit metadata.
-- [ ] Keep failed enforcement from invalidating or hiding the case.
-- [ ] Add a failed-action review query and backend response.
-- [ ] Add manual retry service and storage behavior.
-- [ ] Recheck actor permission, bot permission, target membership, and hierarchy before manual retry.
-- [ ] Add failure-dismissal service and storage behavior without deleting attempt history.
+- [x] Expand the Discord action port beyond direct messages to timeout, kick, ban, timeout removal, and unban operations.
+- [x] Implement real `timeout_user` execution.
+- [x] Implement real `kick_user` execution.
+- [x] Implement real `ban_user` execution.
+- [x] Apply the template-defined timeout duration exactly.
+- [x] Apply the template-defined ban message-history deletion window exactly.
+- [x] Generate Discord audit-log reasons from the case number and official reason.
+- [x] Classify Discord validation, permission, hierarchy, unknown-member, rate-limit, server, timeout, and network failures.
+- [x] Mark only known-safe failures as automatically retryable.
+- [x] Never automatically retry uncertain irreversible kick or ban outcomes.
+- [x] Enforce the admin-configured retry-count limit for safe automatic retries.
+- [x] Keep retry timing and backoff internal to Quack.
+- [x] Add execution timeouts for outbound Discord calls.
+- [x] Add idempotency protection around every enforcement attempt.
+- [x] Prevent duplicate execution when the same case is submitted repeatedly.
+- [x] Prevent duplicate execution when Discord or the HTTP caller retries a case-creation request.
+- [x] Recover action rows left in `running` after a worker crash by using a bounded claim lease.
+- [x] Record every action attempt, response summary, error classification, and final outcome.
+- [x] Redact secrets and unnecessary Discord payload data from action attempts and audit metadata.
+- [x] Keep failed enforcement from invalidating or hiding the case.
+- [x] Add a failed-action review query and backend response.
+- [x] Add manual retry service and storage behavior.
+- [x] Recheck actor permission, bot permission, target membership, and hierarchy before manual retry.
+- [x] Add failure-dismissal service and storage behavior without deleting attempt history.
 - [ ] Add retry, dismiss, and void backend endpoints.
-- [ ] Add immutable audit entries for retry requests, retry results, dismissals, and voids.
-- [ ] Add timeout-removal as a staff-confirmed reversal operation, not a template action.
-- [ ] Add unban as a staff-confirmed reversal operation, not a template action.
-- [ ] Require matching Discord permission and hierarchy for reversals.
-- [ ] Attach reversal attempts and results to the original case and accepted appeal where applicable.
+- [x] Add immutable audit entries for retry requests, retry results, dismissals, and voids.
+- [x] Add timeout-removal as a staff-confirmed reversal operation, not a template action.
+- [x] Add unban as a staff-confirmed reversal operation, not a template action.
+- [x] Require matching Discord permission and hierarchy for reversals.
+- [x] Attach reversal attempts and results to the original case and accepted appeal where applicable.
 - [ ] Add mocked Discord tests for timeout, kick, ban, timeout removal, unban, rate limits, retries, and ambiguous failures.
-- [ ] Add action idempotency and crash-recovery integration tests.
+- [x] Add action idempotency and crash-recovery integration tests.
 
 ## Member Notifications
 
-- [ ] Replace generated `send_dm` action rows with one case-level notification workflow.
-- [ ] Remove separate level and action DM paths that can notify twice for one case.
-- [ ] Let only the selected level decide whether the member is notified.
-- [ ] Prevent moderators from changing notification behavior during case creation.
-- [ ] Prepare or open the member DM channel before kick or ban when needed.
-- [ ] Send the single structured notification after the enforcement outcome is known.
-- [ ] Include guild name, official reason, visible context, outcome, case reference, and appeal access.
-- [ ] Include the optional guild-specific introduction and footer without supporting arbitrary executable templates.
-- [ ] Clearly state whether Discord enforcement succeeded, failed, or requires staff review.
-- [ ] Record notification delivery separately from enforcement outcome.
-- [ ] Keep DM failure from changing case validity or member dashboard visibility.
-- [ ] Surface DM delivery failures to staff without creating a second punitive action failure.
-- [ ] Make notification sending idempotent so worker and request retries cannot send duplicates.
-- [ ] Ensure action retry does not resend the original case notification unless staff explicitly requests another notice.
+- [x] Replace generated `send_dm` action rows with one case-level notification workflow.
+- [x] Remove separate level and action DM paths that can notify twice for one case.
+- [x] Let only the selected level decide whether the member is notified.
+- [x] Prevent moderators from changing notification behavior during case creation.
+- [x] Prepare or open the member DM channel before kick or ban when needed.
+- [x] Send the single structured notification after the enforcement outcome is known.
+- [x] Include guild name, official reason, visible context, outcome, case reference, and appeal access.
+- [x] Include the optional guild-specific introduction and footer without supporting arbitrary executable templates.
+- [x] Clearly state whether Discord enforcement succeeded, failed, or requires staff review.
+- [x] Record notification delivery separately from enforcement outcome.
+- [x] Keep DM failure from changing case validity or member dashboard visibility.
+- [x] Surface DM delivery failures to staff without creating a second punitive action failure.
+- [x] Make notification sending idempotent so worker and request retries cannot send duplicates.
+- [x] Ensure action retry does not resend the original case notification unless staff explicitly requests another notice.
 - [ ] Add notification rendering tests for case-only, timeout, kick, ban, failed enforcement, appealable, non-appealable, and DM-failure cases.
-- [ ] Add integration tests proving one case produces at most one automatic member notification.
+- [x] Add integration tests proving one case produces at most one automatic member notification.
 
 ## Discord Moderator Experience
 
-- [ ] Remove the free-form reason option from `/case add`.
-- [ ] Add structured template-context prompts to `/case add`.
+- [x] Remove the free-form reason option from `/case add`.
+- [x] Add structured template-context prompts to `/case add`.
 - [ ] Use Discord modals or components for context that cannot fit slash-command options.
-- [ ] Keep template selection autocomplete limited to active templates.
-- [ ] Show required-context validation errors privately.
-- [ ] Keep successful case summaries public in the invoking staff channel.
-- [ ] Keep public case summaries limited to case number, target, template, level, and action status.
+- [x] Keep template selection autocomplete limited to active templates.
+- [x] Show required-context validation errors privately.
+- [x] Keep successful case summaries public in the invoking staff channel.
+- [x] Keep public case summaries limited to case number, target, template, level, and action status.
 - [ ] Update the public case summary after asynchronous action and notification outcomes are known.
-- [ ] Add `/case view` for authorized staff case detail.
-- [ ] Add `/case list` for authorized staff case browsing.
-- [ ] Add `/case user` for authorized member history.
+- [x] Add `/case view` for authorized staff case detail.
+- [x] Add `/case list` for authorized staff case browsing.
+- [x] Add `/case user` for authorized member history.
 - [ ] Add stable case pagination buttons.
 - [ ] Add case detail embeds that separate validity, action result, appeal state, context, and evidence links.
 - [ ] Add member-history embeds without exposing other guilds or hidden technical details.
-- [ ] Add a Discord failed-action review view.
+- [x] Add a Discord failed-action review view.
 - [ ] Register real retry, dismiss, and void button handlers.
 - [ ] Require a void reason through a modal before voiding from Discord.
-- [ ] Register the Discord message context command for evidence-backed case creation.
+- [x] Register the Discord message context command for evidence-backed case creation.
 - [ ] Add an appeal entry button or secure dashboard link to eligible case notifications.
 - [ ] Add Discord views for staff to inspect appeal status and case-linked review history.
 - [ ] Add Discord audit-mirror rendering for important moderation events.
@@ -273,7 +273,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [ ] Remove legacy direct moderation commands after migration.
 - [ ] Prevent v4 and v5 command-name collisions during coexistence.
 - [ ] Remove placeholder component and modal handlers as real workflows are registered.
-- [ ] Add interaction deduplication using Discord interaction IDs.
+- [x] Add interaction deduplication using Discord interaction IDs.
 - [ ] Add tests for command definitions, permissions, autocomplete, context modals, message commands, pagination, buttons, deferred edits, and failure recovery.
 
 ## Authentication and Backend API
@@ -302,7 +302,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [ ] Add standard security headers where appropriate for the API.
 - [ ] Log authentication failures and permission denials with trace IDs without logging tokens or cookies.
 - [ ] Redact OAuth tokens, session IDs, cookies, and secrets from logs and error payloads.
-- [ ] Add API idempotency for case creation and other externally retried writes.
+- [x] Add API idempotency for case creation and other externally retried writes.
 - [ ] Add pagination limits and defensive query bounds to every list endpoint.
 - [ ] Add malformed JSON, oversized request, expired session, revoked token, and cross-guild access tests.
 

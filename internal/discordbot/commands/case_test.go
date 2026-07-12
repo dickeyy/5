@@ -55,13 +55,13 @@ func TestCommandDefinitionDefinesCaseAdd(t *testing.T) {
 	if command.DefaultMemberPermissions == nil || *command.DefaultMemberPermissions != int64(discordgo.PermissionModerateMembers) {
 		t.Fatalf("expected moderate members default permission, got %+v", command.DefaultMemberPermissions)
 	}
-	if len(command.Options) != 1 || command.Options[0].Name != "add" {
+	if len(command.Options) < 9 || command.Options[0].Name != "add" {
 		t.Fatalf("expected add subcommand, got %+v", command.Options)
 	}
 
 	add := command.Options[0]
-	if len(add.Options) != 2 {
-		t.Fatalf("expected template/user options, got %+v", add.Options)
+	if len(add.Options) != 4 {
+		t.Fatalf("expected template/user/context/evidence options, got %+v", add.Options)
 	}
 	if !add.Options[0].Autocomplete {
 		t.Fatalf("expected template option to support autocomplete")
@@ -84,8 +84,8 @@ func TestHandleCaseInteractionCreatesCase(t *testing.T) {
 	if response.Type != discordgo.InteractionResponseDeferredChannelMessageWithSource {
 		t.Fatalf("expected deferred success response, got %v", response.Type)
 	}
-	if response.Data != nil && response.Data.Flags&discordgo.MessageFlagsEphemeral != 0 {
-		t.Fatalf("expected public success response, got flags %d", response.Data.Flags)
+	if response.Data == nil || response.Data.Flags&discordgo.MessageFlagsEphemeral == 0 {
+		t.Fatalf("expected private acknowledgement before public success, got %+v", response.Data)
 	}
 	if result.Task == nil {
 		t.Fatalf("expected deferred case creation task")
@@ -94,13 +94,10 @@ func TestHandleCaseInteractionCreatesCase(t *testing.T) {
 	if err := result.Task(ctx, responder); err != nil {
 		t.Fatalf("run deferred task: %v", err)
 	}
-	if responder.edit.Content == nil {
-		t.Fatalf("expected task to clear original response content")
+	if !responder.deleted || len(responder.followup.Embeds) != 1 || responder.followup.Ephemeral {
+		t.Fatalf("expected public followup and deleted private acknowledgement, got followup=%+v deleted=%v", responder.followup, responder.deleted)
 	}
-	if responder.edit.Embeds == nil || len(*responder.edit.Embeds) != 1 {
-		t.Fatalf("expected task to edit original response with an embed, got %+v", responder.edit)
-	}
-	embed := (*responder.edit.Embeds)[0]
+	embed := responder.followup.Embeds[0]
 	if embed.Title != "Case #1 Created" {
 		t.Fatalf("unexpected embed title: %q", embed.Title)
 	}
@@ -111,7 +108,7 @@ func TestHandleCaseInteractionCreatesCase(t *testing.T) {
 		"Template":       "Spam",
 		"Level":          "Default",
 		"Matching Cases": "1",
-		"Queued Actions": "1: send_dm",
+		"Queued Actions": "0 (none)",
 	} {
 		if !strings.Contains(fields[name], want) {
 			t.Fatalf("expected embed field %q to contain %q, got %q", name, want, fields[name])

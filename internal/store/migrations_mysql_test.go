@@ -83,6 +83,12 @@ func TestMySQLMigrateForwardRerunPreservationAndRollbackBoundary(t *testing.T) {
 	}
 
 	if err := repositories.RollbackLastMigration(); err != nil {
+		t.Fatalf("roll back core moderation migration: %v", err)
+	}
+	if db.Migrator().HasTable(&migration0005Notification{}) || db.Migrator().HasColumn(&migration0005CaseColumns{}, "IdempotencyKey") {
+		t.Fatal("MySQL core moderation schema remained after rollback")
+	}
+	if err := repositories.RollbackLastMigration(); err != nil {
 		t.Fatalf("roll back guild settings migration: %v", err)
 	}
 	if db.Migrator().HasTable(&migration0004GuildSettingsRecord{}) {
