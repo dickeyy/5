@@ -26,7 +26,7 @@ func TestOptionalModuleLogicalMigrationsJoinCentralLedger(t *testing.T) {
 	if err := db.Order("version ASC").Find(&ledger).Error; err != nil {
 		t.Fatalf("read migration ledger: %v", err)
 	}
-	if len(ledger) != 9 || ledger[5].Name != "optional_module_registry_0100" || ledger[6].Name != "ticket_lifecycle_0110" || ledger[7].Name != "honeypot_triggers_0300" || ledger[8].Name != "appeals_and_member_access_0200" {
+	if len(ledger) != len(registeredMigrations()) || ledger[5].Name != "optional_module_registry_0100" || ledger[6].Name != "ticket_lifecycle_0110" || ledger[7].Name != "honeypot_triggers_0300" || ledger[8].Name != "appeals_and_member_access_0200" || ledger[9].Name != "v4_historical_import_0400" || ledger[10].Name != "final_storage_constraints_0410" {
 		t.Fatalf("unexpected reconciled ledger: %+v", ledger)
 	}
 	if strings.Contains(migration0006Source, "internal/modules") || strings.Contains(migration0007Source, "internal/modules") || strings.Contains(migration0008Source, "internal/modules") || strings.Contains(migration0200Source, "internal/modules") {

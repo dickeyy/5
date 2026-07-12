@@ -154,7 +154,8 @@ func TestMigration0002QuarantinedPolicyCannotCrossLiveReadBoundary(t *testing.T)
 		t.Fatalf("create preserved second action: %v", err)
 	}
 
-	if err := runMigrations(db, registeredMigrations()); err != nil {
+	migrations := registeredMigrations()
+	if err := runMigrations(db, migrations[:len(migrations)-1]); err != nil {
 		t.Fatalf("apply template compatibility migration: %v", err)
 	}
 

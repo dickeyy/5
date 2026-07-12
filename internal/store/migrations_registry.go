@@ -54,5 +54,7 @@ func registeredMigrations() []migration {
 		migration0007TicketLifecycle(),
 		migration0008HoneypotTriggers(),
 		migration0200Appeals(9),
+		migration0400V4HistoricalImport(10),
+		migration0410FinalStorageConstraints(11),
 	}
 }
