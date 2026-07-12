@@ -128,7 +128,10 @@ func (b *Bot) GuildAuthorization(ctx context.Context, guildID, actorDiscordUserI
 		return nil, quack.ErrAuthorizationUnavailable
 	}
 	guild, err := b.Session.Guild(guildID)
-	if err != nil || guild == nil {
+	if err != nil {
+		return nil, guildAuthorizationError(err)
+	}
+	if guild == nil {
 		return nil, quack.ErrAuthorizationUnavailable
 	}
 
@@ -161,6 +164,18 @@ func (b *Bot) GuildAuthorization(ctx context.Context, guildID, actorDiscordUserI
 		snapshot.Target = &target
 	}
 	return snapshot, nil
+}
+
+// guildAuthorizationError preserves inactive-guild semantics while hiding transient Discord failures.
+func guildAuthorizationError(err error) error {
+	var restErr *discordgo.RESTError
+	if errors.As(err, &restErr) && restErr.Response != nil {
+		switch restErr.Response.StatusCode {
+		case http.StatusForbidden, http.StatusNotFound:
+			return quack.ErrBotNotInGuild
+		}
+	}
+	return quack.ErrAuthorizationUnavailable
 }
 
 // liveMemberAuthorization fetches one current member and safely represents Discord's unknown-member response as non-membership.
