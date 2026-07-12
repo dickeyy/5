@@ -44,7 +44,7 @@ func TestUnavailableEvidenceRequiresOtherVisibleContext(t *testing.T) {
 		t.Fatal("deleted message continued without visible fallback context")
 	}
 	captured, err := service.Capture(context.Background(), "111111111111111111", "target", "", []string{link}, true)
-	if err != nil || len(captured.Snapshots) != 1 || captured.Snapshots[0].CaptureOutcome != "deleted" {
+	if err != nil || len(captured.Snapshots) != 1 || captured.Snapshots[0].CaptureOutcome != "deleted" || captured.Snapshots[0].MessageCreatedAt.IsZero() {
 		t.Fatalf("partial capture: %+v err=%v", captured, err)
 	}
 }

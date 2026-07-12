@@ -2,6 +2,7 @@ package quack_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
@@ -91,6 +92,54 @@ func TestMySQLConcurrentCaseCreationSelectsDistinctEscalation(t *testing.T) {
 	}
 	if !levels["Default"] || !levels["Second"] {
 		t.Fatalf("expected default and second escalation levels, got %+v", levels)
+	}
+}
+
+func TestMySQLUnavailableEvidenceSnapshotUsesPersistableTimestamp(t *testing.T) {
+	db := openIsolatedMySQLDB(t)
+	repositories := store.New(db, nil)
+	if err := repositories.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	guild, err := repositories.UpsertGuild(ctx, model.UpsertGuildParams{
+		DiscordGuildID: "111111111111111111", Name: "Evidence", OwnerDiscordUserID: "owner",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guildContext := &quack.GuildStaffContext{
+		Guild: guild, Staff: &model.StaffMember{GuildID: guild.ID, DiscordUserID: "moderator"},
+		Permissions: map[model.PermissionAction]bool{
+			model.PermissionActionCaseTemplateWrite: true,
+			model.PermissionActionCaseCreate:        true,
+		},
+	}
+	template, err := quack.NewTemplateService(repositories).Create(ctx, guildContext, quack.TemplateInput{
+		Slug: "unavailable-evidence", Name: "Unavailable evidence", Description: "Integration", ReasonTemplate: "Reason",
+		ContextFields: []quack.TemplateContextFieldInput{
+			{Key: "summary", Label: "Summary", FieldType: model.ContextFieldShortText, Position: 1, Required: true},
+			{Key: "message", Label: "Message", FieldType: model.ContextFieldMessageLink, Position: 2, Required: true},
+		},
+		Levels: []quack.TemplateLevelInput{{Name: "Default", Position: 1, IsDefault: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := "https://discord.com/channels/111111111111111111/222222222222222222/333333333333333333"
+	summary, _ := json.Marshal("visible fallback")
+	message, _ := json.Marshal(link)
+	service := quack.NewCaseService(repositories).WithEvidenceCapture(quack.NewEvidenceService(unavailableEvidenceClient{err: &quack.EvidenceUnavailableError{Outcome: "deleted", Message: "message deleted"}}, repositories))
+	created, err := service.Create(ctx, guildContext, quack.CaseInput{
+		TemplateID: template.ID, TargetDiscordUserID: "target",
+		ContextValues: []quack.CaseContextValueInput{{Key: "summary", Value: summary}, {Key: "message", Value: message}},
+	})
+	if err != nil {
+		t.Fatalf("create partial-evidence case on MySQL: %v", err)
+	}
+	evidence, _, err := repositories.ListCaseEvidence(ctx, created.ID)
+	if err != nil || len(evidence) != 1 || evidence[0].MessageCreatedAt.IsZero() {
+		t.Fatalf("persisted unavailable evidence is invalid: evidence=%+v err=%v", evidence, err)
 	}
 }
 

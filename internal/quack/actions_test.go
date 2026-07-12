@@ -2,6 +2,7 @@ package quack_test
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -164,6 +165,40 @@ func TestActionServiceDoesNotNotifyForUnsupportedAction(t *testing.T) {
 	}
 	if failureAudit == nil || failureAudit.RequestID != "req-action-1" || failureAudit.CorrelationID != "corr-action-1" {
 		t.Fatalf("expected traced action failure audit, got %+v", audits)
+	}
+}
+
+func TestActionServiceReversalResolvesCaseNumber(t *testing.T) {
+	ctx := context.Background()
+	store := newMigratedStore(t)
+	admin := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
+	moderator := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
+	template := createAppTemplate(t, ctx, store, admin, actionTemplateInput("numbered-reversal", []quack.TemplateActionInput{{ActionType: model.ActionTimeoutUser, TimeoutDurationSeconds: 60}}))
+	created, err := quack.NewCaseService(store).Create(ctx, moderator, quack.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
+	if err != nil {
+		t.Fatalf("create reversal case: %v", err)
+	}
+	actions, err := store.ListCaseActionExecutions(ctx, created.ID)
+	if err != nil || len(actions) != 1 {
+		t.Fatalf("load original action: actions=%+v err=%v", actions, err)
+	}
+	if err := store.DB().Model(&model.CaseActionExecution{}).Where("id = ?", actions[0].ID).Update("status", model.ActionExecutionSucceeded).Error; err != nil {
+		t.Fatalf("mark original action succeeded: %v", err)
+	}
+	authorizer := quack.NewGuildService(store, fakeDiscordClient{authorization: &quack.DiscordGuildAuthorization{
+		Guild:  quack.DiscordBotGuild{ID: "guild-1", OwnerID: "owner-1"},
+		Actor:  quack.DiscordMemberAuthorization{DiscordUserID: "mod-1", Present: true, PermissionBits: uint64(discordgo.PermissionModerateMembers), TopRolePosition: 10},
+		Bot:    quack.DiscordMemberAuthorization{DiscordUserID: "quack", Present: true, PermissionBits: ^uint64(0), TopRolePosition: 100, Bot: true},
+		Target: &quack.DiscordMemberAuthorization{DiscordUserID: "target-1", Present: true, TopRolePosition: 1},
+	}})
+	reversal, err := quack.NewActionService(store, nil).
+		WithRecoveryControls(authorizer, nil).
+		ReverseForAppeal(ctx, moderator, strconv.FormatUint(created.CaseNumber, 10), actions[0].ID, model.ActionRemoveTimeout, nil)
+	if err != nil || reversal == nil {
+		t.Fatalf("reverse case by number: reversal=%+v err=%v", reversal, err)
+	}
+	if reversal.CaseID != created.ID || reversal.ActionType != model.ActionRemoveTimeout {
+		t.Fatalf("reversal targeted wrong case: %+v", reversal)
 	}
 }
 

@@ -173,7 +173,12 @@ func (s *EvidenceService) Capture(ctx context.Context, guildID, targetDiscordUse
 			if idErr != nil {
 				return nil, idErr
 			}
-			result.Snapshots = append(result.Snapshots, model.CaseEvidenceSnapshot{ULIDModel: model.ULIDModel{ID: id}, GuildID: guildID, ChannelDiscordID: ref.ChannelID, MessageDiscordID: ref.MessageID, MessageURL: ref.URL, CaptureOutcome: outcome, CaptureWarning: warning, EmbedsJSON: "[]"})
+			result.Snapshots = append(result.Snapshots, model.CaseEvidenceSnapshot{
+				ULIDModel: model.ULIDModel{ID: id}, GuildID: guildID,
+				ChannelDiscordID: ref.ChannelID, MessageDiscordID: ref.MessageID,
+				MessageURL: ref.URL, MessageCreatedAt: time.Now().UTC(),
+				CaptureOutcome: outcome, CaptureWarning: warning, EmbedsJSON: "[]",
+			})
 			result.Warnings = append(result.Warnings, warning)
 			continue
 		}

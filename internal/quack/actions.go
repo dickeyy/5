@@ -361,11 +361,14 @@ func (s *ActionService) ReverseForAppeal(ctx context.Context, guildContext *Guil
 	if s.authorizer == nil {
 		return nil, ErrAuthorizationUnavailable
 	}
-	item, err := s.store.GetCaseByID(ctx, caseID)
+	if guildContext == nil || guildContext.Guild == nil || guildContext.Staff == nil {
+		return nil, ErrCaseNotFound
+	}
+	item, err := s.store.GetCaseByIDOrNumber(ctx, guildContext.Guild.ID, caseID)
 	if err != nil {
 		return nil, err
 	}
-	if item == nil || guildContext == nil || guildContext.Guild == nil || guildContext.Staff == nil || item.GuildID != guildContext.Guild.ID {
+	if item == nil || item.GuildID != guildContext.Guild.ID {
 		return nil, ErrCaseNotFound
 	}
 	if err := s.authorizer.PreflightReversal(ctx, guildContext, item.TargetDiscordUserID, actionType); err != nil {
