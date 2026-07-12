@@ -293,6 +293,13 @@ matrix, TODO/scope-drift ledgers, central migration registration, and E2E/
 rehearsal harnesses. It will combine only accepted QP-G/QP-H heads before final
 composition, repository-wide gates, PR, and one-review lifecycle.
 
+QP-I scaffold checkpoint `54df860` is clean with no PR: R01-R15 and all ten
+completion gates are mapped in `docs/v5-readiness.md`; all 122 currently
+unchecked TODO entries are classified by concern/owner; external-only evidence
+is explicitly `NOT EXECUTED`; the rehearsal guide, fail-closed readiness script,
+and clean-install/runtime-composition test are present. Focused readiness tests
+and diff validation pass. Final conclusions remain open pending QP-G/QP-H.
+
 ## Dependency waves and slices
 
 Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
@@ -1079,7 +1086,7 @@ by the macro-package ledger.
 | QI-2 | ACCEPTED | `integration/qi-2-p2` at `6b999c1` | [#13](https://github.com/dickeyy/5/pull/13) | 1 complete; P1 fixed | focused/MySQL/race/full/vet/build green |
 | QP-G | IN_PROGRESS | `package/qp-g-v4-storage` from `6b999c1` | pending | 0 | absorbs V5-023/024 |
 | QP-H | IN_PROGRESS | `package/qp-h-ops-security` from `6b999c1` | pending | 0 | absorbs remaining V5-017/025 |
-| QP-I | IN_PROGRESS | `final/qp-i-readiness` from `6b999c1` | pending | 0 | parallel evidence/E2E scaffold; awaits accepted QP-G/QP-H heads |
+| QP-I | IN_PROGRESS | `final/qp-i-readiness` checkpoint `54df860` | pending | 0 | R01-R15/TODO/rehearsal scaffold green; awaits accepted QP-G/QP-H heads |
 
 ## Decisions
 
