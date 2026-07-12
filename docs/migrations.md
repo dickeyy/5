@@ -36,7 +36,9 @@ history, and every case event in frozen storage. Retired note and generic
 `status_changed` events are inventoried by case in
 `quack_v5_0003_case_compatibility` and excluded from live event queries. Its
 reviewed inverse restores exact prior status/source values and drops only that
-migration-owned table.
+migration-owned table. Cases created after migration 0003 are explicitly mapped
+from canonical validity/source values back to the compatible legacy
+`open`/`voided` and source labels before the ledger entry is removed.
 
 ## Forward procedure
 

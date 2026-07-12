@@ -15,7 +15,7 @@ mapping: open/action_running/completed/failed/appealed -> valid; voided -> voide
 validation: reject unknown status or source values before mutating any case
 legacy events: preserve note_added/note_edited/note_deleted/status_changed byte-for-byte; inventory counts per affected case; exclude them from live v5 reads
 bookkeeping: quack_v5_0003_case_compatibility stores exact prior status/source plus retired event counts
-rollback: restore exact prior status/source values and remove only migration-owned bookkeeping`
+rollback: restore exact prior status/source values; map post-migration canonical cases to compatible legacy values; remove only migration-owned bookkeeping`
 
 // migration0003CaseValidity converts known legacy case values without rewriting immutable history.
 func migration0003CaseValidity() migration {
@@ -160,11 +160,31 @@ func migration0003SourceValue(value string) (string, bool) {
 	}
 }
 
-// rollbackCaseValidityCompatibility restores exact legacy case values and removes only migration-owned bookkeeping.
+// rollbackCaseValidityCompatibility restores exact legacy values, downgrades new canonical rows, and removes only migration-owned bookkeeping.
 func rollbackCaseValidityCompatibility(db *gorm.DB) error {
 	migrator := db.Migrator()
 	if !migrator.HasTable(&migration0003CaseCompatibility{}) {
 		return nil
+	}
+	var postMigrationCases []migration0003Case
+	if err := db.Raw(`SELECT candidate.id, candidate.status, candidate.source
+		FROM cases AS candidate
+		LEFT JOIN quack_v5_0003_case_compatibility AS compatibility ON compatibility.case_id = candidate.id
+		WHERE compatibility.case_id IS NULL`).Scan(&postMigrationCases).Error; err != nil {
+		return fmt.Errorf("list post-migration cases before case validity rollback: %w", err)
+	}
+	type legacyValues struct{ status, source string }
+	postMigrationLegacy := make(map[string]legacyValues, len(postMigrationCases))
+	for _, candidate := range postMigrationCases {
+		status, ok := migration0003LegacyStatus(candidate.Status)
+		if !ok {
+			return fmt.Errorf("post-migration case %s has unknown canonical validity %q", candidate.ID, candidate.Status)
+		}
+		source, ok := migration0003LegacySource(candidate.Source)
+		if !ok {
+			return fmt.Errorf("post-migration case %s has unknown canonical source %q", candidate.ID, candidate.Source)
+		}
+		postMigrationLegacy[candidate.ID] = legacyValues{status: status, source: source}
 	}
 	var entries []migration0003CaseCompatibility
 	if err := db.Find(&entries).Error; err != nil {
@@ -176,8 +196,42 @@ func rollbackCaseValidityCompatibility(db *gorm.DB) error {
 			return fmt.Errorf("restore case %s status and source: %w", entry.CaseID, err)
 		}
 	}
+	for caseID, legacy := range postMigrationLegacy {
+		if err := db.Model(&migration0003Case{}).Where("id = ?", caseID).
+			Updates(map[string]any{"status": legacy.status, "source": legacy.source}).Error; err != nil {
+			return fmt.Errorf("downgrade post-migration case %s status and source: %w", caseID, err)
+		}
+	}
 	if err := migrator.DropTable(&migration0003CaseCompatibility{}); err != nil {
 		return fmt.Errorf("drop case compatibility table: %w", err)
 	}
 	return nil
+}
+
+// migration0003LegacyStatus maps canonical validity to the compatible pre-0003 case state.
+func migration0003LegacyStatus(value string) (string, bool) {
+	switch value {
+	case "valid":
+		return "open", true
+	case "voided":
+		return "voided", true
+	default:
+		return "", false
+	}
+}
+
+// migration0003LegacySource maps canonical sources to their reviewed pre-0003 equivalents.
+func migration0003LegacySource(value string) (string, bool) {
+	switch value {
+	case "dashboard":
+		return "api", true
+	case "discord":
+		return "discord_command", true
+	case "honeypot":
+		return "automation", true
+	case "v4_import":
+		return "import", true
+	default:
+		return "", false
+	}
 }

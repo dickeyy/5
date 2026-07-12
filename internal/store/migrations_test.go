@@ -348,6 +348,71 @@ func TestMigration0003RejectsUnknownValuesWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestMigration0003RollbackDowngradesPostMigrationCases(t *testing.T) {
+	db := openSQLiteMigrationDB(t)
+	if err := runMigrations(db, registeredMigrations()); err != nil {
+		t.Fatalf("apply migrations: %v", err)
+	}
+	now := time.Now().UTC()
+	guild := GuildRecord{ULIDModelRecord: ULIDModelRecord{ID: "01J32000000000000000000001", CreatedAt: now, UpdatedAt: now}, DiscordGuildID: "rollback-guard", Name: "Rollback Guard", OwnerDiscordUserID: "owner"}
+	if err := db.Create(&guild).Error; err != nil {
+		t.Fatalf("create guild: %v", err)
+	}
+	postMigration := model.Case{
+		ULIDModel: model.ULIDModel{ID: "01J32000000000000000000002", CreatedAt: now, UpdatedAt: now},
+		GuildID:   guild.ID, CaseNumber: 1, TemplateVersion: 1, TemplateSnapshotJSON: `{}`,
+		TargetDiscordUserID: "target", ModeratorDiscordUserID: "moderator", Reason: "reason",
+		Validity: model.CaseValidityValid, Source: model.CaseSourceDashboard, MetadataJSON: `{}`,
+	}
+	if err := db.Select("*").Create(&postMigration).Error; err != nil {
+		t.Fatalf("create post-migration case: %v", err)
+	}
+
+	if err := rollbackLastMigration(db, registeredMigrations()); err != nil {
+		t.Fatalf("roll back with post-migration case: %v", err)
+	}
+	var persisted migration0003Case
+	if err := db.First(&persisted, "id = ?", postMigration.ID).Error; err != nil {
+		t.Fatalf("load post-migration case: %v", err)
+	}
+	if persisted.Status != "open" || persisted.Source != "api" {
+		t.Fatalf("post-migration case was not downgraded compatibly: %+v", persisted)
+	}
+	if db.Migrator().HasTable(&migration0003CaseCompatibility{}) {
+		t.Fatal("rollback retained migration-owned compatibility bookkeeping")
+	}
+	var ledgerCount int64
+	if err := db.Model(&schemaMigration{}).Count(&ledgerCount).Error; err != nil {
+		t.Fatalf("count migration ledger: %v", err)
+	}
+	if ledgerCount != 2 {
+		t.Fatalf("expected migration 0003 ledger row removed, got %d rows", ledgerCount)
+	}
+}
+
+func TestMigration0003CanonicalRollbackMappings(t *testing.T) {
+	for value, want := range map[string]string{"valid": "open", "voided": "voided"} {
+		got, ok := migration0003LegacyStatus(value)
+		if !ok || got != want {
+			t.Fatalf("canonical validity %q mapped to %q/%v, want %q/true", value, got, ok, want)
+		}
+	}
+	for value, want := range map[string]string{
+		"dashboard": "api", "discord": "discord_command", "honeypot": "automation", "v4_import": "import",
+	} {
+		got, ok := migration0003LegacySource(value)
+		if !ok || got != want {
+			t.Fatalf("canonical source %q mapped to %q/%v, want %q/true", value, got, ok, want)
+		}
+	}
+	if _, ok := migration0003LegacyStatus("unknown"); ok {
+		t.Fatal("unknown canonical validity was accepted")
+	}
+	if _, ok := migration0003LegacySource("unknown"); ok {
+		t.Fatal("unknown canonical source was accepted")
+	}
+}
+
 func TestMigration0002ActionCompatibility(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -626,6 +691,10 @@ func TestRollbackRefusesForwardOnlyBaselineWithoutChangingHistory(t *testing.T) 
 		t.Fatalf("migrate baseline: %v", err)
 	}
 	want := insertRepresentativeHistory(t, db)
+	if err := db.Model(&migration0003Case{}).Where("id = ?", want.CaseID).
+		Updates(map[string]any{"status": "valid", "source": "discord"}).Error; err != nil {
+		t.Fatalf("make post-migration history canonical: %v", err)
+	}
 
 	if err := repositories.RollbackLastMigration(); err != nil {
 		t.Fatalf("roll back reversible case validity migration: %v", err)
