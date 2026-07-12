@@ -1,8 +1,8 @@
 # Quack v5 Readiness
 
 Verdict: **NOT READY**
-Combined implementation anchor: `final/qp-i-readiness` at `73236be` plus this
-uncommitted final readiness reconciliation
+Combined implementation anchor: `final/qp-i-readiness` at `50d40de` plus this
+review reconciliation
 Last reconciled: 2026-07-12
 
 The repository implementation and local strict validation are complete. Quack
@@ -11,8 +11,8 @@ rehearsal in a non-production guild has not been authorized or executed, and
 no product owner has accepted that missing release evidence as a readiness
 exception. `v5.md` requires exact new-guild bootstrap and Discord-authoritative
 behavior, so adapter and isolated end-to-end tests do not prove the external
-installation boundary. The QP-I Codex review lifecycle is also pending at this
-pre-review anchor. Release-infrastructure changes
+installation boundary. The QP-I Codex review-and-fix lifecycle is complete
+with no second review request. Release-infrastructure changes
 are explicitly deferred under the user's prohibition and are not represented
 as passes.
 
@@ -82,7 +82,7 @@ No unresolved actionable P0 remains.
 | #13 QI-2 | Honeypot internal-guild identity P1 fixed at `6b999c1` |
 | #14 QP-G | Exactly one review of `dd542c0`; recovery-manifest P2 fixed at `17f938b`; central-registry P1 transferred and closed by QP-I physical versions 10/11 |
 | #15 QP-H | Exactly one review of `d66357a`; bearer-format replay identity P2 fixed by normalized session extraction, and stale Discord gateway readiness P2 fixed by transition handlers/tests; both threads resolved at `e3e01b6`, no second request. The later queue-fairness TODO audit gap is fixed at `44f18c9` and integrated at `73236be`. |
-| #16 QP-I | Local strict gate passes; this PR is the single review surface and receives exactly one standalone Codex review request by default. |
+| #16 QP-I | Exactly one review of `fff053b`; three P2 findings were valid and fixed at `50d40de`: strict one-object-per-JSONL-line parsing, side-effect-free failed dry-runs, and exact case-create route classification. Focused/race/vet/diff validation passes; no second request. |
 
 ## Validation evidence
 
@@ -107,9 +107,12 @@ Passed evidence:
   `quack`, `quack-migrate`, `quack-v4-import`, and `quack-storage-verify`, the
   full MySQL/Redis-enabled repository suite, the repository-native two-process
   Redis write/verify persistence probe, and `git diff --check`.
-- QP-I non-network final static gates after current edits:
+- QP-I pre-review final static gates:
   `go vet ./...` PASS, `go build -buildvcs=false ./...` PASS,
   `bash -n scripts/v5-readiness.sh` PASS, `git diff --check` PASS.
+- QP-I Codex fixes: `go test ./internal/v4import
+  ./internal/httpapi/platform` PASS; the same packages under `go test -race`
+  PASS; targeted `go vet` and `git diff --check` PASS.
 - Tracked-file credential pattern scan and committed `.env` scan: PASS with no
   matches outside examples.
 - Firm-boundary source scan: no live severity/weight/window/reason-override/
@@ -136,16 +139,15 @@ Passed evidence:
 | Scope drift resolved or accepted | PASS for implemented repository behavior |
 | Every applicable `v5.md` requirement checked | PASS inventory R01-R15; R15 evidence incomplete |
 | Every slice validation passed | PASS, including QP-I strict final gate |
-| Every slice review/fix lifecycle complete | Accepted packages PASS; QP-I lifecycle not started |
+| Every slice review/fix lifecycle complete | PASS; PR #16 received one review and all three P2 findings were fixed and revalidated without a second request |
 | No actionable P0/P1 review finding | PASS on accepted heads; QP-G transferred P1 closed centrally |
 | Newly discovered work completed/adjudicated | PASS: queue fairness integrated and validated |
 | Repository-wide applicable local gates pass | PASS, including MySQL/Redis, race, vet, builds, migrations and isolated E2E |
 | Final readiness matrix exists | PASS, this document |
-| Final READY/NOT READY report with evidence | **NOT READY**: real-guild install/actions are NOT EXECUTED without an accepted exception; QP-I review lifecycle is pending at this anchor |
+| Final READY/NOT READY report with evidence | **NOT READY**: real-guild install/actions are NOT EXECUTED without an accepted exception |
 
 ## Publication lifecycle
 
-PR #16 is open from `final/qp-i-readiness` into `integration/qi-2-p2`. Post
-exactly one standalone `@codex review`, fix valid findings without a second
-request by default, and revalidate proportionately. Do not merge the PR or
-change release infrastructure/settings.
+PR #16 is open from `final/qp-i-readiness` into `integration/qi-2-p2`. Its one
+Codex review-and-fix lifecycle is complete. Do not merge the PR or change
+release infrastructure/settings without explicit authorization.
