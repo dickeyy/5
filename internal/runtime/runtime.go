@@ -44,7 +44,7 @@ func Run(ctx context.Context) error {
 	}
 	queue := workqueue.New(cfg.EventQueue.Size, cfg.EventQueue.Workers)
 	services := quack.NewWithConfigDependencies(cfg, repositories, bot, bot, queue)
-	moduleRuntime, err := moduleintegration.New(ctx, repositories, bot.Session, services)
+	moduleRuntime, err := moduleintegration.New(ctx, repositories, bot.Session, services, bot)
 	if err != nil {
 		return fmt.Errorf("compose optional modules: %w", err)
 	}

@@ -63,8 +63,23 @@ func TestModuleAuditAdapterWritesImmutableCoreEntry(t *testing.T) {
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("read module audit: entries=%+v err=%v", entries, err)
 	}
-	if entries[0].Source != model.AuditSourceSystem || entries[0].Action != "ticket.open" {
+	if entries[0].Source != model.AuditSourceAPI || entries[0].Action != "ticket.open" {
 		t.Fatalf("unexpected module audit: %+v", entries[0])
+	}
+	if err := auditor.RecordModuleAudit(quack.ContextWithAuditSource(context.Background(), model.AuditSourceDiscord), modules.AuditEvent{
+		GuildID: guild.ID, ActorDiscordUserID: "actor", Action: "ticket.close",
+		ResourceType: "ticket", ResourceID: "ticket-1", Result: "success", MetadataJSON: "{}",
+	}); err != nil {
+		t.Fatalf("record Discord module audit: %v", err)
+	}
+	if err := auditor.RecordModuleAudit(context.Background(), modules.AuditEvent{
+		GuildID: guild.ID, Action: "honeypot.trigger.accepted", ResourceType: "honeypot_trigger", Result: "success", MetadataJSON: "{}",
+	}); err != nil {
+		t.Fatalf("record honeypot module audit: %v", err)
+	}
+	entries, err = repository.ListAuditLogEntries(context.Background(), guild.ID)
+	if err != nil || len(entries) != 3 || entries[1].Source != model.AuditSourceDiscord || entries[2].Source != model.AuditSourceHoneypot {
+		t.Fatalf("module audit sources were not propagated: entries=%+v err=%v", entries, err)
 	}
 }
 

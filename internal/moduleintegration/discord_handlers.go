@@ -8,12 +8,15 @@ import (
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
+	discordcommands "github.com/quackdiscord/bot/internal/discordbot/commands"
 	"github.com/quackdiscord/bot/internal/discordbot/interactions"
 	"github.com/quackdiscord/bot/internal/discordbot/ui"
 	"github.com/quackdiscord/bot/internal/modules"
 	"github.com/quackdiscord/bot/internal/modules/generallogging"
 	"github.com/quackdiscord/bot/internal/modules/honeypot"
 	"github.com/quackdiscord/bot/internal/modules/tickets"
+	"github.com/quackdiscord/bot/internal/quack"
+	"github.com/quackdiscord/bot/internal/quack/model"
 	"github.com/rs/zerolog/log"
 )
 
@@ -29,6 +32,9 @@ func (r *Runtime) RegisterComponents(registry *interactions.ComponentRegistry) e
 		Close: r.closeTicketComponent,
 	}
 	if err := tickets.RegisterComponents(registry, handlers); err != nil {
+		return err
+	}
+	if err := discordcommands.RegisterCaseComponents(registry); err != nil {
 		return err
 	}
 	if err := registry.RegisterComponent("ticket", "repair", r.repairTicketComponent); err != nil {
@@ -91,6 +97,7 @@ func (r *Runtime) openTicketComponent(ctx ui.Context) ui.HandlerResult {
 		return ui.Immediate(ui.Error("Quack could not verify your ticket access."))
 	}
 	return ui.Async(ui.DeferEphemeral(), func(taskCtx context.Context, responder ui.Responder) error {
+		taskCtx = quack.ContextWithAuditSource(taskCtx, model.AuditSourceDiscord)
 		ticket, err := r.TicketDiscord.Open(taskCtx, actor)
 		if err != nil {
 			_, _ = responder.EditOriginal(ui.ErrorEdit(ticketErrorMessage(err)))
@@ -110,6 +117,7 @@ func (r *Runtime) ticketQueueComponent(ctx ui.Context) ui.HandlerResult {
 		return ui.Immediate(ui.Error("You do not have access to the ticket queue."))
 	}
 	return ui.Async(ui.DeferEphemeral(), func(taskCtx context.Context, responder ui.Responder) error {
+		taskCtx = quack.ContextWithAuditSource(taskCtx, model.AuditSourceDiscord)
 		queue, err := r.Tickets.Queue(taskCtx, actor, tickets.StatusOpen, 25)
 		if err != nil {
 			_, _ = responder.EditOriginal(ui.ErrorEdit(ticketErrorMessage(err)))
@@ -134,6 +142,7 @@ func (r *Runtime) viewTicketComponent(ctx ui.Context) ui.HandlerResult {
 		return ui.Immediate(ui.Error("That ticket is unavailable."))
 	}
 	return ui.Async(ui.DeferEphemeral(), func(taskCtx context.Context, responder ui.Responder) error {
+		taskCtx = quack.ContextWithAuditSource(taskCtx, model.AuditSourceDiscord)
 		ticket, events, err := r.Tickets.Detail(taskCtx, actor, ticketID)
 		if err != nil {
 			_, _ = responder.EditOriginal(ui.ErrorEdit(ticketErrorMessage(err)))
@@ -157,6 +166,7 @@ func (r *Runtime) repairTicketComponent(ctx ui.Context) ui.HandlerResult {
 		return ui.Immediate(ui.Error("You do not have permission to repair that ticket."))
 	}
 	return ui.Async(ui.DeferEphemeral(), func(taskCtx context.Context, responder ui.Responder) error {
+		taskCtx = quack.ContextWithAuditSource(taskCtx, model.AuditSourceDiscord)
 		if err := r.TicketDiscord.RepairPermissions(taskCtx, actor, ticketID); err != nil {
 			_, _ = responder.EditOriginal(ui.ErrorEdit(ticketErrorMessage(err)))
 			return nil
@@ -208,6 +218,7 @@ func (r *Runtime) submitTicketReplyModal(ctx ui.Context) ui.HandlerResult {
 	}
 	body := modalText(data.Components, "body")
 	return ui.Async(ui.DeferEphemeral(), func(taskCtx context.Context, responder ui.Responder) error {
+		taskCtx = quack.ContextWithAuditSource(taskCtx, model.AuditSourceDiscord)
 		if err := r.TicketDiscord.Reply(taskCtx, actor, customID.Payload, body); err != nil {
 			_, _ = responder.EditOriginal(ui.ErrorEdit(ticketErrorMessage(err)))
 			return nil
@@ -224,6 +235,7 @@ func (r *Runtime) closeTicketComponent(ctx ui.Context) ui.HandlerResult {
 		return ui.Immediate(ui.Error("You do not have permission to close that ticket."))
 	}
 	return ui.Async(ui.DeferEphemeral(), func(taskCtx context.Context, responder ui.Responder) error {
+		taskCtx = quack.ContextWithAuditSource(taskCtx, model.AuditSourceDiscord)
 		if _, err := r.TicketDiscord.Close(taskCtx, actor, ticketID); err != nil {
 			_, _ = responder.EditOriginal(ui.ErrorEdit(ticketErrorMessage(err)))
 			return nil

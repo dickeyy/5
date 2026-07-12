@@ -404,7 +404,7 @@ func (s *CaseService) createWithAttribution(ctx context.Context, guildContext *G
 	if err != nil {
 		var authorizationErr *AuthorizationError
 		if errors.As(err, &authorizationErr) && s.authorizer != nil {
-			_ = s.authorizer.auditAuthorizationDenialWithMetadata(ctx, guildContext, authorizationErr.Capability, attribution.auditSource, authorizationErr.Reason, authorizationErr.MetadataJSON)
+			_ = s.authorizer.auditAuthorizationDenialWithMetadata(ctx, guildContext, authorizationErr.Capability, AuditSourceFromContext(ctx), authorizationErr.Reason, authorizationErr.MetadataJSON)
 		}
 		if errors.Is(err, ErrCaseValidation) || errors.Is(err, ErrCasePermissionDenied) || errors.Is(err, ErrCaseTemplateNotAvailable) || errors.Is(err, errCasePreflightStale) {
 			_ = s.auditWithAttribution(ctx, guildContext, attribution, "case.create", "case", "unknown", model.AuditResultFailure, err.Error())

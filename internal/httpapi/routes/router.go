@@ -39,6 +39,7 @@ func setupGuildRoutes(r *gin.Engine, services *quack.Services, moduleRuntime *mo
 	guilds := r.Group("/guilds")
 	guilds.Use(middleware.RequireAuth(services.Store, services.Config.Auth))
 	RegisterCoreModerationStaffRoutes(guilds, services)
+	RegisterAuditStatisticsStaffRoutes(guilds, services)
 	if moduleRuntime != nil {
 		if err := moduleRuntime.RegisterHTTP(guilds, services, httpplatform.FromRepository(services.Store)); err != nil {
 			return err

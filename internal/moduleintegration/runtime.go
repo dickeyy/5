@@ -37,6 +37,7 @@ type Runtime struct {
 	Honeypot        *honeypot.Service
 	HoneypotDiscord *honeypot.DiscordAdapter
 	HoneypotRuntime *honeypot.Runtime
+	AuditMirror     *quack.AuditMirrorWorker
 
 	db         *gorm.DB
 	registry   *modules.Registry
@@ -48,6 +49,7 @@ type Runtime struct {
 	bulkMu     sync.RWMutex
 	bulkWG     sync.WaitGroup
 	sweepWG    sync.WaitGroup
+	mirrorWG   sync.WaitGroup
 	closed     bool
 }
 
@@ -59,7 +61,7 @@ type bulkDeleteEvent struct {
 
 // New constructs the shared registry, immutable audit adapter, module stores,
 // Discord adapters, and bounded general-logging delivery workers.
-func New(ctx context.Context, repositories *store.Store, session *discordgo.Session, services *quack.Services) (*Runtime, error) {
+func New(ctx context.Context, repositories *store.Store, session *discordgo.Session, services *quack.Services, auditSenders ...quack.AuditMirrorSender) (*Runtime, error) {
 	if repositories == nil || repositories.DB() == nil {
 		return nil, errors.New("optional module database is not configured")
 	}
@@ -90,6 +92,10 @@ func New(ctx context.Context, repositories *store.Store, session *discordgo.Sess
 	honeypotService := honeypot.NewService(registry, honeypot.NewStore(repositories.DB()), auditor, honeypotChannels, honeypotTemplates, honeypotCaseApplier{cases: services.Cases})
 	honeypotDiscord := honeypot.NewDiscordAdapter(honeypotService)
 	workerCtx, cancel := context.WithCancel(ctx)
+	var auditMirror *quack.AuditMirrorWorker
+	if len(auditSenders) > 0 && auditSenders[0] != nil {
+		auditMirror = quack.NewAuditMirrorWorker(repositories, auditSenders[0], 0)
+	}
 
 	runtime := &Runtime{
 		Tickets:         ticketService,
@@ -99,6 +105,7 @@ func New(ctx context.Context, repositories *store.Store, session *discordgo.Sess
 		Honeypot:        honeypotService,
 		HoneypotDiscord: honeypotDiscord,
 		HoneypotRuntime: honeypot.NewRuntime(workerCtx, honeypotDiscord, honeypotQueueCapacity, honeypotQueueWorkers),
+		AuditMirror:     auditMirror,
 		db:              repositories.DB(),
 		registry:        registry,
 		session:         session,
@@ -116,6 +123,13 @@ func New(ctx context.Context, repositories *store.Store, session *discordgo.Sess
 		defer runtime.sweepWG.Done()
 		runtime.runTranscriptSweep(workerCtx)
 	}()
+	if runtime.AuditMirror != nil {
+		runtime.mirrorWG.Add(1)
+		go func() {
+			defer runtime.mirrorWG.Done()
+			runtime.AuditMirror.Run(workerCtx)
+		}()
+	}
 	return runtime, nil
 }
 
@@ -141,6 +155,7 @@ func (r *Runtime) Close() {
 		r.cancel()
 	}
 	r.sweepWG.Wait()
+	r.mirrorWG.Wait()
 }
 
 // runBulkDeletes drains cache-aware bulk deletion work independently of case actions.
@@ -207,7 +222,7 @@ func (a moduleAuditor) RecordModuleAudit(ctx context.Context, event modules.Audi
 	requestID, correlationID := quack.TraceIDsFromContext(ctx)
 	return a.repository.CreateAuditLogEntry(ctx, &model.AuditLogEntry{
 		GuildID: event.GuildID, ActorDiscordUserID: event.ActorDiscordUserID,
-		Source: model.AuditSourceSystem, Action: event.Action,
+		Source: quack.AuditSourceForModuleAction(ctx, event.Action), Action: event.Action,
 		ResourceType: event.ResourceType, ResourceID: event.ResourceID,
 		Result: result, FailureReason: event.FailureReason,
 		RequestID: requestID, CorrelationID: correlationID, MetadataJSON: event.MetadataJSON,

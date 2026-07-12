@@ -67,7 +67,7 @@ func TestSystemHoneypotCaseUsesNormalPathWithoutFabricatedStaff(t *testing.T) {
 		t.Fatalf("normal path parity missing: events=%+v actions=%+v evidence=%+v notification=%+v", events, actions, evidence, notification)
 	}
 	audits, _ := repository.ListAuditLogEntries(ctx, guild.ID)
-	if len(audits) < 2 || audits[len(audits)-2].Source != model.AuditSourceSystem || audits[len(audits)-2].ActorDiscordUserID != "" || audits[len(audits)-2].Action != "case.create" {
+	if len(audits) < 2 || audits[len(audits)-2].Source != model.AuditSourceHoneypot || audits[len(audits)-2].ActorDiscordUserID != "" || audits[len(audits)-2].Action != "case.create" {
 		t.Fatalf("case audit fabricated staff identity: %+v", audits)
 	}
 
@@ -88,7 +88,7 @@ func TestSystemHoneypotCaseUsesNormalPathWithoutFabricatedStaff(t *testing.T) {
 	}
 	audits, _ = repository.ListAuditLogEntries(ctx, guild.ID)
 	last := audits[len(audits)-1]
-	if last.Source != model.AuditSourceSystem || last.ActorDiscordUserID != "" || last.Action != "authorization.denied" || last.Result != model.AuditResultDenied {
+	if last.Source != model.AuditSourceHoneypot || last.ActorDiscordUserID != "" || last.Action != "authorization.denied" || last.Result != model.AuditResultDenied {
 		t.Fatalf("system denial audit is incorrect: %+v", last)
 	}
 }
