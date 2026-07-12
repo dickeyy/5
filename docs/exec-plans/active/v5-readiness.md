@@ -996,10 +996,10 @@ by the macro-package ledger.
 | V5-001C | ACCEPTED | `slice/v5-001c-case-validity` | [#3](https://github.com/dickeyy/5/pull/3) | 1 complete, one P2 fixed | passed evidence gate |
 | V5-002 | ACCEPTED | `slice/v5-002-guild-bootstrap` | [#4](https://github.com/dickeyy/5/pull/4) | 1 complete, two findings fixed | passed evidence gate |
 | V5-003 | ACCEPTED | `slice/v5-003-live-authorization` | [#5](https://github.com/dickeyy/5/pull/5) | 1 complete, one P2 fixed | passed evidence gate |
-| QP-A | REVIEW_WAIT | `package/qp-a-core-moderation` at `2e5bd6e` | [#8](https://github.com/dickeyy/5/pull/8) | 1 requested | focused/MySQL/race/full/vet/build green |
+| QP-A | FIXING | `package/qp-a-core-moderation` at `0c76447` | [#8](https://github.com/dickeyy/5/pull/8) | 1 complete; 2 P1/2 P2 | three fixed; route-mount P1 assigned to QI-1 |
 | QP-B | ACCEPTED | `package/qp-b-http-auth` at `b2f3e0a` | [#7](https://github.com/dickeyy/5/pull/7) | 1 complete; P1/P2 fixed | passed evidence gate |
 | QP-C | ACCEPTED | `package/qp-c-tickets-logging` at `4579d14` | [#6](https://github.com/dickeyy/5/pull/6) | 1 complete; four P2s fixed | passed evidence gate |
-| QI-1 | IN_PROGRESS | `integration/qi-1-p1` with QP-B/QP-C merged | pending | 0 | fresh integration owner wiring; awaiting QP-A |
+| QI-1 | IN_PROGRESS | `integration/qi-1-p1` with QP-B/QP-C merged | pending | 0 | must close QP-A production route-mount P1 after merge |
 | QP-D | PLANNED | pending | pending | 0 | absorbs member V5-007, V5-013/014/017C |
 | QP-E | PLANNED | pending | pending | 0 | absorbs V5-015/016 |
 | QP-F | PLANNED | pending | pending | 0 | absorbs V5-021/022 |
