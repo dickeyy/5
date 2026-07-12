@@ -561,6 +561,9 @@ func TestCaseRouteCreate(t *testing.T) {
 			CaseNumber             uint64 `json:"case_number"`
 			TargetDiscordUserID    string `json:"target_discord_user_id"`
 			ModeratorDiscordUserID string `json:"moderator_discord_user_id"`
+			Reason                 string `json:"reason"`
+			Validity               string `json:"validity"`
+			Source                 string `json:"source"`
 			Actions                []struct {
 				ID       string `json:"id"`
 				Position int    `json:"position"`
@@ -571,11 +574,36 @@ func TestCaseRouteCreate(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode case response: %v", err)
 	}
-	if body.Case.ID == "" || body.Case.CaseNumber != 1 || body.Case.TargetDiscordUserID != "target-1" {
+	if body.Case.ID == "" || body.Case.CaseNumber != 1 || body.Case.TargetDiscordUserID != "target-1" || body.Case.Reason != "No spam" || body.Case.Validity != "valid" || body.Case.Source != "dashboard" {
 		t.Fatalf("unexpected case response: %+v", body.Case)
 	}
 	if len(body.Case.Actions) != 0 {
 		t.Fatalf("unexpected actions: %+v", body.Case.Actions)
+	}
+	var raw struct {
+		Case map[string]json.RawMessage `json:"case"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw case response: %v", err)
+	}
+	for _, retired := range []string{"severity", "weight", "status", "reason_override"} {
+		if _, exists := raw.Case[retired]; exists {
+			t.Fatalf("case response exposed retired field %q: %s", retired, response.Body.String())
+		}
+	}
+}
+
+func TestCaseRouteRejectsReasonOverride(t *testing.T) {
+	router, sessionID, templateID := newCaseRouteHarness(t, uint64(discordgo.PermissionModerateMembers))
+	payload := `{"template_id":"` + templateID + `","target_discord_user_id":"target-1","reason_override":"invented"}`
+	request := httptest.NewRequest(http.MethodPost, "/guilds/guild-1/cases", bytes.NewBufferString(payload))
+	request.Header.Set("Authorization", "Bearer "+sessionID)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected retired reason override rejection %d, got %d body=%s", http.StatusBadRequest, response.Code, response.Body.String())
 	}
 }
 

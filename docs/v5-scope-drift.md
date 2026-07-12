@@ -22,14 +22,20 @@ The current backend already supports important parts of the intended v5 directio
 - Live template contracts now use all-time distinct thresholds, archive-only
   availability, level-owned notification, and zero or one typed enforcement
   action. Frozen legacy columns remain storage-only compatibility data.
+- Live case contracts now use only valid/voided validity and the dashboard,
+  Discord, honeypot, and v4-import sources. Action and appeal state remain
+  separate, and the official reason always comes from the immutable template
+  snapshot source.
+- Severity, weight, reason overrides, and free-form note lifecycle are absent
+  from live case models and contracts. Migration 0003 preserves legacy columns
+  and events, inventories retired event rows, and exposes none of them through
+  live v5 case/event reads.
 
 ## Behavior That Must Change
 
 The current implementation differs from the v5 definition in several core rules:
 
-- Case creation currently accepts a moderator reason override. V5 keeps the admin-defined reason fixed and collects context separately.
 - The current level-owned notification is still represented as a pre-enforcement `send_dm` action. V5 sends one structured notification after the action outcome is known.
-- Case status currently mixes case validity with action progress and appeal state. V5 treats case validity as valid or voided and tracks actions and appeals separately.
 - Current case permissions do not fully enforce the actor's matching timeout, kick, or ban permission before case creation.
 - The current dashboard guild flow is staff-focused and does not yet provide case-owner access for members who left or were banned.
 - Template import, export, restore, and automatic starter policy behavior are not yet defined in the running product.
@@ -38,11 +44,7 @@ The current implementation differs from the v5 definition in several core rules:
 
 These concepts appear in current models, documentation, or backlog history but do not belong in the v5 product model:
 
-- Severity and weight as case or template policy.
-- Moderator-provided reason overrides.
 - Cross-template or cross-guild escalation.
-- Private or public free-form case notes.
-- Detailed case lifecycle states that duplicate action or appeal state.
 - Direct `/warn`, `/timeout`, `/kick`, and `/ban` workflows after migration.
 - Generic bot utilities as requirements for the moderation core.
 

@@ -394,7 +394,7 @@ func caseTemplateRecordFromModel(template model.CaseTemplate) CaseTemplateRecord
 		Name:                   template.Name,
 		Description:            template.Description,
 		ReasonTemplate:         template.ReasonTemplate,
-		DefaultSeverity:        model.CaseSeverityMedium,
+		DefaultSeverity:        "medium",
 		Appealable:             template.Appealable,
 		Enabled:                true,
 		Version:                template.Version,

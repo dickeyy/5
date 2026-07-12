@@ -33,7 +33,7 @@ func TestCaseServiceCreateFromTemplate(t *testing.T) {
 	if created.ID == "" || created.CaseNumber != 1 {
 		t.Fatalf("unexpected case response: %+v", created)
 	}
-	if created.Reason != "No spam" || created.Status != model.CaseStatusOpen || created.Source != model.CaseSourceAPI {
+	if created.Reason != "No spam" || created.Validity != model.CaseValidityValid || created.Source != model.CaseSourceDashboard {
 		t.Fatalf("unexpected case fields: %+v", created)
 	}
 	if len(created.Actions) != 1 || created.Actions[0].ActionType != model.ActionSendDM {
@@ -52,7 +52,8 @@ func TestCaseServiceCreateFromTemplate(t *testing.T) {
 	}
 	var snapshot struct {
 		Template struct {
-			ID string `json:"id"`
+			ID             string `json:"id"`
+			ReasonTemplate string `json:"reason_template"`
 		} `json:"template"`
 		Actions []struct {
 			ActionType model.ActionType `json:"action_type"`
@@ -66,7 +67,7 @@ func TestCaseServiceCreateFromTemplate(t *testing.T) {
 	if err := json.Unmarshal([]byte(cases[0].TemplateSnapshotJSON), &snapshot); err != nil {
 		t.Fatalf("decode snapshot: %v", err)
 	}
-	if snapshot.Template.ID != template.ID || len(snapshot.Actions) != 0 {
+	if snapshot.Template.ID != template.ID || snapshot.Template.ReasonTemplate != created.Reason || len(snapshot.Actions) != 0 {
 		t.Fatalf("unexpected snapshot: %+v", snapshot)
 	}
 	if snapshot.SelectedLevel.ID == "" || !snapshot.SelectedLevel.IsDefault || snapshot.SelectedLevel.MatchedCaseCount != 1 {
@@ -375,7 +376,7 @@ func TestCaseServiceVoidedCasesDoNotCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create prior case: %v", err)
 	}
-	if err := store.DB().Model(&model.Case{}).Where("id = ?", prior.ID).Update("status", model.CaseStatusVoided).Error; err != nil {
+	if err := store.DB().Model(&model.Case{}).Where("id = ?", prior.ID).Update("status", model.CaseValidityVoided).Error; err != nil {
 		t.Fatalf("void prior case: %v", err)
 	}
 
@@ -438,7 +439,7 @@ func TestCaseServiceDashboardReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("user history: %v", err)
 	}
-	if profile.Total != 1 || len(profile.Cases) != 1 || profile.Summary.Total != 1 || profile.Summary.ByStatus[string(model.CaseStatusOpen)] != 1 {
+	if profile.Total != 1 || len(profile.Cases) != 1 || profile.Summary.Total != 1 || profile.Summary.ByValidity[string(model.CaseValidityValid)] != 1 {
 		t.Fatalf("unexpected profile response: %+v", profile)
 	}
 	if profile.Summary.ByTemplate[template.ID] != 1 {
@@ -461,7 +462,7 @@ func TestCaseServiceReadValidationAndPermissions(t *testing.T) {
 	if !errors.Is(err, quack.ErrCaseValidation) {
 		t.Fatalf("expected limit validation error, got %v", err)
 	}
-	_, err = service.List(ctx, modContext, quack.CaseListInput{Status: "not-a-status"})
+	_, err = service.List(ctx, modContext, quack.CaseListInput{Validity: "not-a-validity"})
 	if !errors.Is(err, quack.ErrCaseValidation) {
 		t.Fatalf("expected status validation error, got %v", err)
 	}

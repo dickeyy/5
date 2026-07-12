@@ -66,8 +66,8 @@ func TestActionServiceProcessesSafeActions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list cases: %v", err)
 	}
-	if cases[0].Status != model.CaseStatusCompleted {
-		t.Fatalf("expected completed case, got %+v", cases[0])
+	if cases[0].Validity != model.CaseValidityValid {
+		t.Fatalf("expected action completion not to change case validity, got %+v", cases[0])
 	}
 }
 

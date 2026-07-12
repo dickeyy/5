@@ -51,6 +51,7 @@ func TestMigrateSQLiteForwardAndRerun(t *testing.T) {
 
 func TestMigration0002PreservesAndQuarantinesIncompatibleTemplates(t *testing.T) {
 	db := openSQLiteMigrationDB(t)
+	through0002 := []migration{migration0001InitialV5Schema(), migration0002SimplifyTemplateModel()}
 	if err := runMigrations(db, []migration{migration0001InitialV5Schema()}); err != nil {
 		t.Fatalf("apply frozen baseline: %v", err)
 	}
@@ -64,7 +65,7 @@ func TestMigration0002PreservesAndQuarantinesIncompatibleTemplates(t *testing.T)
 		t.Fatalf("soft delete compatibility fixture: %v", err)
 	}
 
-	if err := runMigrations(db, registeredMigrations()); err != nil {
+	if err := runMigrations(db, through0002); err != nil {
 		t.Fatalf("apply template compatibility migration: %v", err)
 	}
 	assertTemplateArchiveState(t, db, validID, false)
@@ -93,7 +94,7 @@ func TestMigration0002PreservesAndQuarantinesIncompatibleTemplates(t *testing.T)
 	if compatibilityCount != 3 {
 		t.Fatalf("expected three quarantined templates, got %d", compatibilityCount)
 	}
-	if err := runMigrations(db, registeredMigrations()); err != nil {
+	if err := runMigrations(db, through0002); err != nil {
 		t.Fatalf("rerun template compatibility migration: %v", err)
 	}
 	if err := db.Model(&migration0002TemplateCompatibility{}).Count(&compatibilityCount).Error; err != nil {
@@ -103,7 +104,7 @@ func TestMigration0002PreservesAndQuarantinesIncompatibleTemplates(t *testing.T)
 		t.Fatalf("expected idempotent compatibility records, got %d", compatibilityCount)
 	}
 
-	if err := rollbackLastMigration(db, registeredMigrations()); err != nil {
+	if err := rollbackLastMigration(db, through0002); err != nil {
 		t.Fatalf("roll back template compatibility migration: %v", err)
 	}
 	assertTemplateArchiveState(t, db, disabledID, false)
@@ -111,7 +112,7 @@ func TestMigration0002PreservesAndQuarantinesIncompatibleTemplates(t *testing.T)
 	assertTemplateArchiveState(t, db, softDeletedID, false)
 	assertTemplateDeletedState(t, db, softDeletedID, true)
 	assertRepresentativeHistory(t, db, want)
-	if err := runMigrations(db, registeredMigrations()); err != nil {
+	if err := runMigrations(db, through0002); err != nil {
 		t.Fatalf("reapply template compatibility migration: %v", err)
 	}
 	assertTemplateArchiveState(t, db, disabledID, true)
@@ -190,6 +191,225 @@ func TestMigration0002QuarantinedPolicyCannotCrossLiveReadBoundary(t *testing.T)
 	}
 	if validArchived == nil || validArchived.Template.ID != validArchivedID || validArchived.Template.ArchivedAt == nil {
 		t.Fatalf("expected readable valid archived template, got %+v", validArchived)
+	}
+}
+
+func TestMigration0003MapsCasesInventoriesRetiredEventsAndRollsBackExactly(t *testing.T) {
+	db := openSQLiteMigrationDB(t)
+	through0002 := []migration{migration0001InitialV5Schema(), migration0002SimplifyTemplateModel()}
+	if err := runMigrations(db, through0002); err != nil {
+		t.Fatalf("apply migrations through 0002: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	guild := GuildRecord{ULIDModelRecord: ULIDModelRecord{ID: "01J30000000000000000000001", CreatedAt: now, UpdatedAt: now}, DiscordGuildID: "migration-0003", Name: "Migration 0003", OwnerDiscordUserID: "owner"}
+	if err := db.Create(&guild).Error; err != nil {
+		t.Fatalf("create migration guild: %v", err)
+	}
+
+	fixtures := []struct {
+		id, status, source, wantValidity, wantSource string
+	}{
+		{"01J30000000000000000000002", "open", "api", "valid", "dashboard"},
+		{"01J30000000000000000000003", "action_running", "discord_command", "valid", "discord"},
+		{"01J30000000000000000000004", "completed", "automation", "valid", "honeypot"},
+		{"01J30000000000000000000005", "failed", "import", "valid", "v4_import"},
+		{"01J30000000000000000000006", "appealed", "api", "valid", "dashboard"},
+		{"01J30000000000000000000007", "voided", "import", "voided", "v4_import"},
+	}
+	for index, fixture := range fixtures {
+		row := migration0003HistoryCase{
+			ID: fixture.id, CreatedAt: now, UpdatedAt: now, GuildID: guild.ID, CaseNumber: uint64(index + 1),
+			TemplateVersion: 1, TemplateSnapshotJSON: `{"snapshot":"preserved"}`, TargetDiscordUserID: "target",
+			ModeratorDiscordUserID: "moderator", Reason: "immutable reason", Severity: "critical", Weight: 99,
+			Status: fixture.status, Source: fixture.source, MetadataJSON: `{"legacy":true}`,
+		}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatalf("create case fixture %s: %v", fixture.id, err)
+		}
+	}
+
+	legacyEventID := "01J30000000000000000000008"
+	editedAt := now.Add(time.Minute)
+	deletedAt := now.Add(2 * time.Minute)
+	if err := db.Exec(`INSERT INTO case_events
+		(id, created_at, updated_at, case_id, guild_id, event_type, actor_discord_user_id, actor_type, visibility, body, metadata_json, edited_at, deleted_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		legacyEventID, now, now, fixtures[0].id, guild.ID, "note_added", "moderator", "staff", "internal",
+		"private preserved body", `{"bytes":"preserved"}`, editedAt, deletedAt).Error; err != nil {
+		t.Fatalf("insert preserved retired event: %v", err)
+	}
+	for index, eventType := range []string{"note_edited", "note_deleted", "status_changed", "case_created"} {
+		id := fmt.Sprintf("01J3000000000000000000001%d", index)
+		if err := db.Exec(`INSERT INTO case_events
+			(id, created_at, updated_at, case_id, guild_id, event_type, actor_type, visibility, body, metadata_json)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, now, now, fixtures[0].id, guild.ID, eventType, "system", "staff", eventType, `{}`).Error; err != nil {
+			t.Fatalf("insert event %s: %v", eventType, err)
+		}
+	}
+	var eventBefore migration0003LegacyEvent
+	if err := db.First(&eventBefore, "id = ?", legacyEventID).Error; err != nil {
+		t.Fatalf("load retired event before migration: %v", err)
+	}
+
+	if err := runMigrations(db, registeredMigrations()); err != nil {
+		t.Fatalf("apply migration 0003: %v", err)
+	}
+	if err := runMigrations(db, registeredMigrations()); err != nil {
+		t.Fatalf("rerun migration 0003: %v", err)
+	}
+	for _, fixture := range fixtures {
+		var got migration0003Case
+		if err := db.First(&got, "id = ?", fixture.id).Error; err != nil {
+			t.Fatalf("load mapped case %s: %v", fixture.id, err)
+		}
+		if got.Status != fixture.wantValidity || got.Source != fixture.wantSource {
+			t.Fatalf("case %s mapped to status=%q source=%q, want %q/%q", fixture.id, got.Status, got.Source, fixture.wantValidity, fixture.wantSource)
+		}
+	}
+	var compatibility migration0003CaseCompatibility
+	if err := db.First(&compatibility, "case_id = ?", fixtures[0].id).Error; err != nil {
+		t.Fatalf("load case compatibility inventory: %v", err)
+	}
+	if compatibility.PreviousStatus != "open" || compatibility.PreviousSource != "api" || compatibility.NoteEventCount != 3 || compatibility.StatusEventCount != 1 {
+		t.Fatalf("unexpected compatibility inventory: %+v", compatibility)
+	}
+	var compatibilityCount int64
+	if err := db.Model(&migration0003CaseCompatibility{}).Count(&compatibilityCount).Error; err != nil || compatibilityCount != int64(len(fixtures)) {
+		t.Fatalf("expected one idempotent compatibility row per case, count=%d err=%v", compatibilityCount, err)
+	}
+	var eventAfter migration0003LegacyEvent
+	if err := db.First(&eventAfter, "id = ?", legacyEventID).Error; err != nil {
+		t.Fatalf("load retired event after migration: %v", err)
+	}
+	assertMigration0003LegacyEventEqual(t, eventAfter, eventBefore)
+	liveEvents, err := New(db, nil).ListCaseEvents(context.Background(), fixtures[0].id)
+	if err != nil {
+		t.Fatalf("list live case events: %v", err)
+	}
+	if len(liveEvents) != 1 || liveEvents[0].EventType != model.CaseEventCreated {
+		t.Fatalf("retired events crossed live boundary: %+v", liveEvents)
+	}
+
+	if err := rollbackLastMigration(db, registeredMigrations()); err != nil {
+		t.Fatalf("roll back migration 0003: %v", err)
+	}
+	if db.Migrator().HasTable(&migration0003CaseCompatibility{}) {
+		t.Fatal("migration-owned compatibility table remained after rollback")
+	}
+	for _, fixture := range fixtures {
+		var got migration0003Case
+		if err := db.First(&got, "id = ?", fixture.id).Error; err != nil {
+			t.Fatalf("load rolled-back case %s: %v", fixture.id, err)
+		}
+		if got.Status != fixture.status || got.Source != fixture.source {
+			t.Fatalf("case %s rollback restored %q/%q, want %q/%q", fixture.id, got.Status, got.Source, fixture.status, fixture.source)
+		}
+	}
+	var eventRolledBack migration0003LegacyEvent
+	if err := db.First(&eventRolledBack, "id = ?", legacyEventID).Error; err != nil {
+		t.Fatalf("load retired event after rollback: %v", err)
+	}
+	assertMigration0003LegacyEventEqual(t, eventRolledBack, eventBefore)
+}
+
+func TestMigration0003RejectsUnknownValuesWithoutMutation(t *testing.T) {
+	for _, test := range []struct {
+		name, status, source string
+	}{
+		{name: "status", status: "mystery", source: "api"},
+		{name: "source", status: "open", source: "mystery"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := openSQLiteMigrationDB(t)
+			through0002 := []migration{migration0001InitialV5Schema(), migration0002SimplifyTemplateModel()}
+			if err := runMigrations(db, through0002); err != nil {
+				t.Fatalf("apply migrations through 0002: %v", err)
+			}
+			now := time.Now().UTC()
+			guild := GuildRecord{ULIDModelRecord: ULIDModelRecord{ID: "01J31000000000000000000001", CreatedAt: now, UpdatedAt: now}, DiscordGuildID: "unknown-" + test.name, Name: "Unknown", OwnerDiscordUserID: "owner"}
+			if err := db.Create(&guild).Error; err != nil {
+				t.Fatalf("create guild: %v", err)
+			}
+			row := migration0003HistoryCase{ID: "01J31000000000000000000002", CreatedAt: now, UpdatedAt: now, GuildID: guild.ID, CaseNumber: 1, TemplateVersion: 1, TemplateSnapshotJSON: `{}`, TargetDiscordUserID: "target", ModeratorDiscordUserID: "moderator", Reason: "reason", Severity: "medium", Weight: 1, Status: test.status, Source: test.source, MetadataJSON: `{}`}
+			if err := db.Create(&row).Error; err != nil {
+				t.Fatalf("create unknown fixture: %v", err)
+			}
+			if err := runMigrations(db, registeredMigrations()); err == nil || !strings.Contains(err.Error(), "unknown legacy "+test.name) {
+				t.Fatalf("expected explicit unknown %s failure, got %v", test.name, err)
+			}
+			var got migration0003Case
+			if err := db.First(&got, "id = ?", row.ID).Error; err != nil {
+				t.Fatalf("load rejected fixture: %v", err)
+			}
+			if got.Status != test.status || got.Source != test.source || db.Migrator().HasTable(&migration0003CaseCompatibility{}) {
+				t.Fatalf("rejected migration mutated state: case=%+v table=%v", got, db.Migrator().HasTable(&migration0003CaseCompatibility{}))
+			}
+		})
+	}
+}
+
+func TestMigration0003RollbackDowngradesPostMigrationCases(t *testing.T) {
+	db := openSQLiteMigrationDB(t)
+	if err := runMigrations(db, registeredMigrations()); err != nil {
+		t.Fatalf("apply migrations: %v", err)
+	}
+	now := time.Now().UTC()
+	guild := GuildRecord{ULIDModelRecord: ULIDModelRecord{ID: "01J32000000000000000000001", CreatedAt: now, UpdatedAt: now}, DiscordGuildID: "rollback-guard", Name: "Rollback Guard", OwnerDiscordUserID: "owner"}
+	if err := db.Create(&guild).Error; err != nil {
+		t.Fatalf("create guild: %v", err)
+	}
+	postMigration := model.Case{
+		ULIDModel: model.ULIDModel{ID: "01J32000000000000000000002", CreatedAt: now, UpdatedAt: now},
+		GuildID:   guild.ID, CaseNumber: 1, TemplateVersion: 1, TemplateSnapshotJSON: `{}`,
+		TargetDiscordUserID: "target", ModeratorDiscordUserID: "moderator", Reason: "reason",
+		Validity: model.CaseValidityValid, Source: model.CaseSourceDashboard, MetadataJSON: `{}`,
+	}
+	if err := db.Select("*").Create(&postMigration).Error; err != nil {
+		t.Fatalf("create post-migration case: %v", err)
+	}
+
+	if err := rollbackLastMigration(db, registeredMigrations()); err != nil {
+		t.Fatalf("roll back with post-migration case: %v", err)
+	}
+	var persisted migration0003Case
+	if err := db.First(&persisted, "id = ?", postMigration.ID).Error; err != nil {
+		t.Fatalf("load post-migration case: %v", err)
+	}
+	if persisted.Status != "open" || persisted.Source != "api" {
+		t.Fatalf("post-migration case was not downgraded compatibly: %+v", persisted)
+	}
+	if db.Migrator().HasTable(&migration0003CaseCompatibility{}) {
+		t.Fatal("rollback retained migration-owned compatibility bookkeeping")
+	}
+	var ledgerCount int64
+	if err := db.Model(&schemaMigration{}).Count(&ledgerCount).Error; err != nil {
+		t.Fatalf("count migration ledger: %v", err)
+	}
+	if ledgerCount != 2 {
+		t.Fatalf("expected migration 0003 ledger row removed, got %d rows", ledgerCount)
+	}
+}
+
+func TestMigration0003CanonicalRollbackMappings(t *testing.T) {
+	for value, want := range map[string]string{"valid": "open", "voided": "voided"} {
+		got, ok := migration0003LegacyStatus(value)
+		if !ok || got != want {
+			t.Fatalf("canonical validity %q mapped to %q/%v, want %q/true", value, got, ok, want)
+		}
+	}
+	for value, want := range map[string]string{
+		"dashboard": "api", "discord": "discord_command", "honeypot": "automation", "v4_import": "import",
+	} {
+		got, ok := migration0003LegacySource(value)
+		if !ok || got != want {
+			t.Fatalf("canonical source %q mapped to %q/%v, want %q/true", value, got, ok, want)
+		}
+	}
+	if _, ok := migration0003LegacyStatus("unknown"); ok {
+		t.Fatal("unknown canonical validity was accepted")
+	}
+	if _, ok := migration0003LegacySource("unknown"); ok {
+		t.Fatal("unknown canonical source was accepted")
 	}
 }
 
@@ -471,7 +691,14 @@ func TestRollbackRefusesForwardOnlyBaselineWithoutChangingHistory(t *testing.T) 
 		t.Fatalf("migrate baseline: %v", err)
 	}
 	want := insertRepresentativeHistory(t, db)
+	if err := db.Model(&migration0003Case{}).Where("id = ?", want.CaseID).
+		Updates(map[string]any{"status": "valid", "source": "discord"}).Error; err != nil {
+		t.Fatalf("make post-migration history canonical: %v", err)
+	}
 
+	if err := repositories.RollbackLastMigration(); err != nil {
+		t.Fatalf("roll back reversible case validity migration: %v", err)
+	}
 	if err := repositories.RollbackLastMigration(); err != nil {
 		t.Fatalf("roll back reversible template compatibility migration: %v", err)
 	}
@@ -568,6 +795,67 @@ type representativeHistory struct {
 	TemplateSnapshot                             string
 }
 
+// migration0003HistoryCase is the frozen pre-0003 case shape used to prove rejected columns survive migration.
+type migration0003HistoryCase struct {
+	ID                     string `gorm:"type:char(26);primaryKey"`
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	GuildID                string
+	CaseNumber             uint64
+	TemplateVersion        uint
+	TemplateSnapshotJSON   string `gorm:"column:template_snapshot_json"`
+	TargetDiscordUserID    string
+	ModeratorDiscordUserID string
+	Reason                 string
+	Severity               string
+	Weight                 int
+	Status                 string
+	Source                 string
+	MetadataJSON           string `gorm:"column:metadata_json"`
+}
+
+// TableName keeps the test fixture on the frozen cases table.
+func (migration0003HistoryCase) TableName() string { return "cases" }
+
+// migration0003LegacyEvent is the frozen event shape used to compare every preserved retired field.
+type migration0003LegacyEvent struct {
+	ID                 string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	CaseID             string
+	GuildID            string
+	EventType          string
+	ActorDiscordUserID string
+	ActorType          string
+	Visibility         string
+	Body               string
+	MetadataJSON       string `gorm:"column:metadata_json"`
+	EditedAt           *time.Time
+	DeletedAt          *time.Time
+}
+
+// TableName keeps the test fixture on the frozen case_events table.
+func (migration0003LegacyEvent) TableName() string { return "case_events" }
+
+// assertMigration0003LegacyEventEqual verifies byte-bearing and lifecycle fields remain exact.
+func assertMigration0003LegacyEventEqual(t *testing.T, got, want migration0003LegacyEvent) {
+	t.Helper()
+	if got.ID != want.ID || !got.CreatedAt.Equal(want.CreatedAt) || !got.UpdatedAt.Equal(want.UpdatedAt) ||
+		got.CaseID != want.CaseID || got.GuildID != want.GuildID || got.EventType != want.EventType ||
+		got.ActorDiscordUserID != want.ActorDiscordUserID || got.ActorType != want.ActorType || got.Visibility != want.Visibility ||
+		got.Body != want.Body || got.MetadataJSON != want.MetadataJSON || !timePointersEqual(got.EditedAt, want.EditedAt) || !timePointersEqual(got.DeletedAt, want.DeletedAt) {
+		t.Fatalf("legacy event changed:\n got=%+v\nwant=%+v", got, want)
+	}
+}
+
+// timePointersEqual compares nullable timestamps without changing their precision.
+func timePointersEqual(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.Equal(*right)
+}
+
 // insertRepresentativeHistory inserts IDs, numbering, snapshots, attempts, events, and audit rows from the current v5 shape.
 func insertRepresentativeHistory(t *testing.T, db *gorm.DB) representativeHistory {
 	t.Helper()
@@ -579,7 +867,7 @@ func insertRepresentativeHistory(t *testing.T, db *gorm.DB) representativeHistor
 	}
 	records := []any{
 		&GuildRecord{ULIDModelRecord: ULIDModelRecord{ID: want.GuildID, CreatedAt: now, UpdatedAt: now}, DiscordGuildID: "123", Name: "Fixture Guild", OwnerDiscordUserID: "owner"},
-		&CaseRecord{ULIDModelRecord: ULIDModelRecord{ID: want.CaseID, CreatedAt: now, UpdatedAt: now}, GuildID: want.GuildID, CaseNumber: want.CaseNumber, TemplateVersion: 3, TemplateSnapshotJSON: want.TemplateSnapshot, TargetDiscordUserID: "target", ModeratorDiscordUserID: "moderator", Reason: "preserve", Severity: model.CaseSeverity("medium"), Weight: 1, Status: model.CaseStatus("open"), Source: model.CaseSource("discord_command"), MetadataJSON: "{}"},
+		&migration0003HistoryCase{ID: want.CaseID, CreatedAt: now, UpdatedAt: now, GuildID: want.GuildID, CaseNumber: want.CaseNumber, TemplateVersion: 3, TemplateSnapshotJSON: want.TemplateSnapshot, TargetDiscordUserID: "target", ModeratorDiscordUserID: "moderator", Reason: "preserve", Severity: "medium", Weight: 1, Status: "open", Source: "discord_command", MetadataJSON: "{}"},
 		&CaseActionExecutionRecord{ULIDModelRecord: ULIDModelRecord{ID: "01J00000000000000000000003", CreatedAt: now, UpdatedAt: now}, CaseID: want.CaseID, Position: 1, ActionType: model.ActionType("send_dm"), Status: model.ActionExecutionStatus("succeeded"), IdempotencyKey: "fixture-action", ConfigSnapshotJSON: "{}"},
 		&CaseActionAttemptRecord{ULIDModelRecord: ULIDModelRecord{ID: want.AttemptID, CreatedAt: now, UpdatedAt: now}, ExecutionID: "01J00000000000000000000003", AttemptNumber: 1, Status: model.ActionAttemptStatus("succeeded"), StartedAt: now, RequestPayloadJSON: "{}", ResponsePayloadJSON: "{}"},
 		&CaseEventRecord{ULIDModelRecord: ULIDModelRecord{ID: want.EventID, CreatedAt: now, UpdatedAt: now}, CaseID: want.CaseID, GuildID: want.GuildID, EventType: model.CaseEventType("created"), ActorType: "staff", Visibility: model.EventVisibility("staff"), Body: "fixture event", MetadataJSON: "{}"},

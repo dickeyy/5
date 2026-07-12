@@ -27,6 +27,19 @@ invalid legacy levels or actions through the live v5 contract. Valid archived
 templates remain readable. The reviewed inverse restores recorded timestamps
 and removes only the migration-owned bookkeeping table.
 
+Migration 0003 replaces mixed case lifecycle status and generic source labels
+at the live boundary. It validates all rows before changing data, maps the
+reviewed legacy values to `valid`/`voided` and
+`dashboard`/`discord`/`honeypot`/`v4_import`, and fails explicitly on unknown
+values. It preserves severity, weight, snapshots, actions, attempts, audit
+history, and every case event in frozen storage. Retired note and generic
+`status_changed` events are inventoried by case in
+`quack_v5_0003_case_compatibility` and excluded from live event queries. Its
+reviewed inverse restores exact prior status/source values and drops only that
+migration-owned table. Cases created after migration 0003 are explicitly mapped
+from canonical validity/source values back to the compatible legacy
+`open`/`voided` and source labels before the ledger entry is removed.
+
 ## Forward procedure
 
 1. Back up MySQL and verify the backup before deploying schema-changing code.

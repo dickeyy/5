@@ -131,7 +131,7 @@ func TestCountTemplateCasesForTargetFiltersHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create voided case: %v", err)
 	}
-	if err := store.DB().Model(&model.Case{}).Where("id = ?", voided.Case.ID).Update("status", model.CaseStatusVoided).Error; err != nil {
+	if err := store.DB().Model(&model.Case{}).Where("id = ?", voided.Case.ID).Update("status", model.CaseValidityVoided).Error; err != nil {
 		t.Fatalf("void case: %v", err)
 	}
 
@@ -179,7 +179,7 @@ func TestListCasesFilteredAndGetCaseByReference(t *testing.T) {
 	secondCase := caseModel(guildID, &template.Template.ID)
 	secondCase.TargetDiscordUserID = "target-2"
 	secondCase.ModeratorDiscordUserID = "moderator-2"
-	secondCase.Status = model.CaseStatusFailed
+	secondCase.Validity = model.CaseValidityVoided
 	second, err := store.CreateCase(ctx, storage.CreateCaseParams{Case: secondCase, Event: caseEvent()})
 	if err != nil {
 		t.Fatalf("create second case: %v", err)
@@ -196,7 +196,7 @@ func TestListCasesFilteredAndGetCaseByReference(t *testing.T) {
 		t.Fatalf("expected newest-first cases for guild only, got %+v", list)
 	}
 
-	list, err = store.ListCasesFiltered(ctx, storage.ListCasesParams{GuildID: guildID, TargetDiscordUserID: "target-2", ModeratorDiscordUserID: "moderator-2", TemplateID: template.Template.ID, Status: model.CaseStatusFailed, Limit: 10})
+	list, err = store.ListCasesFiltered(ctx, storage.ListCasesParams{GuildID: guildID, TargetDiscordUserID: "target-2", ModeratorDiscordUserID: "moderator-2", TemplateID: template.Template.ID, Validity: model.CaseValidityVoided, Limit: 10})
 	if err != nil {
 		t.Fatalf("list filtered cases with filters: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestListCaseActionAttemptsAndTargetSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("target summary: %v", err)
 	}
-	if summary.Total != 1 || summary.ByStatus[model.CaseStatusCompleted] != 1 {
+	if summary.Total != 1 || summary.ByValidity[model.CaseValidityValid] != 1 {
 		t.Fatalf("unexpected target summary: %+v", summary)
 	}
 }
@@ -489,8 +489,8 @@ func TestCaseActionStateMachineClaimCompleteAndSkip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list cases: %v", err)
 	}
-	if cases[0].Status != model.CaseStatusFailed || cases[0].ResolvedAt == nil {
-		t.Fatalf("expected failed resolved case, got %+v", cases[0])
+	if cases[0].Validity != model.CaseValidityValid {
+		t.Fatalf("expected action failure not to change case validity, got %+v", cases[0])
 	}
 }
 
@@ -582,10 +582,8 @@ func caseModel(guildID string, templateID *string) model.Case {
 		TargetDiscordUserID:    "target-1",
 		ModeratorDiscordUserID: "moderator-1",
 		Reason:                 "No spam",
-		Severity:               model.CaseSeverityMedium,
-		Weight:                 1,
-		Status:                 model.CaseStatusOpen,
-		Source:                 model.CaseSourceAPI,
+		Validity:               model.CaseValidityValid,
+		Source:                 model.CaseSourceDashboard,
 		MetadataJSON:           "{}",
 	}
 }

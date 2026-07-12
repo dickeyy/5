@@ -29,7 +29,6 @@ type CaseService struct {
 type CaseInput struct {
 	TemplateID              string           `json:"template_id"`
 	TargetDiscordUserID     string           `json:"target_discord_user_id"`
-	ReasonOverride          string           `json:"reason_override"`
 	Source                  model.CaseSource `json:"source"`
 	ContextChannelDiscordID string           `json:"context_channel_discord_id"`
 	ContextMessageDiscordID string           `json:"context_message_discord_id"`
@@ -44,7 +43,7 @@ type CaseListInput struct {
 	TargetDiscordUserID    string
 	ModeratorDiscordUserID string
 	TemplateID             string
-	Status                 string
+	Validity               string
 }
 
 // CaseListResponse is the transport-neutral representation returned for case list response.
@@ -75,7 +74,7 @@ type CaseProfileResponse struct {
 // CaseProfileSummary groups the case profile summary state used to keep this package's responsibilities explicit.
 type CaseProfileSummary struct {
 	Total      int64            `json:"total"`
-	ByStatus   map[string]int64 `json:"by_status"`
+	ByValidity map[string]int64 `json:"by_validity"`
 	ByTemplate map[string]int64 `json:"by_template"`
 }
 
@@ -91,15 +90,11 @@ type CaseResponse struct {
 	TargetDiscordUserID     string               `json:"target_discord_user_id"`
 	ModeratorDiscordUserID  string               `json:"moderator_discord_user_id"`
 	Reason                  string               `json:"reason"`
-	Severity                model.CaseSeverity   `json:"severity"`
-	Weight                  int                  `json:"weight"`
-	Status                  model.CaseStatus     `json:"status"`
+	Validity                model.CaseValidity   `json:"validity"`
 	Source                  model.CaseSource     `json:"source"`
 	ContextChannelDiscordID string               `json:"context_channel_discord_id,omitempty"`
 	ContextMessageDiscordID string               `json:"context_message_discord_id,omitempty"`
 	ContextURL              string               `json:"context_url,omitempty"`
-	ResolvedAt              *time.Time           `json:"resolved_at,omitempty"`
-	ResolvedByDiscordUserID string               `json:"resolved_by_discord_user_id,omitempty"`
 	Metadata                any                  `json:"metadata"`
 	SelectedLevel           *CaseSelectedLevel   `json:"selected_level,omitempty"`
 	Actions                 []CaseActionResponse `json:"actions"`
@@ -167,7 +162,6 @@ type CaseEventResponse struct {
 	Visibility         model.EventVisibility `json:"visibility"`
 	Body               string                `json:"body"`
 	Metadata           any                   `json:"metadata"`
-	EditedAt           *time.Time            `json:"edited_at,omitempty"`
 }
 
 // CaseTemplateSnapshotResponse is the transport-neutral representation returned for case template snapshot response.
@@ -344,7 +338,7 @@ func (s *CaseService) UserHistory(ctx context.Context, guildContext *GuildStaffC
 		Offset: list.Offset,
 		Summary: CaseProfileSummary{
 			Total:      summary.Total,
-			ByStatus:   caseStatusSummary(summary.ByStatus),
+			ByValidity: caseValiditySummary(summary.ByValidity),
 			ByTemplate: summary.ByTemplate,
 		},
 	}, nil
@@ -361,9 +355,9 @@ func (s *CaseService) caseListParams(guildContext *GuildStaffContext, input Case
 		return model.ListCasesParams{}, 0, 0, err
 	}
 
-	status := model.CaseStatus(strings.TrimSpace(input.Status))
-	if status != "" && !validCaseStatus(status) {
-		return model.ListCasesParams{}, 0, 0, validationCaseError("status is invalid")
+	validity := model.CaseValidity(strings.TrimSpace(input.Validity))
+	if validity != "" && !validCaseValidity(validity) {
+		return model.ListCasesParams{}, 0, 0, validationCaseError("validity is invalid")
 	}
 
 	return model.ListCasesParams{
@@ -371,7 +365,7 @@ func (s *CaseService) caseListParams(guildContext *GuildStaffContext, input Case
 		TargetDiscordUserID:    strings.TrimSpace(input.TargetDiscordUserID),
 		ModeratorDiscordUserID: strings.TrimSpace(input.ModeratorDiscordUserID),
 		TemplateID:             strings.TrimSpace(input.TemplateID),
-		Status:                 status,
+		Validity:               validity,
 		Limit:                  limit,
 		Offset:                 offset,
 	}, limit, offset, nil
@@ -414,7 +408,7 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 
 	source := input.Source
 	if source == "" {
-		source = model.CaseSourceAPI
+		source = model.CaseSourceDashboard
 	}
 	if !validCaseSource(source) {
 		return nil, validationCaseError("source is invalid")
@@ -433,10 +427,7 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 		return nil, ErrCaseTemplateNotAvailable
 	}
 
-	reason := strings.TrimSpace(input.ReasonOverride)
-	if reason == "" {
-		reason = strings.TrimSpace(template.Template.ReasonTemplate)
-	}
+	reason := strings.TrimSpace(template.Template.ReasonTemplate)
 	if reason == "" {
 		return nil, validationCaseError("reason is required")
 	}
@@ -460,9 +451,7 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 		TargetDiscordUserID:     targetDiscordUserID,
 		ModeratorDiscordUserID:  guildContext.Staff.DiscordUserID,
 		Reason:                  reason,
-		Severity:                model.CaseSeverityMedium,
-		Weight:                  1,
-		Status:                  model.CaseStatusOpen,
+		Validity:                model.CaseValidityValid,
 		Source:                  source,
 		CorrelationID:           correlationID,
 		ContextChannelDiscordID: strings.TrimSpace(input.ContextChannelDiscordID),
@@ -655,15 +644,11 @@ func caseResponseFromModel(caseModel model.Case, actionExecutions []model.CaseAc
 		TargetDiscordUserID:     caseModel.TargetDiscordUserID,
 		ModeratorDiscordUserID:  caseModel.ModeratorDiscordUserID,
 		Reason:                  caseModel.Reason,
-		Severity:                caseModel.Severity,
-		Weight:                  caseModel.Weight,
-		Status:                  caseModel.Status,
+		Validity:                caseModel.Validity,
 		Source:                  caseModel.Source,
 		ContextChannelDiscordID: caseModel.ContextChannelDiscordID,
 		ContextMessageDiscordID: caseModel.ContextMessageDiscordID,
 		ContextURL:              caseModel.ContextURL,
-		ResolvedAt:              caseModel.ResolvedAt,
-		ResolvedByDiscordUserID: caseModel.ResolvedByDiscordUserID,
 		Metadata:                parseJSON(caseModel.MetadataJSON),
 		SelectedLevel:           selectedLevelResponse(caseModel.TemplateSnapshotJSON),
 		Actions:                 make([]CaseActionResponse, 0, len(actionExecutions)),
@@ -758,7 +743,6 @@ func caseEventResponses(events []model.CaseEvent) []CaseEventResponse {
 			Visibility:         event.Visibility,
 			Body:               event.Body,
 			Metadata:           parseJSON(event.MetadataJSON),
-			EditedAt:           event.EditedAt,
 		})
 	}
 	return responses
@@ -836,18 +820,18 @@ func pagination(limitValue, offsetValue string) (int, int, error) {
 	return limit, offset, nil
 }
 
-// validCaseStatus checks valid case status before state is read or changed.
-func validCaseStatus(status model.CaseStatus) bool {
-	switch status {
-	case model.CaseStatusOpen, model.CaseStatusActionRunning, model.CaseStatusCompleted, model.CaseStatusFailed, model.CaseStatusAppealed, model.CaseStatusVoided:
+// validCaseValidity reports whether validity is one of the two v5 case states.
+func validCaseValidity(validity model.CaseValidity) bool {
+	switch validity {
+	case model.CaseValidityValid, model.CaseValidityVoided:
 		return true
 	default:
 		return false
 	}
 }
 
-// caseStatusSummary encapsulates the case status summary rule so callers share one consistent package implementation.
-func caseStatusSummary(source map[model.CaseStatus]int64) map[string]int64 {
+// caseValiditySummary converts typed validity counts for transport responses.
+func caseValiditySummary(source map[model.CaseValidity]int64) map[string]int64 {
 	out := make(map[string]int64, len(source))
 	for status, count := range source {
 		out[string(status)] = count
@@ -863,7 +847,7 @@ func validationCaseError(message string) error {
 // validCaseSource checks valid case source before state is read or changed.
 func validCaseSource(source model.CaseSource) bool {
 	switch source {
-	case model.CaseSourceAPI, model.CaseSourceDiscordCommand, model.CaseSourceAutomation, model.CaseSourceImport:
+	case model.CaseSourceDashboard, model.CaseSourceDiscord, model.CaseSourceHoneypot, model.CaseSourceV4Import:
 		return true
 	default:
 		return false

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -18,6 +19,16 @@ func TestMySQLMigrateForwardRerunPreservationAndRollbackBoundary(t *testing.T) {
 		t.Fatalf("create representative pre-ledger MySQL schema: %v", err)
 	}
 	want := insertRepresentativeHistory(t, db)
+	legacyEventID := "01J40000000000000000000001"
+	if err := db.Exec(`INSERT INTO case_events
+		(id, created_at, updated_at, case_id, guild_id, event_type, actor_type, visibility, body, metadata_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, legacyEventID, time.Now().UTC(), time.Now().UTC(), want.CaseID, want.GuildID, "note_added", "staff", "internal", "preserved MySQL note", `{"mysql":true}`).Error; err != nil {
+		t.Fatalf("insert MySQL retired event: %v", err)
+	}
+	var legacyEventBefore migration0003LegacyEvent
+	if err := db.First(&legacyEventBefore, "id = ?", legacyEventID).Error; err != nil {
+		t.Fatalf("load MySQL retired event before migration: %v", err)
+	}
 	disabledTemplateID := insertMigration0002Template(t, db, "mysql-disabled", false, 0)
 	windowTemplateID := insertMigration0002Template(t, db, "mysql-window", true, 60)
 	deletedTemplateID := insertMigration0002Template(t, db, "mysql-deleted", true, 0)
@@ -33,11 +44,51 @@ func TestMySQLMigrateForwardRerunPreservationAndRollbackBoundary(t *testing.T) {
 		t.Fatalf("rerun MySQL migrations: %v", err)
 	}
 	assertRepresentativeHistory(t, db, want)
+	var mapped migration0003Case
+	if err := db.First(&mapped, "id = ?", want.CaseID).Error; err != nil {
+		t.Fatalf("load mapped representative case: %v", err)
+	}
+	if mapped.Status != "valid" || mapped.Source != "discord" {
+		t.Fatalf("unexpected MySQL case mapping: %+v", mapped)
+	}
+	var compatibility migration0003CaseCompatibility
+	if err := db.First(&compatibility, "case_id = ?", want.CaseID).Error; err != nil {
+		t.Fatalf("load MySQL compatibility inventory: %v", err)
+	}
+	if compatibility.NoteEventCount != 1 || compatibility.StatusEventCount != 0 {
+		t.Fatalf("unexpected MySQL retired-event inventory: %+v", compatibility)
+	}
+	liveEvents, err := repositories.ListCaseEvents(context.Background(), want.CaseID)
+	if err != nil {
+		t.Fatalf("list MySQL live case events: %v", err)
+	}
+	if len(liveEvents) != 1 {
+		t.Fatalf("expected preserved note excluded from MySQL live reads, got %+v", liveEvents)
+	}
+	var legacyEventAfter migration0003LegacyEvent
+	if err := db.First(&legacyEventAfter, "id = ?", legacyEventID).Error; err != nil {
+		t.Fatalf("load MySQL retired event after migration: %v", err)
+	}
+	assertMigration0003LegacyEventEqual(t, legacyEventAfter, legacyEventBefore)
 	assertTemplateArchiveState(t, db, disabledTemplateID, true)
 	assertTemplateArchiveState(t, db, windowTemplateID, true)
 	assertTemplateArchiveState(t, db, deletedTemplateID, true)
 	assertTemplateDeletedState(t, db, deletedTemplateID, false)
 
+	if err := repositories.RollbackLastMigration(); err != nil {
+		t.Fatalf("roll back case validity migration: %v", err)
+	}
+	if err := db.First(&mapped, "id = ?", want.CaseID).Error; err != nil {
+		t.Fatalf("load rolled-back representative case: %v", err)
+	}
+	if mapped.Status != "open" || mapped.Source != "discord_command" {
+		t.Fatalf("unexpected MySQL case rollback: %+v", mapped)
+	}
+	var preservedEvent migration0003LegacyEvent
+	if err := db.First(&preservedEvent, "id = ?", legacyEventID).Error; err != nil {
+		t.Fatalf("load preserved MySQL retired event after rollback: %v", err)
+	}
+	assertMigration0003LegacyEventEqual(t, preservedEvent, legacyEventBefore)
 	if err := repositories.RollbackLastMigration(); err != nil {
 		t.Fatalf("roll back template compatibility migration: %v", err)
 	}
@@ -45,7 +96,7 @@ func TestMySQLMigrateForwardRerunPreservationAndRollbackBoundary(t *testing.T) {
 	assertTemplateArchiveState(t, db, windowTemplateID, false)
 	assertTemplateArchiveState(t, db, deletedTemplateID, false)
 	assertTemplateDeletedState(t, db, deletedTemplateID, true)
-	err := repositories.RollbackLastMigration()
+	err = repositories.RollbackLastMigration()
 	if !errors.Is(err, ErrMigrationNotReversible) {
 		t.Fatalf("expected baseline rollback refusal, got %v", err)
 	}

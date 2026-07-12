@@ -8,26 +8,26 @@ Items are grouped by concern, not by implementation order or priority. Completed
 
 - [x] Remove escalation time windows from live domain models, template requests, responses, snapshots, validation, and tests while retaining frozen compatibility columns only.
 - [x] Change escalation counting to use all-time non-voided cases only.
-- [ ] Remove severity from templates, cases, API contracts, storage records, snapshots, filters, and tests.
-- [ ] Remove weight from cases, escalation behavior, storage records, API contracts, and tests.
+- [x] Remove severity from templates, cases, API contracts, live storage records, snapshots, filters, and tests while retaining frozen compatibility columns only.
+- [x] Remove weight from cases, escalation behavior, live storage records, API contracts, and tests while retaining the frozen compatibility column only.
 - [x] Remove the separate enabled state from live templates, levels, and level actions while retaining frozen compatibility columns only.
 - [ ] Make reversible archive and restore the only template availability lifecycle.
 - [ ] Remove soft-delete concepts that imply templates or cases can be deleted outside the defined archive/void flows.
-- [ ] Remove moderator reason overrides from case inputs, HTTP routes, Discord commands, snapshots, and tests.
+- [x] Remove moderator reason overrides from case inputs, HTTP routes, Discord commands, snapshots, and tests.
 - [x] Enforce zero or one timeout, kick, or ban action per template level.
 - [x] Remove ordered multi-action behavior and `continue_on_error` from the product model.
 - [x] Remove action-level notification settings now that each case has one level-owned notification decision.
 - [x] Remove technical action settings that are no longer admin-facing, including configurable backoff, execution timeout, and idempotency scope.
 - [x] Retain only the admin-configurable safe retry-count limit in template action contracts.
-- [ ] Replace mixed case lifecycle statuses with valid or voided case state.
-- [ ] Keep action execution and appeal statuses separate from case validity.
-- [ ] Remove note-related case event types and note-oriented model fields.
-- [ ] Remove free-form staff and member case-note expectations from backend contracts and documentation.
-- [ ] Restrict normal case sources to dashboard, Discord, honeypot automation, and v4 import where appropriate.
-- [ ] Preserve existing v5 data through explicit compatibility migrations while rejected fields are retired.
-- [ ] Update all JSON contracts and snapshots to match the simplified v5 model.
-- [ ] Update technical documentation after each model correction so it continues to describe running code.
-- [ ] Remove resolved entries from `docs/v5-scope-drift.md` only after code and tests match `v5.md`.
+- [x] Replace mixed case lifecycle statuses with valid or voided case state.
+- [x] Keep action execution and appeal statuses separate from case validity.
+- [x] Remove note-related case event types and note-oriented model fields from the live v5 boundary while preserving retired rows for compatibility.
+- [x] Remove free-form staff and member case-note expectations from backend contracts and documentation.
+- [x] Restrict normal case sources to dashboard, Discord, honeypot automation, and v4 import where appropriate.
+- [x] Preserve existing v5 data through explicit compatibility migrations while rejected fields are retired.
+- [x] Update all current template and case JSON contracts and snapshots to match the simplified v5 model.
+- [x] Update technical documentation after each model correction so it continues to describe running code.
+- [x] Remove resolved entries from `docs/v5-scope-drift.md` only after code and tests match `v5.md`.
 
 ## Guild Setup and Settings
 
@@ -100,7 +100,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [ ] Include context definitions in template create, update, get, list, import, export, and snapshot contracts.
 - [ ] Validate context-field names, labels, types, ordering, and required flags.
 - [ ] Treat all submitted context fields as member-visible.
-- [ ] Keep the official template reason fixed during case creation.
+- [x] Keep the official template reason fixed during case creation.
 - [x] Require exactly one default level on every template.
 - [x] Allow the default level to create a case without an enforcement action.
 - [x] Validate positive case-count thresholds for every non-default level.

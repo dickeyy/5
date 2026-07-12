@@ -94,7 +94,7 @@ type CountTemplateCasesForTargetParams struct {
 // ListCasesParams groups the validated inputs needed for list cases params.
 type ListCasesParams struct {
 	GuildID, TargetDiscordUserID, ModeratorDiscordUserID, TemplateID string
-	Status                                                           CaseStatus
+	Validity                                                         CaseValidity
 	Limit, Offset                                                    int
 }
 
@@ -107,7 +107,7 @@ type ListCasesResult struct {
 // TargetCaseSummary groups the target case summary state used to keep this package's responsibilities explicit.
 type TargetCaseSummary struct {
 	Total      int64
-	ByStatus   map[CaseStatus]int64
+	ByValidity map[CaseValidity]int64
 	ByTemplate map[string]int64
 }
 
