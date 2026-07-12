@@ -67,17 +67,25 @@ func (a *DiscordAdapter) Reply(ctx context.Context, actor Actor, ticketID, body 
 
 // Close captures the transcript before resolving and archiving the private channel.
 func (a *DiscordAdapter) Close(ctx context.Context, actor Actor, ticketID string) (*Ticket, error) {
+	if !actor.CanModerate {
+		return nil, ErrPermissionDenied
+	}
 	ticket, _, err := a.service.Detail(ctx, actor, ticketID)
 	if err != nil {
 		return nil, err
 	}
-	transcript, err := a.client.CaptureTicketTranscript(ctx, ticket.ThreadDiscordChannelID)
-	if err != nil {
-		return nil, err
-	}
-	resolved, err := a.service.Resolve(ctx, actor, ticketID, transcript)
-	if err != nil {
-		return nil, err
+	resolved := ticket
+	if ticket.Status == StatusOpen {
+		transcript, err := a.client.CaptureTicketTranscript(ctx, ticket.ThreadDiscordChannelID)
+		if err != nil {
+			return nil, err
+		}
+		resolved, err = a.service.Resolve(ctx, actor, ticketID, transcript)
+		if err != nil {
+			return nil, err
+		}
+	} else if ticket.Status != StatusResolved {
+		return nil, ErrInvalidTransition
 	}
 	if err := a.client.ArchiveTicketChannel(ctx, ticket.ThreadDiscordChannelID); err != nil {
 		return resolved, err
@@ -91,13 +99,18 @@ func (a *DiscordAdapter) Cancel(ctx context.Context, actor Actor, ticketID strin
 	if err != nil {
 		return nil, err
 	}
-	transcript, err := a.client.CaptureTicketTranscript(ctx, ticket.ThreadDiscordChannelID)
-	if err != nil {
-		return nil, err
-	}
-	cancelled, err := a.service.cancel(ctx, actor, ticketID, transcript)
-	if err != nil {
-		return nil, err
+	cancelled := ticket
+	if ticket.Status == StatusOpen {
+		transcript, err := a.client.CaptureTicketTranscript(ctx, ticket.ThreadDiscordChannelID)
+		if err != nil {
+			return nil, err
+		}
+		cancelled, err = a.service.cancel(ctx, actor, ticketID, &transcript)
+		if err != nil {
+			return nil, err
+		}
+	} else if ticket.Status != StatusCancelled {
+		return nil, ErrInvalidTransition
 	}
 	if err := a.client.ArchiveTicketChannel(ctx, ticket.ThreadDiscordChannelID); err != nil {
 		return cancelled, err

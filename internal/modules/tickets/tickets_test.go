@@ -48,6 +48,7 @@ func setup(t *testing.T) (*gorm.DB, *tickets.Service, *auditRecorder) {
 	service := tickets.NewService(registry, tickets.NewStore(db), audit)
 	settings := tickets.Defaults()
 	settings.EntryChannelDiscordID = "entry"
+	settings.StaffRoleDiscordIDs = []string{"staff-role"}
 	if _, err := service.UpdateSettings(context.Background(), tickets.Actor{GuildID: "guild-a", DiscordUserID: "admin", CanManage: true}, true, settings); err != nil {
 		t.Fatal(err)
 	}
@@ -94,6 +95,10 @@ func TestLifecyclePrivacyDuplicateRateAndIsolation(t *testing.T) {
 	if err != nil || cancelled.Status != tickets.StatusCancelled {
 		t.Fatalf("cancel=%+v err=%v", cancelled, err)
 	}
+	transcript, err = service.Transcript(ctx, member, ticket.ID)
+	if err != nil || transcript.Content != "private transcript" {
+		t.Fatalf("cancel overwrote transcript=%+v err=%v", transcript, err)
+	}
 	for index := 2; index <= 3; index++ {
 		opened, openErr := service.Open(ctx, member, fmt.Sprintf("thread-%d", index))
 		if openErr != nil {
@@ -135,6 +140,8 @@ type discordFake struct {
 	replies         []string
 	permissionCalls int
 	channelCalls    int
+	archiveAttempts int
+	failArchive     int
 }
 
 func (f *discordFake) CreatePrivateTicketChannel(context.Context, string, string, tickets.Settings) (string, error) {
@@ -153,6 +160,10 @@ func (f *discordFake) CaptureTicketTranscript(context.Context, string) (string, 
 	return "captured", nil
 }
 func (f *discordFake) ArchiveTicketChannel(_ context.Context, id string) error {
+	f.archiveAttempts++
+	if f.archiveAttempts <= f.failArchive {
+		return errors.New("temporary archive failure")
+	}
 	f.archived = append(f.archived, id)
 	return nil
 }
@@ -173,8 +184,12 @@ func TestDiscordAdapterPrivateFlowAndRepair(t *testing.T) {
 	if err := adapter.RepairPermissions(context.Background(), staff, ticket.ID); err != nil {
 		t.Fatal(err)
 	}
+	client.failArchive = 1
+	if _, err := adapter.Close(context.Background(), staff, ticket.ID); err == nil {
+		t.Fatal("expected first archive failure")
+	}
 	if _, err := adapter.Close(context.Background(), staff, ticket.ID); err != nil {
-		t.Fatal(err)
+		t.Fatalf("retry close: %v", err)
 	}
 	second, err := adapter.Open(context.Background(), member)
 	if err != nil {
@@ -183,7 +198,7 @@ func TestDiscordAdapterPrivateFlowAndRepair(t *testing.T) {
 	if _, err := adapter.Cancel(context.Background(), member, second.ID); err != nil {
 		t.Fatal(err)
 	}
-	if client.permissionCalls != 3 || len(client.replies) != 1 || len(client.archived) != 2 {
+	if client.permissionCalls != 3 || len(client.replies) != 1 || len(client.archived) != 2 || client.archiveAttempts != 3 {
 		t.Fatalf("client=%+v", client)
 	}
 	if err := adapter.HandleDeletedChannel(context.Background(), "guild-a", ticket.ID, "private-thread"); err != nil {
@@ -195,6 +210,16 @@ func TestDiscordAdapterPrivateFlowAndRepair(t *testing.T) {
 	status, err := service.Status(context.Background(), staff)
 	if err != nil || status.Enabled || status.EntryConfigured {
 		t.Fatalf("entry repair status=%+v err=%v", status, err)
+	}
+}
+
+func TestEnabledTicketsRequireStaffRole(t *testing.T) {
+	_, service, _ := setup(t)
+	settings := tickets.Defaults()
+	settings.EntryChannelDiscordID = "entry"
+	_, err := service.UpdateSettings(context.Background(), tickets.Actor{GuildID: "guild-a", DiscordUserID: "admin", CanManage: true}, true, settings)
+	if err == nil {
+		t.Fatal("enabled tickets accepted no staff role")
 	}
 }
 

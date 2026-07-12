@@ -75,7 +75,9 @@ func setup(t *testing.T) (*gorm.DB, *logmodule.Service, *deliveryFake, *auditRec
 func TestPrivacyRedactionRetryAndAuditIsolation(t *testing.T) {
 	_, service, client, audit := setup(t)
 	client.failUntil = 2
-	service.CacheMessage(logmodule.CachedMessage{GuildID: "guild-a", ChannelDiscordID: "source", MessageDiscordID: "message", Content: "token=supersecretvalue", Attachments: []logmodule.AttachmentMetadata{{Filename: "proof.png", Size: 5}}})
+	if err := service.CacheMessage(context.Background(), logmodule.CachedMessage{GuildID: "guild-a", ChannelDiscordID: "source", MessageDiscordID: "message", Content: "token=supersecretvalue", Attachments: []logmodule.AttachmentMetadata{{Filename: "proof.png", Size: 5}}}); err != nil {
+		t.Fatal(err)
+	}
 	err := service.Handle(context.Background(), logmodule.Event{GuildID: "guild-a", Type: logmodule.MessageDelete, MessageDiscordID: "message", Metadata: map[string]string{"webhook": "https://discord.com/api/webhooks/123/secret"}})
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +103,9 @@ func TestPrivacyRedactionRetryAndAuditIsolation(t *testing.T) {
 func TestFailedDeleteRetainsCachedContextForGatewayReplay(t *testing.T) {
 	_, service, client, _ := setup(t)
 	client.failUntil = 10
-	service.CacheMessage(logmodule.CachedMessage{GuildID: "guild-a", MessageDiscordID: "replay", Content: "retained context"})
+	if err := service.CacheMessage(context.Background(), logmodule.CachedMessage{GuildID: "guild-a", MessageDiscordID: "replay", Content: "retained context"}); err != nil {
+		t.Fatal(err)
+	}
 	event := logmodule.Event{GuildID: "guild-a", Type: logmodule.MessageDelete, MessageDiscordID: "replay"}
 	if err := service.Handle(context.Background(), event); err == nil {
 		t.Fatal("expected bounded failure")
@@ -118,7 +122,9 @@ func TestFailedDeleteRetainsCachedContextForGatewayReplay(t *testing.T) {
 func TestBulkDeleteUsesAndThenEvictsCachedContext(t *testing.T) {
 	_, service, client, _ := setup(t)
 	for _, id := range []string{"one", "two"} {
-		service.CacheMessage(logmodule.CachedMessage{GuildID: "guild-a", MessageDiscordID: id, Content: "body-" + id})
+		if err := service.CacheMessage(context.Background(), logmodule.CachedMessage{GuildID: "guild-a", MessageDiscordID: id, Content: "body-" + id}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := service.HandleBulkDelete(context.Background(), "guild-a", "source", []string{"one", "two", "missing"}); err != nil {
 		t.Fatal(err)
@@ -133,6 +139,18 @@ func TestBulkDeleteUsesAndThenEvictsCachedContext(t *testing.T) {
 	payload = client.payloads[len(client.payloads)-1]
 	if strings.Contains(payload, "body-one") {
 		t.Fatalf("bulk cache not evicted: %s", payload)
+	}
+}
+
+func TestCacheMessageLoadsPersistedLimit(t *testing.T) {
+	_, service, _, _ := setup(t)
+	for i := 0; i < 3; i++ {
+		if err := service.CacheMessage(context.Background(), logmodule.CachedMessage{GuildID: "guild-a", MessageDiscordID: fmt.Sprint(i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if status := service.Status("guild-a"); status.CachedMessages != 2 {
+		t.Fatalf("cached=%d", status.CachedMessages)
 	}
 }
 
@@ -192,11 +210,12 @@ func TestDeliveryQueueConcurrentBoundedLifecycle(t *testing.T) {
 }
 
 func TestSettingsImportDryRunAndIdempotency(t *testing.T) {
-	db, _, _, audit := setup(t)
+	db, service, _, audit := setup(t)
 	importer := logmodule.NewImporter(db, audit)
 	actor := logmodule.Actor{GuildID: "guild-a", DiscordUserID: "admin", CanManage: true}
 	settings := logmodule.Defaults()
 	settings.Channels = map[logmodule.EventType]string{logmodule.MemberJoin: "staff"}
+	settings.CacheEntriesPerGuild = 1
 	row := logmodule.LegacySettings{SourceID: "legacy-settings", GuildID: "guild-a", Enabled: true, Settings: settings}
 	dry, err := importer.Import(context.Background(), actor, []logmodule.LegacySettings{row}, true)
 	if err != nil || !dry[0].WouldCreate {
@@ -209,5 +228,13 @@ func TestSettingsImportDryRunAndIdempotency(t *testing.T) {
 	second, err := importer.Import(context.Background(), actor, []logmodule.LegacySettings{row}, false)
 	if err != nil || second[0].Created {
 		t.Fatalf("second=%+v err=%v", second, err)
+	}
+	for _, id := range []string{"after-import-1", "after-import-2"} {
+		if err := service.CacheMessage(context.Background(), logmodule.CachedMessage{GuildID: "guild-a", MessageDiscordID: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if status := service.Status("guild-a"); status.CachedMessages != 1 {
+		t.Fatalf("imported cache limit not applied: %+v", status)
 	}
 }

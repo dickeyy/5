@@ -30,10 +30,11 @@ type RetryAfterError interface {
 
 // Status describes non-durable delivery health without becoming an event archive.
 type Status struct {
-	Delivered     uint64     `json:"delivered"`
-	Failed        uint64     `json:"failed"`
-	LastError     string     `json:"last_error,omitempty"`
-	LastFailureAt *time.Time `json:"last_failure_at,omitempty"`
+	Delivered      uint64     `json:"delivered"`
+	Failed         uint64     `json:"failed"`
+	LastError      string     `json:"last_error,omitempty"`
+	LastFailureAt  *time.Time `json:"last_failure_at,omitempty"`
+	CachedMessages int        `json:"cached_messages"`
 }
 
 // Service owns general logging configuration, ephemeral formatting/cache, and bounded delivery retry.
@@ -101,8 +102,19 @@ func (s *Service) UpdateSettings(ctx context.Context, actor Actor, enabled bool,
 	return settings, nil
 }
 
-// CacheMessage retains bounded message context for later edit/delete events.
-func (s *Service) CacheMessage(message CachedMessage) { s.cache.Put(message) }
+// CacheMessage applies persisted guild limits before retaining edit/delete context.
+func (s *Service) CacheMessage(ctx context.Context, message CachedMessage) error {
+	settings, enabled, err := s.loadSettings(ctx, message.GuildID)
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return ErrDisabled
+	}
+	s.cache.SetGuildLimit(message.GuildID, settings.CacheEntriesPerGuild)
+	s.cache.Put(message)
+	return nil
+}
 
 // Handle formats, redacts, routes, and retries one configured event without storing it permanently.
 func (s *Service) Handle(ctx context.Context, event Event) error {
@@ -194,8 +206,10 @@ func (s *Service) RepairDeletedChannel(ctx context.Context, actor Actor, channel
 // Status returns a copy of in-memory delivery health counters.
 func (s *Service) Status(guildID string) Status {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.status[guildID]
+	status := s.status[guildID]
+	s.mu.Unlock()
+	status.CachedMessages = s.cache.Len(guildID)
+	return status
 }
 
 func (s *Service) loadSettings(ctx context.Context, guildID string) (Settings, bool, error) {

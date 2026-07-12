@@ -116,10 +116,10 @@ func (s *Service) Resolve(ctx context.Context, actor Actor, ticketID, transcript
 
 // Cancel closes an open ticket at the owner's request or by current staff.
 func (s *Service) Cancel(ctx context.Context, actor Actor, ticketID string) (*Ticket, error) {
-	return s.cancel(ctx, actor, ticketID, "")
+	return s.cancel(ctx, actor, ticketID, nil)
 }
 
-func (s *Service) cancel(ctx context.Context, actor Actor, ticketID, transcriptContent string) (*Ticket, error) {
+func (s *Service) cancel(ctx context.Context, actor Actor, ticketID string, transcriptContent *string) (*Ticket, error) {
 	ticket, err := s.store.get(ctx, actor.GuildID, ticketID)
 	if err != nil {
 		return nil, err
@@ -131,8 +131,8 @@ func (s *Service) cancel(ctx context.Context, actor Actor, ticketID, transcriptC
 	settings, _, settingsErr := s.loadSettings(ctx, actor.GuildID)
 	now := s.now()
 	var transcript *Transcript
-	if settingsErr == nil {
-		transcript = &Transcript{TicketID: ticketID, GuildID: actor.GuildID, Content: transcriptContent, CapturedAt: now, ExpiresAt: now.AddDate(0, 0, settings.TranscriptRetentionDays)}
+	if settingsErr == nil && transcriptContent != nil {
+		transcript = &Transcript{TicketID: ticketID, GuildID: actor.GuildID, Content: *transcriptContent, CapturedAt: now, ExpiresAt: now.AddDate(0, 0, settings.TranscriptRetentionDays)}
 	}
 	ticket, err = s.store.transition(ctx, actor.GuildID, ticketID, []Status{StatusOpen}, StatusCancelled, actor.DiscordUserID, EventCancelled, "Ticket cancelled", false, transcript, now)
 	if err != nil {
@@ -303,6 +303,14 @@ func validateSettingsJSON(raw string) error {
 func validateSettings(settings Settings, enabled bool) error {
 	if enabled && strings.TrimSpace(settings.EntryChannelDiscordID) == "" {
 		return errors.New("entry channel is required when tickets are enabled")
+	}
+	if enabled && len(settings.StaffRoleDiscordIDs) == 0 {
+		return errors.New("at least one staff role is required when tickets are enabled")
+	}
+	for _, roleID := range settings.StaffRoleDiscordIDs {
+		if strings.TrimSpace(roleID) == "" {
+			return errors.New("staff role ids cannot be empty")
+		}
 	}
 	if settings.TranscriptRetentionDays < 1 || settings.TranscriptRetentionDays > 365 {
 		return errors.New("transcript retention must be 1 to 365 days")
