@@ -245,6 +245,11 @@ closes all transferred wiring obligations and passes focused, real-MySQL, race,
 full, vet, build, formatting, and diff gates. PR #13 has one Codex review
 request pending.
 
+QI-2 accepted at review-fix head `6b999c1` on PR #13 after exactly one Codex
+request. Its sole P1—using a Discord snowflake instead of the resolved internal
+guild ID in the live honeypot projection—was fixed with regression coverage;
+post-fix targeted/full/race/MySQL/vet/build gates are green.
+
 ### Parallel wave P3 - migration and operations from QI-2
 
 | Package | Absorbed requirements | Exclusive implementation surface | Migration range |
@@ -255,6 +260,18 @@ request pending.
 Release-infrastructure mutations within QP-H remain blocked until explicit user
 authorization; code, tests, docs, and an exact proposed infrastructure diff may
 proceed independently.
+
+P3 assignments from accepted QI-2 head `6b999c1`:
+
+- QP-G: fresh owner `/root/qp_g_v4_storage`, branch
+  `package/qp-g-v4-storage`, worktree `/tmp/quack-v5-worktrees/qp-g`.
+- QP-H: fresh owner `/root/qp_h_ops_security`, branch
+  `package/qp-h-ops-security`, worktree `/tmp/quack-v5-worktrees/qp-h`.
+
+QP-G exclusively owns v4 import/storage migration sources and recovery evidence;
+QP-H exclusively owns API policy, ops, security, observability, and lifecycle
+code/docs. Central migration registration, shared ledgers, final composition,
+and readiness adjudication remain QP-I-owned to avoid parallel write conflicts.
 
 ### Final package
 
@@ -1046,9 +1063,9 @@ by the macro-package ledger.
 | QP-D | ACCEPTED | `package/qp-d-appeals-member` at `24f3e4d` | [#12](https://github.com/dickeyy/5/pull/12) | 1 complete; P1/P2 fixed | focused x20/full/race/MySQL/vet/build green |
 | QP-E | ACCEPTED | `package/qp-e-audit-discord` at `f7ace2f` | [#11](https://github.com/dickeyy/5/pull/11) | 1 complete; three integration findings | package gates green; findings transferred to QI-2 |
 | QP-F | ACCEPTED | `package/qp-f-honeypot-isolation` at `fc6d82c` | [#10](https://github.com/dickeyy/5/pull/10) | 1 complete; one P2 fixed | passed evidence gate |
-| QI-2 | REVIEW_PENDING | `integration/qi-2-p2` at `1ddad6d` | [#13](https://github.com/dickeyy/5/pull/13) | 1 requested | all P2 heads integrated; focused/MySQL/race/full/vet/build green |
-| QP-G | PLANNED | pending | pending | 0 | absorbs V5-023/024 |
-| QP-H | PLANNED | pending | pending | 0 | absorbs remaining V5-017/025 |
+| QI-2 | ACCEPTED | `integration/qi-2-p2` at `6b999c1` | [#13](https://github.com/dickeyy/5/pull/13) | 1 complete; P1 fixed | focused/MySQL/race/full/vet/build green |
+| QP-G | IN_PROGRESS | `package/qp-g-v4-storage` from `6b999c1` | pending | 0 | absorbs V5-023/024 |
+| QP-H | IN_PROGRESS | `package/qp-h-ops-security` from `6b999c1` | pending | 0 | absorbs remaining V5-017/025 |
 | QP-I | PLANNED | pending | pending | 0 | absorbs V5-026 and final readiness |
 
 ## Decisions
