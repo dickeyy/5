@@ -65,8 +65,10 @@ interaction handlers:
 - autocomplete responses
 - modal responses
 
-The `/case add` command uses this layer to defer publicly and then replace the
-deferred placeholder with a case-created embed from `internal/discordbot/ui/views/case.go`.
+The `/case add` command performs live shared authorization before deferring.
+Permission and membership denials therefore remain immediate and private. An
+authorized request defers publicly and then replaces the placeholder with a
+case-created embed from `internal/discordbot/ui/views/case.go`.
 
 ## Error And Panic Behavior
 

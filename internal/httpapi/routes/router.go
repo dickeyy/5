@@ -30,10 +30,10 @@ func setupGuildRoutes(r *gin.Engine, services *quack.Services) {
 	guilds.GET("/:discordGuildID/settings", middleware.RequireGuildContext(services, model.PermissionActionGuildSettingsRead), func(c *gin.Context) {
 		getGuildSettings(c, services)
 	})
-	guilds.PATCH("/:discordGuildID/settings", middleware.RequireGuildContext(services, ""), func(c *gin.Context) {
+	guilds.PATCH("/:discordGuildID/settings", middleware.RequireGuildContext(services, model.PermissionActionGuildSettingsWrite), func(c *gin.Context) {
 		updateGuildSettings(c, services)
 	})
-	guilds.POST("/:discordGuildID/settings/starter-policy-notice/acknowledge", middleware.RequireGuildContext(services, ""), func(c *gin.Context) {
+	guilds.POST("/:discordGuildID/settings/starter-policy-notice/acknowledge", middleware.RequireGuildContext(services, model.PermissionActionGuildSettingsWrite), func(c *gin.Context) {
 		acknowledgeStarterPolicyNotice(c, services)
 	})
 	guilds.GET("/:discordGuildID/templates", middleware.RequireGuildContext(services, model.PermissionActionCaseTemplateRead), func(c *gin.Context) {
@@ -51,16 +51,16 @@ func setupGuildRoutes(r *gin.Engine, services *quack.Services) {
 	guilds.DELETE("/:discordGuildID/templates/:templateID", middleware.RequireGuildContext(services, model.PermissionActionCaseTemplateDelete), func(c *gin.Context) {
 		archiveTemplate(c, services)
 	})
-	guilds.GET("/:discordGuildID/cases", middleware.RequireGuildContext(services, model.PermissionActionCaseCreate), func(c *gin.Context) {
+	guilds.GET("/:discordGuildID/cases", middleware.RequireGuildContext(services, model.PermissionActionCaseRead), func(c *gin.Context) {
 		listCases(c, services)
 	})
 	guilds.POST("/:discordGuildID/cases", middleware.RequireGuildContext(services, model.PermissionActionCaseCreate), func(c *gin.Context) {
 		createCase(c, services)
 	})
-	guilds.GET("/:discordGuildID/cases/:caseRef", middleware.RequireGuildContext(services, model.PermissionActionCaseCreate), func(c *gin.Context) {
+	guilds.GET("/:discordGuildID/cases/:caseRef", middleware.RequireGuildContext(services, model.PermissionActionCaseRead), func(c *gin.Context) {
 		getCase(c, services)
 	})
-	guilds.GET("/:discordGuildID/users/:targetDiscordUserID/cases", middleware.RequireGuildContext(services, model.PermissionActionCaseCreate), func(c *gin.Context) {
+	guilds.GET("/:discordGuildID/users/:targetDiscordUserID/cases", middleware.RequireGuildContext(services, model.PermissionActionCaseRead), func(c *gin.Context) {
 		listUserCases(c, services)
 	})
 	guilds.GET("/:discordGuildID/audit-log", middleware.RequireGuildContext(services, model.PermissionActionAuditRead), func(c *gin.Context) {

@@ -11,8 +11,7 @@ import (
 )
 
 var (
-	ErrUserNotInGuild = errors.New("user is not in guild")
-	ErrBotNotInGuild  = errors.New("bot is not in guild")
+	ErrBotNotInGuild = errors.New("bot is not in guild")
 )
 
 // GuildService resolves dashboard and Discord identities into a common authorized staff context.
@@ -23,12 +22,14 @@ type GuildService struct {
 
 // GuildStaffContext carries the request-scoped guild staff context data needed by downstream logic.
 type GuildStaffContext struct {
-	Guild          *model.Guild
-	Staff          *model.StaffMember
-	PermissionBits uint64
-	Permissions    map[model.PermissionAction]bool
-	IsAdmin        bool
-	IsModerator    bool
+	Guild              *model.Guild
+	Staff              *model.StaffMember
+	ActorDiscordUserID string
+	PermissionBits     uint64
+	Permissions        map[model.PermissionAction]bool
+	IsAdmin            bool
+	IsModerator        bool
+	Live               DiscordGuildAuthorization
 }
 
 // UserGuildListItem groups the user guild list item state used to keep this package's responsibilities explicit.
@@ -40,6 +41,7 @@ type UserGuildListItem struct {
 	IsOwner         bool   `json:"is_owner"`
 	IsAdministrator bool   `json:"is_administrator"`
 	CanManageGuild  bool   `json:"can_manage_guild"`
+	CanModerate     bool   `json:"can_moderate"`
 	QuackInGuild    bool   `json:"quack_in_guild"`
 	QuackGuildName  string `json:"quack_guild_name,omitempty"`
 }
@@ -141,7 +143,8 @@ func (s *GuildService) ListUserManageableGuilds(ctx context.Context, session *mo
 	for _, guild := range userGuilds {
 		isAdmin := hasAllBits(guild.Permissions, permissionAdministrator)
 		canManageGuild := guild.Owner || isAdmin || hasAllBits(guild.Permissions, permissionManageGuild)
-		if !canManageGuild {
+		canModerate := guild.Owner || isAdmin || hasAllBits(guild.Permissions, permissionModerateMembers)
+		if !canManageGuild && !canModerate {
 			continue
 		}
 
@@ -153,6 +156,7 @@ func (s *GuildService) ListUserManageableGuilds(ctx context.Context, session *mo
 			IsOwner:         guild.Owner,
 			IsAdministrator: isAdmin,
 			CanManageGuild:  canManageGuild,
+			CanModerate:     canModerate,
 		}
 
 		if botGuild, ok := botGuildsByID[guild.ID]; ok {
@@ -183,51 +187,17 @@ func (s *GuildService) ResolveStaffContext(ctx context.Context, session *model.A
 		return nil, errors.New("missing discord guild id")
 	}
 
-	userGuild, err := s.userGuild(ctx, session.AccessToken, discordGuildID)
-	if err != nil {
-		return nil, err
+	snapshot, err := s.discord.GuildAuthorization(ctx, discordGuildID, session.DiscordUserID, "")
+	if err != nil || snapshot == nil {
+		if errors.Is(err, ErrBotNotInGuild) {
+			return nil, ErrBotNotInGuild
+		}
+		return nil, ErrAuthorizationUnavailable
 	}
-
-	botGuild, err := s.discord.BotGuild(ctx, discordGuildID)
-	if err != nil {
-		return nil, err
+	if snapshot.Guild.ID != discordGuildID {
+		return nil, ErrAuthorizationUnavailable
 	}
-	if botGuild == nil || botGuild.ID == "" {
-		return nil, ErrBotNotInGuild
-	}
-
-	guild, err := s.store.UpsertGuild(ctx, model.UpsertGuildParams{
-		DiscordGuildID:     botGuild.ID,
-		Name:               botGuild.Name,
-		IconURL:            discordGuildIconURL(botGuild.ID, botGuild.Icon),
-		OwnerDiscordUserID: botGuild.OwnerID,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	staff, err := s.store.UpsertStaffMember(ctx, model.UpsertStaffMemberParams{
-		GuildID:                guild.ID,
-		DiscordUserID:          session.DiscordUserID,
-		LastSeenPermissionBits: userGuild.Permissions,
-		LastKnownDisplayName:   staffDisplayName(session),
-		LastActiveAt:           time.Now().UTC(),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	isOwner := userGuild.Owner || guild.OwnerDiscordUserID == session.DiscordUserID
-	role := discordRoleContext(userGuild.Permissions, isOwner)
-
-	return &GuildStaffContext{
-		Guild:          guild,
-		Staff:          staff,
-		PermissionBits: userGuild.Permissions,
-		Permissions:    role.permissions,
-		IsAdmin:        role.isAdmin,
-		IsModerator:    role.isModerator,
-	}, nil
+	return s.contextFromAuthorization(ctx, snapshot, session.DiscordUserID, staffDisplayName(session))
 }
 
 // ResolveDiscordStaffContext resolves discord staff context from authoritative request and repository data.
@@ -248,71 +218,63 @@ func (s *GuildService) ResolveDiscordStaffContext(ctx context.Context, input Dis
 		return nil, errors.New("missing discord user id")
 	}
 
-	botGuild, err := s.discord.BotGuild(ctx, discordGuildID)
-	if err != nil {
-		return nil, err
+	snapshot, err := s.discord.GuildAuthorization(ctx, discordGuildID, discordUserID, "")
+	if err != nil || snapshot == nil {
+		if errors.Is(err, ErrBotNotInGuild) {
+			return nil, ErrBotNotInGuild
+		}
+		return nil, ErrAuthorizationUnavailable
 	}
-	if botGuild == nil || botGuild.ID == "" {
-		return nil, ErrBotNotInGuild
+	if snapshot.Guild.ID != discordGuildID {
+		return nil, ErrAuthorizationUnavailable
 	}
-
-	guild, err := s.store.UpsertGuild(ctx, model.UpsertGuildParams{
-		DiscordGuildID:     botGuild.ID,
-		Name:               botGuild.Name,
-		IconURL:            discordGuildIconURL(botGuild.ID, botGuild.Icon),
-		OwnerDiscordUserID: botGuild.OwnerID,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	displayName := strings.TrimSpace(input.DisplayName)
-	if displayName == "" {
-		displayName = discordUserID
-	}
-	lastActiveAt := input.LastActiveAt
-	if lastActiveAt.IsZero() {
-		lastActiveAt = time.Now().UTC()
-	}
-
-	staff, err := s.store.UpsertStaffMember(ctx, model.UpsertStaffMemberParams{
-		GuildID:                guild.ID,
-		DiscordUserID:          discordUserID,
-		LastSeenPermissionBits: input.PermissionBits,
-		LastKnownDisplayName:   displayName,
-		LastActiveAt:           lastActiveAt,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	isOwner := guild.OwnerDiscordUserID == discordUserID
-	role := discordRoleContext(input.PermissionBits, isOwner)
-
-	return &GuildStaffContext{
-		Guild:          guild,
-		Staff:          staff,
-		PermissionBits: input.PermissionBits,
-		Permissions:    role.permissions,
-		IsAdmin:        role.isAdmin,
-		IsModerator:    role.isModerator,
-	}, nil
+	return s.contextFromAuthorization(ctx, snapshot, discordUserID, input.DisplayName)
 }
 
-// userGuild encapsulates the user guild rule so callers share one consistent package implementation.
-func (s *GuildService) userGuild(ctx context.Context, accessToken, discordGuildID string) (*DiscordUserGuild, error) {
-	guilds, err := s.discord.UserGuilds(ctx, accessToken)
+// contextFromAuthorization materializes a request context from live Discord state and refreshes attribution cache data only after successful resolution.
+func (s *GuildService) contextFromAuthorization(ctx context.Context, snapshot *DiscordGuildAuthorization, actorDiscordUserID, fallbackDisplayName string) (*GuildStaffContext, error) {
+	if snapshot == nil || snapshot.Guild.ID == "" || snapshot.Guild.ID != strings.TrimSpace(snapshot.Guild.ID) {
+		return nil, ErrAuthorizationUnavailable
+	}
+	if snapshot.Actor.DiscordUserID != actorDiscordUserID {
+		return nil, ErrAuthorizationUnavailable
+	}
+	guild, err := s.store.UpsertGuild(ctx, model.UpsertGuildParams{
+		DiscordGuildID: snapshot.Guild.ID, Name: snapshot.Guild.Name,
+		IconURL: discordGuildIconURL(snapshot.Guild.ID, snapshot.Guild.Icon), OwnerDiscordUserID: snapshot.Guild.OwnerID,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	for i := range guilds {
-		if guilds[i].ID == discordGuildID {
-			return &guilds[i], nil
+	var staff *model.StaffMember
+	if snapshot.Actor.Present {
+		displayName := strings.TrimSpace(snapshot.Actor.DisplayName)
+		if displayName == "" {
+			displayName = strings.TrimSpace(fallbackDisplayName)
 		}
+		if displayName == "" {
+			displayName = actorDiscordUserID
+		}
+		staff, err = s.store.UpsertStaffMember(ctx, model.UpsertStaffMemberParams{
+			GuildID: guild.ID, DiscordUserID: actorDiscordUserID,
+			LastSeenPermissionBits: snapshot.Actor.PermissionBits,
+			LastKnownDisplayName:   displayName, LastActiveAt: authorizationNow(),
+		})
+	} else {
+		staff, err = s.store.GetStaffMember(ctx, guild.ID, actorDiscordUserID)
+	}
+	if err != nil {
+		return nil, err
 	}
 
-	return nil, ErrUserNotInGuild
+	isOwner := snapshot.Guild.OwnerID == actorDiscordUserID
+	role := discordRoleContext(snapshot.Actor.PermissionBits, isOwner)
+	return &GuildStaffContext{
+		Guild: guild, Staff: staff, ActorDiscordUserID: actorDiscordUserID,
+		PermissionBits: snapshot.Actor.PermissionBits, Permissions: role.permissions,
+		IsAdmin: role.isAdmin, IsModerator: role.isModerator, Live: *snapshot,
+	}, nil
 }
 
 // Can reports whether the staff context grants every requested moderation permission.
@@ -354,14 +316,17 @@ func discordRoleContext(permissionBits uint64, isOwner bool) discordRole {
 func discordPermissionMap(canModerate, canManage bool) map[model.PermissionAction]bool {
 	return map[model.PermissionAction]bool{
 		model.PermissionActionCaseCreate:         canModerate,
-		model.PermissionActionCaseTemplateRead:   canModerate,
+		model.PermissionActionCaseRead:           canModerate,
+		model.PermissionActionCaseTemplateRead:   canModerate || canManage,
 		model.PermissionActionCaseTemplateWrite:  canManage,
 		model.PermissionActionCaseTemplateDelete: canManage,
 		model.PermissionActionAppealReview:       canModerate,
 		model.PermissionActionTicketResolve:      canModerate,
-		model.PermissionActionAuditRead:          canManage,
+		model.PermissionActionAuditRead:          canModerate,
 		model.PermissionActionGuildSettingsRead:  canManage,
 		model.PermissionActionGuildSettingsWrite: canManage,
+		model.PermissionActionCaseVoid:           canModerate,
+		model.PermissionActionFailureDismiss:     canModerate,
 	}
 }
 

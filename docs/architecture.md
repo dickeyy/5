@@ -35,6 +35,22 @@ guild.
 Dependencies point inward: adapters may import the application core, while the
 core imports no Gin, DiscordGo, GORM, or Redis packages.
 
+## Live Discord authorization
+
+Discord is the authority for guild access. Every protected dashboard request
+and Discord moderation request resolves a fresh guild/actor/bot snapshot through
+the `DiscordClient` port. The snapshot contains current membership, guild-level
+permission bits, account type, and top-role position. OAuth guild lists,
+session-time permissions, interaction permission bits, and `staff_members` rows
+never grant access; the staff row is only refreshed attribution/display cache.
+
+The shared core capability map grants full access to the guild owner and
+`Administrator`, configuration access to `Manage Guild`, and moderation/case/
+audit access to `Moderate Members`. Case preflight additionally requires the
+actor and bot action permission and rejects unsafe targets against both role
+hierarchies. HTTP and Discord map the same typed authorization errors without
+exposing Discord REST failures.
+
 ## Moderation flow
 
 Both `POST /guilds/:discordGuildID/cases` and Discord `/case add` call the
@@ -43,10 +59,12 @@ same case service. Case creation:
 1. Resolves the actor through Discord-derived guild permissions.
 2. Locks the guild row inside a unit of work.
 3. Loads the selected template and counts matching non-voided history.
-4. Selects and snapshots the highest matching escalation level.
-5. Allocates the guild case number and writes the case, initial event, action
+4. Selects the highest matching escalation level, then refreshes live target,
+   actor, bot, permission, and hierarchy state before any case row exists.
+5. Snapshots the selected policy.
+6. Allocates the guild case number and writes the case, initial event, action
    executions, and audit row transactionally.
-6. Submits a best-effort wake-up hint to the work queue.
+7. Submits a best-effort wake-up hint to the work queue.
 
 The guild lock makes simultaneous cases observe a deterministic history and
 receive unique case numbers.

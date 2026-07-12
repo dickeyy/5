@@ -27,21 +27,30 @@ cases first.
 
 ## Creation Flow
 
-1. Validate guild context, permission, template ID, target user, source, and
+1. Resolve current Discord membership and permissions through the shared live
+   authorization port, then validate guild context, template ID, target user, source, and
    metadata.
 2. Load the expanded template with `GetCaseTemplateExpanded`.
 3. Reject archived templates.
 4. Copy the immutable official reason from the template `reason_template`.
 5. Choose the selected template level based on prior case count for the same
    target and template.
-6. Build `TemplateSnapshotJSON` so the case keeps the policy that was used at
+6. Refresh actor, bot, target, permission, and role-hierarchy state. Reject
+   self, bots, the guild owner, departed members, peer/higher targets, and any
+   selected action the actor or bot cannot enforce.
+7. Build `TemplateSnapshotJSON` so the case keeps the policy that was used at
    creation time.
-7. Build action execution rows from the selected level actions.
-8. Add a generated `send_dm` execution first when the level itself has
+8. Build action execution rows from the selected level actions.
+9. Add a generated `send_dm` execution first when the level itself has
    `notify_user` enabled.
-9. Persist the case, initial case event, action executions, and audit row in
+10. Persist the case, initial case event, action executions, and audit row in
    one transaction.
-10. Enqueue the case for asynchronous action processing.
+11. Enqueue the case for asynchronous action processing.
+
+Target/action preflight runs before persistence inside the guild lock. A typed
+denial rolls the transaction back before its trace-linked `authorization.denied`
+audit entry is appended, so no rejected request can leave a case, event, or
+action row behind.
 
 ## Level Selection Rules
 

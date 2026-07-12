@@ -60,33 +60,33 @@ Items are grouped by concern, not by implementation order or priority. Completed
 
 ## Discord Identity and Permissions
 
-- [ ] Refresh Discord guild membership and permission bits before every sensitive write or enforcement operation.
-- [ ] Stop relying on session-time permission snapshots for sensitive authorization.
-- [ ] Treat stored staff-member rows as audit/display caches only and never as an independent source of permission.
-- [ ] End former staff access on their next protected request while preserving historical attribution.
-- [ ] Grant full guild access to the guild owner and members with `Administrator`.
-- [ ] Grant template and module configuration to members with `Manage Guild`.
+- [x] Refresh Discord guild membership and permission bits before every sensitive write or enforcement operation.
+- [x] Stop relying on session-time permission snapshots for sensitive authorization.
+- [x] Treat stored staff-member rows as audit/display caches only and never as an independent source of permission.
+- [x] End former staff access on their next protected request while preserving historical attribution.
+- [x] Grant full guild access to the guild owner and members with `Administrator`.
+- [x] Grant template and module configuration to members with `Manage Guild`.
 - [ ] Grant case creation, case review, appeal review, audit reads, case voiding, and failure dismissal to members with `Moderate Members`.
-- [ ] Allow all moderators to read the complete audit log instead of limiting it to `Manage Guild`.
-- [ ] Require `Moderate Members` for selected timeout actions.
-- [ ] Require `Kick Members` for selected kick actions.
-- [ ] Require `Ban Members` for selected ban actions.
+- [x] Allow all moderators to read the complete audit log instead of limiting it to `Manage Guild`.
+- [x] Require `Moderate Members` for selected timeout actions.
+- [x] Require `Kick Members` for selected kick actions.
+- [x] Require `Ban Members` for selected ban actions.
 - [ ] Require the matching current Discord permission for every manual action retry or reversal.
-- [ ] Check the moderator's role hierarchy against the target before punitive case creation.
-- [ ] Check the Quack bot's role hierarchy against the target before punitive case creation.
-- [ ] Check the Quack bot's action-specific Discord permissions before case creation.
-- [ ] Block the entire case request when the selected level cannot be enforced by the actor or bot.
-- [ ] Reject normal cases targeting the acting moderator.
-- [ ] Reject normal cases targeting bot accounts, including Quack.
-- [ ] Reject normal cases targeting the guild owner.
-- [ ] Require normal template application targets to be current human guild members.
+- [x] Check the moderator's role hierarchy against the target before punitive case creation.
+- [x] Check the Quack bot's role hierarchy against the target before punitive case creation.
+- [x] Check the Quack bot's action-specific Discord permissions before case creation.
+- [x] Block the entire case request when the selected level cannot be enforced by the actor or bot.
+- [x] Reject normal cases targeting the acting moderator.
+- [x] Reject normal cases targeting bot accounts, including Quack.
+- [x] Reject normal cases targeting the guild owner.
+- [x] Require normal template application targets to be current human guild members.
 - [ ] Keep imported history and explicit reversal flows able to reference departed members without weakening normal target rules.
-- [ ] List dashboard guild access for moderators with Quack capabilities instead of requiring `Manage Guild` for every staff entry point.
+- [x] List dashboard guild access for moderators with Quack capabilities instead of requiring `Manage Guild` for every staff entry point.
 - [ ] Provide a member-facing guild/case entry path that does not depend on the banned user still appearing in Discord's guild list.
-- [ ] Add consistent authorization errors for dashboard and Discord callers.
-- [ ] Audit denied sensitive operations with actor, guild, requested capability, request ID, and correlation ID.
-- [ ] Add permission-matrix tests covering owner, Administrator, Manage Guild, Moderate Members, Kick Members, Ban Members, former staff, and ordinary members.
-- [ ] Add hierarchy tests covering moderator, bot, owner, peer-role, and higher-role targets.
+- [x] Add consistent authorization errors for dashboard and Discord callers.
+- [x] Audit denied sensitive operations with actor, guild, requested capability, request ID, and correlation ID.
+- [x] Add permission-matrix tests covering owner, Administrator, Manage Guild, Moderate Members, Kick Members, Ban Members, former staff, and ordinary members.
+- [x] Add hierarchy tests covering moderator, bot, owner, peer-role, and higher-role targets.
 
 ## Templates and Escalation
 
@@ -136,7 +136,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [ ] Snapshot submitted context with the case.
 - [ ] Snapshot the selected level and its zero or one action with the case.
 - [ ] Keep case creation, escalation selection, numbering, snapshot, event, action row, notification work record, and audit insertion atomic.
-- [ ] Validate target membership, actor permission, bot permission, and both role hierarchies before committing the case.
+- [x] Validate target membership, actor permission, bot permission, and both role hierarchies before committing the case.
 - [ ] Keep case numbers unique, sequential per guild, and never reusable after voiding or import.
 - [ ] Add case void service behavior with a required reason.
 - [ ] Add case void storage behavior and immutable case event.
@@ -506,7 +506,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 ## Testing and Release Readiness
 
 - [ ] Update core unit tests to the final no-window, no-severity, no-weight, archive-only, one-action model.
-- [ ] Add table-driven tests for every permission and hierarchy rule.
+- [ ] Add table-driven tests for every permission and hierarchy rule, including later retry and reversal operations when those surfaces exist.
 - [ ] Add template validation tests for context fields, archive/restore, import/export, timeout duration, ban deletion, and retry count.
 - [ ] Add case tests for context, evidence, target validation, voiding, replacement, member visibility, and action-independent validity.
 - [ ] Add action tests for every Discord result, retry classification, idempotency boundary, manual control, and reversal.

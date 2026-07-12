@@ -21,8 +21,9 @@ var (
 
 // CaseService owns case authorization, escalation selection, snapshots, auditing, and action scheduling.
 type CaseService struct {
-	store     Repository
-	scheduler CaseWorkScheduler
+	store      Repository
+	scheduler  CaseWorkScheduler
+	authorizer *GuildService
 }
 
 // CaseInput groups the validated inputs needed for case input.
@@ -230,6 +231,10 @@ func (s *CaseService) Create(ctx context.Context, guildContext *GuildStaffContex
 		return createErr
 	})
 	if err != nil {
+		var authorizationErr *AuthorizationError
+		if errors.As(err, &authorizationErr) && s.authorizer != nil {
+			_ = s.authorizer.auditAuthorizationDenialWithMetadata(ctx, guildContext, authorizationErr.Capability, authorizationSource(input.Source), authorizationErr.Reason, authorizationErr.MetadataJSON)
+		}
 		if errors.Is(err, ErrCaseValidation) || errors.Is(err, ErrCasePermissionDenied) || errors.Is(err, ErrCaseTemplateNotAvailable) {
 			_ = s.audit(ctx, guildContext, "case.create", "case", "unknown", model.AuditResultFailure, err.Error())
 		}
@@ -379,7 +384,7 @@ func (s *CaseService) requireCaseRead(guildContext *GuildStaffContext) error {
 	if guildContext == nil || guildContext.Guild == nil || guildContext.Staff == nil {
 		return validationCaseError("missing guild context")
 	}
-	if !guildContext.Can(model.PermissionActionCaseCreate) {
+	if !guildContext.Can(model.PermissionActionCaseRead) {
 		return ErrCasePermissionDenied
 	}
 	return nil
@@ -435,6 +440,15 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 	selectedLevel, err := s.selectTemplateLevel(ctx, guildContext.Guild.ID, targetDiscordUserID, template)
 	if err != nil {
 		return nil, err
+	}
+	if s.authorizer != nil {
+		actionType := model.ActionType("")
+		if len(selectedLevel.Actions) == 1 {
+			actionType = selectedLevel.Actions[0].ActionType
+		}
+		if err := s.authorizer.PreflightCase(ctx, guildContext, targetDiscordUserID, actionType); err != nil {
+			return nil, err
+		}
 	}
 
 	snapshotJSON, err := buildTemplateSnapshot(template.Template, *selectedLevel)

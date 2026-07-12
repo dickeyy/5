@@ -9,6 +9,7 @@ type PermissionAction string
 
 const (
 	PermissionActionCaseCreate         PermissionAction = "case.create"
+	PermissionActionCaseRead           PermissionAction = "case.read"
 	PermissionActionCaseTemplateRead   PermissionAction = "case_template.read"
 	PermissionActionCaseTemplateWrite  PermissionAction = "case_template.write"
 	PermissionActionCaseTemplateDelete PermissionAction = "case_template.delete"
@@ -17,6 +18,8 @@ const (
 	PermissionActionAuditRead          PermissionAction = "audit.read"
 	PermissionActionGuildSettingsRead  PermissionAction = "guild_settings.read"
 	PermissionActionGuildSettingsWrite PermissionAction = "guild_settings.write"
+	PermissionActionCaseVoid           PermissionAction = "case.void"
+	PermissionActionFailureDismiss     PermissionAction = "action_failure.dismiss"
 )
 
 // CaseValidity identifies whether a case participates in escalation history.
