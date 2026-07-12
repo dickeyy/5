@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/internal/config"
 	"github.com/quackdiscord/bot/internal/httpapi/apierror"
+	"github.com/quackdiscord/bot/internal/httpapi/middleware"
 )
 
 // EndpointPolicy applies the documented route-class rate and replay contract
@@ -128,10 +129,7 @@ func endpointRatePolicy(method, path string, cfg config.Config) (string, RateLim
 
 // endpointSubject keeps credentials within the shared hashed Redis boundary.
 func endpointSubject(c *gin.Context, cookieName string) string {
-	credential := strings.TrimSpace(c.GetHeader("Authorization"))
-	if credential == "" {
-		credential, _ = c.Cookie(cookieName)
-	}
+	credential := middleware.ExtractSessionID(c, cookieName)
 	return credential + ":" + c.Param("discordGuildID") + ":" + c.Param("guildID")
 }
 

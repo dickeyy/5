@@ -37,7 +37,26 @@ func New(token string) (*Bot, error) {
 	session.Identify.Intents = discordgo.IntentGuilds
 	session.StateEnabled = true
 	session.State.MaxMessageCount = 5000
-	return &Bot{Session: session, HTTPClient: http.DefaultClient}, nil
+	bot := &Bot{Session: session, HTTPClient: http.DefaultClient}
+	session.AddHandler(bot.gatewayReady)
+	session.AddHandler(bot.gatewayResumed)
+	session.AddHandler(bot.gatewayConnected)
+	session.AddHandler(bot.gatewayDisconnected)
+	return bot, nil
+}
+
+// gatewayReady marks the authenticated initial gateway session ready.
+func (b *Bot) gatewayReady(_ *discordgo.Session, _ *discordgo.Ready) { b.connected.Store(true) }
+
+// gatewayResumed marks a successfully resumed gateway session ready.
+func (b *Bot) gatewayResumed(_ *discordgo.Session, _ *discordgo.Resumed) { b.connected.Store(true) }
+
+// gatewayConnected marks DiscordGo's post-handshake synthetic connect event ready.
+func (b *Bot) gatewayConnected(_ *discordgo.Session, _ *discordgo.Connect) { b.connected.Store(true) }
+
+// gatewayDisconnected immediately removes Discord from process readiness while reconnecting.
+func (b *Bot) gatewayDisconnected(_ *discordgo.Session, _ *discordgo.Disconnect) {
+	b.connected.Store(false)
 }
 
 // Open opens and verifies open so startup fails before serving traffic when the dependency is unavailable.

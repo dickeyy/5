@@ -83,3 +83,28 @@ func TestEndpointRatePolicyMatrix(t *testing.T) {
 		t.Fatal("health probes must not depend on actor rate-limit policy")
 	}
 }
+
+func TestEndpointPolicyNormalizesEquivalentBearerSubjects(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	cfg := config.Default()
+	primitives := Primitives{RateLimits: NewRateLimiter(client, "test:normalize-rate:"), Idempotency: NewIdempotencyStore(client, "test:normalize-idempotency:")}
+	router := gin.New()
+	router.Use(middleware.RequestContext, middleware.ErrorEnvelope, EndpointPolicy(primitives, cfg))
+	calls := 0
+	router.POST("/guilds/:discordGuildID/cases", func(c *gin.Context) { calls++; c.JSON(http.StatusCreated, gin.H{"case": "one"}) })
+	for _, authorization := range []string{"bearer   same-session", "Bearer same-session"} {
+		request := httptest.NewRequest(http.MethodPost, "/guilds/guild-1/cases", nil)
+		request.Header.Set("Authorization", authorization)
+		request.Header.Set("Idempotency-Key", "same-write")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("authorization %q: status=%d body=%s", authorization, response.Code, response.Body.String())
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("equivalent bearer forms executed %d writes", calls)
+	}
+}
