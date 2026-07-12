@@ -303,6 +303,7 @@ func (s *CaseService) WithEvidenceCapture(evidence *EvidenceService) *CaseServic
 // Create applies a template to a user inside the guild-scoped transaction boundary. The lock keeps escalation history and case numbering consistent, while scheduling occurs only after the transaction commits.
 func (s *CaseService) Create(ctx context.Context, guildContext *GuildStaffContext, input CaseInput) (*CaseResponse, error) {
 	ctx = ensureTraceContext(ctx)
+	ctx = ContextWithAuditSource(ctx, AuditSourceForCaseSource(input.Source))
 	if s == nil || s.store == nil {
 		return nil, errors.New("case service is not configured")
 	}
@@ -439,6 +440,9 @@ func (s *CaseService) preflightCreate(ctx context.Context, guildContext *GuildSt
 func (s *CaseService) List(ctx context.Context, guildContext *GuildStaffContext, input CaseListInput) (*CaseListResponse, error) {
 	params, limit, offset, err := s.caseListParams(guildContext, input)
 	if err != nil {
+		if errors.Is(err, ErrCasePermissionDenied) {
+			_ = s.audit(ctx, guildContext, string(model.AuditActionCaseSearch), "case", "list", model.AuditResultDenied, "permission_denied")
+		}
 		return nil, err
 	}
 
@@ -466,6 +470,7 @@ func (s *CaseService) List(ctx context.Context, guildContext *GuildStaffContext,
 // Get retrieves get without exposing the underlying adapter implementation.
 func (s *CaseService) Get(ctx context.Context, guildContext *GuildStaffContext, caseRef string) (*CaseDetailResponse, error) {
 	if err := s.requireCaseRead(guildContext); err != nil {
+		_ = s.audit(ctx, guildContext, string(model.AuditActionCaseRead), "case", strings.TrimSpace(caseRef), model.AuditResultDenied, "permission_denied")
 		return nil, err
 	}
 	caseRef = strings.TrimSpace(caseRef)
@@ -639,7 +644,17 @@ func validAppealStatus(value model.AppealStatus) bool {
 }
 
 // Void preserves the case and correction reason while removing it from future escalation.
-func (s *CaseService) Void(ctx context.Context, guildContext *GuildStaffContext, caseRef, reason string, replacementCaseID *string) (*CaseResponse, error) {
+func (s *CaseService) Void(ctx context.Context, guildContext *GuildStaffContext, caseRef, reason string, replacementCaseID *string) (response *CaseResponse, err error) {
+	defer func() {
+		if err == nil || s == nil || s.store == nil || guildContext == nil || guildContext.Guild == nil || guildContext.Staff == nil {
+			return
+		}
+		result := model.AuditResultFailure
+		if errors.Is(err, ErrCasePermissionDenied) || errors.Is(err, ErrAuthorizationDenied) {
+			result = model.AuditResultDenied
+		}
+		_ = s.audit(ctx, guildContext, string(model.AuditActionCaseVoid), "case", strings.TrimSpace(caseRef), result, err.Error())
+	}()
 	if s == nil || s.store == nil {
 		return nil, errors.New("case service is not configured")
 	}
@@ -674,8 +689,8 @@ func (s *CaseService) Void(ctx context.Context, guildContext *GuildStaffContext,
 	if err != nil {
 		return nil, err
 	}
-	response := caseResponseFromModel(*voided, actions)
-	return &response, nil
+	result := caseResponseFromModel(*voided, actions)
+	return &result, nil
 }
 
 // MemberCaseDetail is the privacy-safe projection available only to the target Discord identity.
@@ -1476,7 +1491,7 @@ func (s *CaseService) auditEntry(ctx context.Context, guildContext *GuildStaffCo
 		GuildID:             guildContext.Guild.ID,
 		ActorDiscordUserID:  guildContext.Staff.DiscordUserID,
 		ActorPermissionBits: guildContext.PermissionBits,
-		Source:              model.AuditSourceAPI,
+		Source:              AuditSourceFromContext(ctx),
 		Action:              action,
 		ResourceType:        resourceType,
 		ResourceID:          resourceID,

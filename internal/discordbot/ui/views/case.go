@@ -31,7 +31,6 @@ func CaseCreatedEmbed(result CaseCreated) *discordgo.MessageEmbed {
 	created := result.Case
 	embed := ui.NewSuccessEmbed(fmt.Sprintf("Case #%d Created", created.CaseNumber), "").
 		AddField("Target", fmt.Sprintf("<@%s>", created.TargetDiscordUserID), true).
-		AddField("Moderator", fmt.Sprintf("<@%s>", created.ModeratorDiscordUserID), true).
 		SetFooter(fmt.Sprintf("Case ID: %s", created.ID)).
 		SetTimestamp(time.Now())
 
@@ -46,12 +45,9 @@ func CaseCreatedEmbed(result CaseCreated) *discordgo.MessageEmbed {
 			levelName = fmt.Sprintf("Level %d", created.SelectedLevel.Position)
 		}
 		embed.AddField("Level", levelName, true)
-		if created.SelectedLevel.MatchedCaseCount > 0 {
-			embed.AddField("Matching Cases", created.SelectedLevel.MatchedCaseCount, true)
-		}
 	}
 
-	embed.AddField("Queued Actions", fmt.Sprintf("%d%s", len(created.Actions), actionSummary(created.Actions)), false)
+	embed.AddField("Action Status", publicActionStatus(created.Actions), false)
 	return embed.Build()
 }
 
@@ -65,7 +61,6 @@ func FormatCaseCreated(result CaseCreated) string {
 	lines := []string{
 		fmt.Sprintf("Case #%d created", created.CaseNumber),
 		fmt.Sprintf("Target: <@%s>", created.TargetDiscordUserID),
-		fmt.Sprintf("Moderator: <@%s>", created.ModeratorDiscordUserID),
 	}
 
 	templateName := caseTemplateDisplayName(result.Template)
@@ -79,13 +74,21 @@ func FormatCaseCreated(result CaseCreated) string {
 			levelName = fmt.Sprintf("Level %d", created.SelectedLevel.Position)
 		}
 		lines = append(lines, fmt.Sprintf("Level: %s", levelName))
-		if created.SelectedLevel.MatchedCaseCount > 0 {
-			lines = append(lines, fmt.Sprintf("Matching cases: %d", created.SelectedLevel.MatchedCaseCount))
-		}
 	}
 
-	lines = append(lines, fmt.Sprintf("Queued actions: %d%s", len(created.Actions), actionSummary(created.Actions)))
+	lines = append(lines, "Action status: "+publicActionStatus(created.Actions))
 	return strings.Join(lines, "\n")
+}
+
+func publicActionStatus(actions []quack.CaseActionResponse) string {
+	if len(actions) == 0 {
+		return "No Discord action configured"
+	}
+	parts := make([]string, 0, len(actions))
+	for _, action := range actions {
+		parts = append(parts, fmt.Sprintf("%s: %s", action.ActionType, action.Status))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // caseTemplateDisplayName encapsulates the case template display name rule so callers share one consistent package implementation.

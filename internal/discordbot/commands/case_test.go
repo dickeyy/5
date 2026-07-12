@@ -111,12 +111,10 @@ func TestHandleCaseInteractionCreatesCase(t *testing.T) {
 	}
 	fields := embedFields(embed)
 	for name, want := range map[string]string{
-		"Target":         "<@target-1>",
-		"Moderator":      "<@mod-1>",
-		"Template":       "Spam",
-		"Level":          "Default",
-		"Matching Cases": "1",
-		"Queued Actions": "0 (none)",
+		"Target":        "<@target-1>",
+		"Template":      "Spam",
+		"Level":         "Default",
+		"Action Status": "No Discord action configured",
 	} {
 		if !strings.Contains(fields[name], want) {
 			t.Fatalf("expected embed field %q to contain %q, got %q", name, want, fields[name])
@@ -280,6 +278,11 @@ func (f *fakeResponder) EditOriginal(edit ui.Edit) (*discordgo.Message, error) {
 func (f *fakeResponder) Followup(message ui.Message) (*discordgo.Message, error) {
 	f.followup = message
 	return &discordgo.Message{ID: "followup-1"}, nil
+}
+
+func (f *fakeResponder) EditFollowup(messageID string, edit ui.Edit) (*discordgo.Message, error) {
+	f.updated = edit
+	return &discordgo.Message{ID: messageID}, nil
 }
 
 func (f *fakeResponder) DeleteOriginal() error {

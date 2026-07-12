@@ -87,5 +87,6 @@ func (s *Store) DB() *gorm.DB {
 
 // New constructs new with required dependencies explicit so callers control lifecycle and substitution.
 func New(db *gorm.DB, redis *r.Client) *Store {
+	installAuditImmutability(db)
 	return &Store{db: db, redis: redis}
 }
