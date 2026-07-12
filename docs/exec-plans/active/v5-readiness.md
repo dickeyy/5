@@ -379,12 +379,15 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 
 #### V5-003 - Live Discord authorization and target-safety preflight
 
-- Status: IN_PROGRESS
+- Status: REVIEW_WAIT
 - Assignment: fresh implementation subagent `/root/slice_v5_003` using
   `v5-implementation-slice`; this owner is assigned only to V5-003.
 - Branch: `slice/v5-003-live-authorization`
 - Worktree: `/tmp/quack-v5-worktrees/v5-003`
 - Base/PR target: `slice/v5-002-guild-bootstrap` at accepted head `cec76ef`
+- Commit: `444a582`.
+- PR/review: [PR #5](https://github.com/dickeyy/5/pull/5); exactly one standalone
+  `@codex review` posted 2026-07-11 and awaiting completion.
 - Requirements: People and Permissions; Actions Target Safety.
 - Acceptance criteria:
   - Every sensitive write refreshes current Discord membership, permissions,
@@ -880,7 +883,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 | V5-001 | ACCEPTED | `slice/v5-001-template-model` | [#2](https://github.com/dickeyy/5/pull/2) | 1 complete, no findings | passed round 2 |
 | V5-001C | ACCEPTED | `slice/v5-001c-case-validity` | [#3](https://github.com/dickeyy/5/pull/3) | 1 complete, one P2 fixed | passed evidence gate |
 | V5-002 | ACCEPTED | `slice/v5-002-guild-bootstrap` | [#4](https://github.com/dickeyy/5/pull/4) | 1 complete, two findings fixed | passed evidence gate |
-| V5-003 | IN_PROGRESS | `slice/v5-003-live-authorization` | pending | 0 | pending |
+| V5-003 | REVIEW_WAIT | `slice/v5-003-live-authorization` | [#5](https://github.com/dickeyy/5/pull/5) | 1 requested | pending |
 | V5-004 | PLANNED | pending | pending | 0 | pending |
 | V5-005 | PLANNED | pending | pending | 0 | pending |
 | V5-006 | PLANNED | pending | pending | 0 | pending |
