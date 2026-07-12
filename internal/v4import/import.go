@@ -121,12 +121,17 @@ func (i *Importer) Import(ctx context.Context, sourceName, guildID, actorID stri
 	identity := sha256.Sum256([]byte(strings.TrimSpace(guildID) + "\n" + strings.TrimSpace(sourceName) + "\n" + checksum))
 	batch := Batch{ID: "v4-" + hex.EncodeToString(identity[:12]), GuildID: strings.TrimSpace(guildID), SourceName: strings.TrimSpace(sourceName), Checksum: checksum, ActorDiscordUserID: strings.TrimSpace(actorID), RecordCount: len(prepared) + len(issues)}
 	report := &Report{BatchID: batch.ID, Checksum: checksum, DryRun: dryRun, Total: batch.RecordCount, Valid: len(prepared), Failures: issues}
+	recordFailure := func(count int, code string) {
+		if !dryRun {
+			_ = i.repository.RecordV4ImportFailure(ctx, batch, count, code)
+		}
+	}
 	if len(issues) != 0 {
-		_ = i.repository.RecordV4ImportFailure(ctx, batch, len(issues), "validation_failed")
+		recordFailure(len(issues), "validation_failed")
 		return report, fmt.Errorf("%w: %d row(s) failed validation", ErrInvalidInput, len(issues))
 	}
 	if len(prepared) == 0 {
-		_ = i.repository.RecordV4ImportFailure(ctx, batch, 1, "empty_source")
+		recordFailure(1, "empty_source")
 		return report, fmt.Errorf("%w: source contains no records", ErrInvalidInput)
 	}
 	var decisions []Decision
@@ -140,7 +145,7 @@ func (i *Importer) Import(ctx context.Context, sourceName, guildID, actorID stri
 		if errors.Is(err, ErrSourceCollision) {
 			code = "source_collision"
 		}
-		_ = i.repository.RecordV4ImportFailure(ctx, batch, 1, code)
+		recordFailure(1, code)
 		return report, err
 	}
 	report.Decisions = decisions
@@ -180,6 +185,11 @@ func parse(raw []byte, guildID string) ([]PreparedCase, []Issue) {
 		decoder := json.NewDecoder(bytes.NewReader(body))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&row); err != nil {
+			issues = append(issues, Issue{Line: line, Code: "malformed_json"})
+			continue
+		}
+		var trailing any
+		if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 			issues = append(issues, Issue{Line: line, Code: "malformed_json"})
 			continue
 		}

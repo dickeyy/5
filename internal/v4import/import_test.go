@@ -10,6 +10,7 @@ import (
 type fakeRepository struct {
 	preview, applied []Decision
 	failureCode      string
+	failureCalls     int
 }
 
 func (f *fakeRepository) PreviewV4Import(_ context.Context, _ Batch, _ []PreparedCase) ([]Decision, error) {
@@ -21,7 +22,36 @@ func (f *fakeRepository) ApplyV4Import(_ context.Context, _ Batch, _ []PreparedC
 func (f *fakeRepository) RollbackV4Import(context.Context, string, string, string) error { return nil }
 func (f *fakeRepository) RecordV4ImportFailure(_ context.Context, _ Batch, _ int, code string) error {
 	f.failureCode = code
+	f.failureCalls++
 	return nil
+}
+
+func TestImportRejectsTrailingDataAfterJSONLObject(t *testing.T) {
+	valid := `{"format":"quack-v4-case-jsonl/v1","source_id":"source","guild_id":"guild","target_discord_user_id":"member","reason":"history","action_type":"warning","created_at":"2024-01-02T03:04:05Z"}`
+	for _, trailing := range []string{valid, `garbage`} {
+		repository := &fakeRepository{}
+		report, err := New(repository).Import(context.Background(), "export", "guild", "actor", bytes.NewBufferString(valid+trailing+"\n"), false)
+		if !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("trailing %q: expected invalid input, got %v", trailing, err)
+		}
+		if report == nil || report.Valid != 0 || len(report.Failures) != 1 || report.Failures[0].Code != "malformed_json" {
+			t.Fatalf("trailing %q: unexpected report %+v", trailing, report)
+		}
+	}
+}
+
+func TestImportFailedDryRunHasNoRepositorySideEffects(t *testing.T) {
+	for name, input := range map[string]string{"malformed": "{bad json}\n", "empty": "\n"} {
+		t.Run(name, func(t *testing.T) {
+			repository := &fakeRepository{}
+			if _, err := New(repository).Import(context.Background(), "export", "guild", "actor", bytes.NewBufferString(input), true); !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("expected invalid input, got %v", err)
+			}
+			if repository.failureCalls != 0 || repository.failureCode != "" {
+				t.Fatalf("dry-run recorded failure side effects: %+v", repository)
+			}
+		})
+	}
 }
 
 func TestImportRejectsWholeMalformedSourceAndAuditsClassification(t *testing.T) {

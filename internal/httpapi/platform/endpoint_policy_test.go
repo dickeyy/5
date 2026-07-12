@@ -70,6 +70,8 @@ func TestEndpointRatePolicyMatrix(t *testing.T) {
 		{http.MethodGet, "/members/me/cases/case-1", "member-read"},
 		{http.MethodPut, "/guilds/guild-1/modules/tickets/settings", "authenticated-write"},
 		{http.MethodPost, "/guilds/guild-1/cases", "case-create"},
+		{http.MethodPost, "/guilds/guild-1/cases/case-1/void", "authenticated-write"},
+		{http.MethodPost, "/members/me/cases/case-1/appeal", "authenticated-write"},
 		{http.MethodPost, "/guilds/guild-1/action-failures/action-1/retry", "action-recovery"},
 		{http.MethodPost, "/guilds/guild-1/cases/case-1/evidence", "evidence"},
 	}

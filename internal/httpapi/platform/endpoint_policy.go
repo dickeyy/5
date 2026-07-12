@@ -112,7 +112,7 @@ func endpointRatePolicy(method, path string, cfg config.Config) (string, RateLim
 		selected = cfg.RateLimits.TemplateWrite
 		class = "authenticated-write"
 	}
-	if method == http.MethodPost && strings.Contains(path, "/cases") && !strings.Contains(path, "/appeal") {
+	if isCaseCreationEndpoint(method, path) {
 		selected = cfg.RateLimits.CaseCreate
 		class = "case-create"
 	}
@@ -125,6 +125,15 @@ func endpointRatePolicy(method, path string, cfg config.Config) (string, RateLim
 		class = "evidence"
 	}
 	return class, RateLimit{Maximum: selected.Maximum, Window: time.Duration(selected.WindowSeconds) * time.Second}, true
+}
+
+// isCaseCreationEndpoint matches only the guild case-collection POST route.
+func isCaseCreationEndpoint(method, path string) bool {
+	if method != http.MethodPost {
+		return false
+	}
+	segments := strings.Split(strings.Trim(path, "/"), "/")
+	return len(segments) == 3 && segments[0] == "guilds" && segments[1] != "" && segments[2] == "cases"
 }
 
 // endpointSubject keeps credentials within the shared hashed Redis boundary.
