@@ -27,6 +27,15 @@ func setupGuildRoutes(r *gin.Engine, services *quack.Services) {
 
 	guilds.GET("", func(c *gin.Context) { listUserGuilds(c, services) })
 	guilds.GET("/:discordGuildID/me", middleware.RequireGuildContext(services, ""), guildMe)
+	guilds.GET("/:discordGuildID/settings", middleware.RequireGuildContext(services, model.PermissionActionGuildSettingsRead), func(c *gin.Context) {
+		getGuildSettings(c, services)
+	})
+	guilds.PATCH("/:discordGuildID/settings", middleware.RequireGuildContext(services, ""), func(c *gin.Context) {
+		updateGuildSettings(c, services)
+	})
+	guilds.POST("/:discordGuildID/settings/starter-policy-notice/acknowledge", middleware.RequireGuildContext(services, ""), func(c *gin.Context) {
+		acknowledgeStarterPolicyNotice(c, services)
+	})
 	guilds.GET("/:discordGuildID/templates", middleware.RequireGuildContext(services, model.PermissionActionCaseTemplateRead), func(c *gin.Context) {
 		listTemplates(c, services)
 	})

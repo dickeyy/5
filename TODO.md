@@ -31,31 +31,31 @@ Items are grouped by concern, not by implementation order or priority. Completed
 
 ## Guild Setup and Settings
 
-- [ ] Add guild settings records and repository methods for core Quack configuration.
-- [ ] Add settings for the Discord audit-mirror channel.
-- [ ] Add settings for the managed evidence channel.
-- [ ] Add settings for the optional member-notification introduction and footer.
-- [ ] Add settings for independently enabling tickets, general logging, and honeypots.
-- [ ] Add backend read and write APIs for guild settings.
-- [ ] Restrict guild settings changes to the owner, `Administrator`, or `Manage Guild` as defined by the setting.
-- [ ] Audit successful, failed, and denied guild-setting changes.
-- [ ] Bootstrap a guild when Quack is first installed instead of waiting for an arbitrary dashboard request.
-- [ ] Create the active General rule violation starter template during guild bootstrap.
-- [ ] Seed starter cases 1–2 as case-only notifications.
-- [ ] Seed starter cases 3–4 with a 24-hour timeout.
-- [ ] Seed starter case 5 and later with a ban and 24-hour message-history deletion.
-- [ ] Make starter-template cases appealable and member notifications enabled at every level.
-- [ ] Store whether the one-time starter-policy review notice has been shown.
-- [ ] Expose the starter-policy notice through the backend for the dashboard setup flow.
+- [x] Add guild settings records and repository methods for core Quack configuration.
+- [x] Add settings for the Discord audit-mirror channel.
+- [x] Add settings for the managed evidence channel.
+- [x] Add settings for the optional member-notification introduction and footer.
+- [x] Add settings for independently enabling tickets, general logging, and honeypots.
+- [x] Add backend read and write APIs for guild settings.
+- [x] Restrict guild settings changes to the owner, `Administrator`, or `Manage Guild` as defined by the setting.
+- [x] Audit successful, failed, and denied guild-setting changes.
+- [x] Bootstrap a guild when Quack is first installed instead of waiting for an arbitrary dashboard request.
+- [x] Create the active General rule violation starter template during guild bootstrap.
+- [x] Seed starter cases 1–2 as case-only notifications.
+- [x] Seed starter cases 3–4 with a 24-hour timeout.
+- [x] Seed starter case 5 and later with a ban and 24-hour message-history deletion.
+- [x] Make starter-template cases appealable and member notifications enabled at every level.
+- [x] Store whether the one-time starter-policy review notice has been shown.
+- [x] Expose the starter-policy notice through the backend for the dashboard setup flow.
 - [ ] Create and permission the staff-only evidence channel during guild setup.
 - [ ] Detect and report evidence-channel permission drift.
 - [ ] Add a safe repair flow for a missing, deleted, or misconfigured evidence channel.
-- [ ] Handle Discord guild create, update, leave, and rejoin events.
-- [ ] Preserve guild history when Quack leaves instead of hard-deleting guild data.
-- [ ] Define and implement reactivation behavior when Quack rejoins a known guild.
-- [ ] Refresh stored guild name, icon, owner, and active state from Discord events.
-- [ ] Clean or repair channel references when configured Discord channels are deleted.
-- [ ] Document the Discord install permissions and privileged intents required by core and optional modules.
+- [x] Handle Discord guild create, update, leave, and rejoin events.
+- [x] Preserve guild history when Quack leaves instead of hard-deleting guild data.
+- [x] Define and implement reactivation behavior when Quack rejoins a known guild.
+- [x] Refresh stored guild name, icon, owner, and active state from Discord events.
+- [x] Clean or repair channel references when configured Discord channels are deleted.
+- [x] Document the Discord install permissions and privileged intents required by core and optional modules.
 - [ ] Reduce hard-coded Discord intents to the minimum enabled feature set.
 
 ## Discord Identity and Permissions

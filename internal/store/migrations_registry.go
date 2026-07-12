@@ -17,11 +17,17 @@ var migration0002Source string
 //go:embed migration_0003_case_validity.go
 var migration0003Source string
 
+// migration0004Source binds migration 0004's guild setup schema and reversible compatibility logic to its ledger checksum.
+//
+//go:embed migration_0004_guild_settings.go
+var migration0004Source string
+
 // registeredMigrations returns the immutable ordered production migration registry.
 func registeredMigrations() []migration {
 	return []migration{
 		migration0001InitialV5Schema(),
 		migration0002SimplifyTemplateModel(),
 		migration0003CaseValidity(),
+		migration0004GuildSettings(),
 	}
 }

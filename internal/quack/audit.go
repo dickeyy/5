@@ -157,7 +157,7 @@ func auditPagination(limitValue, offsetValue string) (int, int, error) {
 // validAuditResult checks valid audit result before state is read or changed.
 func validAuditResult(result model.AuditResult) bool {
 	switch result {
-	case model.AuditResultSuccess, model.AuditResultFailure:
+	case model.AuditResultSuccess, model.AuditResultFailure, model.AuditResultDenied:
 		return true
 	default:
 		return false

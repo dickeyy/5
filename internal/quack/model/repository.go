@@ -143,6 +143,27 @@ type SkipCaseActionsParams struct {
 // UpsertGuildParams groups the validated inputs needed for upsert guild params.
 type UpsertGuildParams struct{ DiscordGuildID, Name, IconURL, OwnerDiscordUserID string }
 
+// BootstrapGuildParams carries authoritative Discord guild metadata used by the idempotent install transaction.
+type BootstrapGuildParams struct {
+	DiscordGuildID, Name, IconURL, OwnerDiscordUserID string
+	KnownChannelDiscordIDs                            []string
+}
+
+// BootstrapGuildResult reports the durable guild, settings, and starter-policy state produced by an install or rejoin event.
+type BootstrapGuildResult struct {
+	Guild                  Guild
+	Settings               GuildSettings
+	StarterTemplate        ExpandedCaseTemplate
+	GuildCreated           bool
+	StarterTemplateCreated bool
+}
+
+// UpdateGuildSettingsParams contains a complete validated settings replacement and its immutable audit evidence.
+type UpdateGuildSettingsParams struct {
+	Settings GuildSettings
+	Audit    *AuditLogEntry
+}
+
 // UpsertStaffMemberParams groups the validated inputs needed for upsert staff member params.
 type UpsertStaffMemberParams struct {
 	GuildID, DiscordUserID string

@@ -74,7 +74,21 @@ func TestMySQLMigrateForwardRerunPreservationAndRollbackBoundary(t *testing.T) {
 	assertTemplateArchiveState(t, db, windowTemplateID, true)
 	assertTemplateArchiveState(t, db, deletedTemplateID, true)
 	assertTemplateDeletedState(t, db, deletedTemplateID, false)
+	var guildSettings migration0004GuildSettingsRecord
+	if err := db.First(&guildSettings, "guild_id = ?", want.GuildID).Error; err != nil {
+		t.Fatalf("load MySQL guild settings seed: %v", err)
+	}
+	if !guildSettings.StarterPolicyNoticePending {
+		t.Fatalf("expected pending starter review notice, got %+v", guildSettings)
+	}
 
+	if err := repositories.RollbackLastMigration(); err != nil {
+		t.Fatalf("roll back guild settings migration: %v", err)
+	}
+	if db.Migrator().HasTable(&migration0004GuildSettingsRecord{}) {
+		t.Fatal("MySQL guild settings table remained after rollback")
+	}
+	assertRepresentativeHistory(t, db, want)
 	if err := repositories.RollbackLastMigration(); err != nil {
 		t.Fatalf("roll back case validity migration: %v", err)
 	}

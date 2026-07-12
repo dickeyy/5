@@ -11,6 +11,7 @@ type Services struct {
 	Config    config.Config
 	Store     Repository
 	Guilds    *GuildService
+	Settings  *GuildSettingsService
 	Templates *TemplateService
 	Cases     *CaseService
 	Audits    *AuditService
@@ -32,6 +33,7 @@ func NewWithDiscordClient(store Repository, discord DiscordClient) *Services {
 func NewWithConfigDependencies(cfg config.Config, store Repository, discord DiscordClient, actions DiscordActionClient, scheduler CaseWorkScheduler) *Services {
 	services := &Services{Config: cfg, Store: store}
 	services.Guilds = NewGuildService(store, discord)
+	services.Settings = NewGuildSettingsService(store)
 	services.Templates = NewTemplateService(store)
 	services.Cases = NewCaseService(store, scheduler)
 	services.Audits = NewAuditService(store)

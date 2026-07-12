@@ -30,6 +30,11 @@ The current backend already supports important parts of the intended v5 directio
   from live case models and contracts. Migration 0003 preserves legacy columns
   and events, inventories retired event rows, and exposes none of them through
   live v5 case/event reads.
+- GuildCreate bootstrap now atomically persists guild-owned channel and
+  notification settings, independent optional-module enablement, the exact
+  editable starter policy, and its one-time dashboard review notice. Guild
+  update, leave, rejoin, and channel-deletion events preserve history while
+  refreshing identity and clearing stale configured references.
 
 ## Behavior That Must Change
 
@@ -38,7 +43,7 @@ The current implementation differs from the v5 definition in several core rules:
 - The current level-owned notification is still represented as a pre-enforcement `send_dm` action. V5 sends one structured notification after the action outcome is known.
 - Current case permissions do not fully enforce the actor's matching timeout, kick, or ban permission before case creation.
 - The current dashboard guild flow is staff-focused and does not yet provide case-owner access for members who left or were banned.
-- Template import, export, restore, and automatic starter policy behavior are not yet defined in the running product.
+- Template import, export, and restore are not yet defined in the running product.
 
 ## Rejected Concepts to Remove
 
