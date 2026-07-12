@@ -234,6 +234,12 @@ parallel to run their single missing environment gate, publish one PR each,
 request Codex once, and fix findings. QI-2 proceeds concurrently and will
 combine both reviewed heads without another idle integration setup phase.
 
+QP-D reached reviewable head `12f8e1f` on PR #12 after its final MySQL gate and
+a pre-review SQLite concurrency-fixture correction; one Codex review is
+pending. QP-E reached reviewable head `f7ace2f` on PR #11 with the full suite
+green; one Codex review is pending. QI-2 checkpointed the coherent QP-F and
+honeypot integration at `62a9b73` and is clean while those reviews complete.
+
 ### Parallel wave P3 - migration and operations from QI-2
 
 | Package | Absorbed requirements | Exclusive implementation surface | Migration range |
@@ -1032,10 +1038,10 @@ by the macro-package ledger.
 | QP-B | ACCEPTED | `package/qp-b-http-auth` at `b2f3e0a` | [#7](https://github.com/dickeyy/5/pull/7) | 1 complete; P1/P2 fixed | passed evidence gate |
 | QP-C | ACCEPTED | `package/qp-c-tickets-logging` at `4579d14` | [#6](https://github.com/dickeyy/5/pull/6) | 1 complete; four P2s fixed | passed evidence gate |
 | QI-1 | ACCEPTED | `integration/qi-1-p1` at `11650a5` | [#9](https://github.com/dickeyy/5/pull/9) | 1 complete; two P2s fixed | passed wave evidence gate |
-| QP-D | IN_PROGRESS | `package/qp-d-appeals-member` uncommitted | pending | 0 | lifecycle owner running final MySQL/publication/review |
-| QP-E | IN_PROGRESS | `package/qp-e-audit-discord` uncommitted | pending | 0 | lifecycle owner running final full suite/publication/review |
+| QP-D | REVIEW_PENDING | `package/qp-d-appeals-member` at `12f8e1f` | [#12](https://github.com/dickeyy/5/pull/12) | 1 requested | final MySQL/focused/race/vet/build green |
+| QP-E | REVIEW_PENDING | `package/qp-e-audit-discord` at `f7ace2f` | [#11](https://github.com/dickeyy/5/pull/11) | 1 requested | full/focused/race/vet/build green |
 | QP-F | ACCEPTED | `package/qp-f-honeypot-isolation` at `fc6d82c` | [#10](https://github.com/dickeyy/5/pull/10) | 1 complete; one P2 fixed | passed evidence gate |
-| QI-2 | IN_PROGRESS | `integration/qi-2-p2` with QP-F merged | pending | 0 | QP-F wiring green; awaiting reviewed QP-D/QP-E |
+| QI-2 | IN_PROGRESS | `integration/qi-2-p2` at checkpoint `62a9b73` | pending | 0 | QP-F/honeypot wiring green; awaiting reviewed QP-D/QP-E |
 | QP-G | PLANNED | pending | pending | 0 | absorbs V5-023/024 |
 | QP-H | PLANNED | pending | pending | 0 | absorbs remaining V5-017/025 |
 | QP-I | PLANNED | pending | pending | 0 | absorbs V5-026 and final readiness |
