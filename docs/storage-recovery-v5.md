@@ -27,13 +27,15 @@ DATABASE_DSN='restored isolated DSN' go run ./cmd/quack-storage-verify mysql-ver
   < quack-recovery-manifest.json
 ```
 
-The manifest compares counts and deterministic digests for guilds, templates,
-cases, action executions/attempts, evidence, appeals, audit, and v4 import
-ledgers. Verification also rejects duplicate guild case numbers, action
-idempotency keys, and v4 source identities. After verification, repeat one v4
-source import and one already-completed action lookup; neither may create new
-execution work. Destroy the isolated source, dump, manifest, and restored target
-according to the operator's secure-data policy.
+The manifest compares counts and deterministic digests for the migration
+ledger, guild settings/staff, complete template definitions, cases and their
+event timelines, action executions/attempts, evidence/attachments,
+notifications, appeals and their event/outbox state, optional modules, audit,
+and v4 import ledgers. Verification also rejects duplicate guild case numbers,
+action idempotency keys, and v4 source identities. After verification, repeat
+one v4 source import and one already-completed action lookup; neither may create
+new execution work. Destroy the isolated source, dump, manifest, and restored
+target according to the operator's secure-data policy.
 
 Logical 0400 adds only import ledgers. Logical 0410 is forward-only and adds
 constraints/indexes without rewriting IDs, case numbers, template snapshots,
