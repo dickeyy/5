@@ -47,12 +47,18 @@ The current backend already supports important parts of the intended v5 directio
 - Member notification is a case-level post-outcome workflow rather than a
   `send_dm` action. Evidence capture and managed attachment copies share one
   bounded HTTP/Discord service.
+- The QP-D package now provides target-owned case summaries/details, the final
+  case-linked appeal state machine, form snapshots, atomic acceptance/voiding,
+  audited timelines, notification outbox/adapters, and explicit reversal
+  offers without relying on current Discord membership.
 
 ## Behavior That Must Change
 
 The current implementation differs from the v5 definition in several core rules:
 
-- The current dashboard guild flow is staff-focused and does not yet provide case-owner access for members who left or were banned.
+- QP-D's member and appeal route registrars still need QI-2 central composition;
+  until that integration anchor is built, the live process retains its older
+  member route registration and does not expose the complete appeal surface.
 
 ## Rejected Concepts to Remove
 
@@ -68,8 +74,8 @@ Historical database compatibility may require a later migration rather than imme
 
 The intended v5 core still requires product behavior that is not complete today:
 
-- Member-facing case access with the agreed transparency and staff-identity rules.
-- A complete case-linked appeal flow.
+- QI-2 composition of the implemented QP-D member/appeal registrars, logical
+  0200 migration, notification worker, and Discord component handlers.
 - Searchable audit views and optional Discord audit mirroring for all moderators.
 - Derived staff statistics.
 - V4 historical-case import that does not affect escalation.

@@ -691,7 +691,7 @@ func validActionExecutionStatus(value model.ActionExecutionStatus) bool {
 // validAppealStatus reports whether a staff appeal-status filter is supported.
 func validAppealStatus(value model.AppealStatus) bool {
 	switch value {
-	case model.AppealStatusPending, model.AppealStatusAccepted, model.AppealStatusRejected, model.AppealStatusClosed:
+	case model.AppealStatusPending, model.AppealStatusNeedsInformation, model.AppealStatusAccepted, model.AppealStatusRejected, model.AppealStatusClosed:
 		return true
 	default:
 		return false
@@ -766,6 +766,30 @@ type MemberCaseDetail struct {
 	Events            []CaseEventResponse        `json:"history"`
 	Notification      *CaseNotificationResponse  `json:"notification,omitempty"`
 	Appealable        bool                       `json:"appealable"`
+	AppealID          string                     `json:"appeal_id,omitempty"`
+	AppealStatus      model.AppealStatus         `json:"appeal_status,omitempty"`
+}
+
+// MemberCaseSummary is the deliberately small list projection that cannot expose moderator or adapter internals.
+type MemberCaseSummary struct {
+	ID            string             `json:"id"`
+	GuildID       string             `json:"guild_id"`
+	CaseNumber    uint64             `json:"case_number"`
+	Reason        string             `json:"official_reason"`
+	Validity      model.CaseValidity `json:"validity"`
+	CreatedAt     time.Time          `json:"created_at"`
+	SelectedLevel *CaseSelectedLevel `json:"selected_outcome,omitempty"`
+	Appealable    bool               `json:"appealable"`
+	AppealID      string             `json:"appeal_id,omitempty"`
+	AppealStatus  model.AppealStatus `json:"appeal_status,omitempty"`
+}
+
+// MemberCaseListResponse returns only target-owned privacy-safe summaries.
+type MemberCaseListResponse struct {
+	Cases  []MemberCaseSummary `json:"cases"`
+	Total  int64               `json:"total"`
+	Limit  int                 `json:"limit"`
+	Offset int                 `json:"offset"`
 }
 
 // MemberEnforcementOutcome exposes only the configured action and public result.
@@ -775,7 +799,7 @@ type MemberEnforcementOutcome struct {
 }
 
 // ListMemberCases returns only cases targeting the authenticated Discord identity and does not require current guild membership.
-func (s *CaseService) ListMemberCases(ctx context.Context, guildID, memberDiscordUserID string, input CaseListInput) (*CaseListResponse, error) {
+func (s *CaseService) ListMemberCases(ctx context.Context, guildID, memberDiscordUserID string, input CaseListInput) (*MemberCaseListResponse, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("case service is not configured")
 	}
@@ -792,18 +816,22 @@ func (s *CaseService) ListMemberCases(ctx context.Context, guildID, memberDiscor
 	if err != nil {
 		return nil, err
 	}
-	responses := make([]CaseResponse, 0, len(result.Cases))
+	responses := make([]MemberCaseSummary, 0, len(result.Cases))
 	for _, item := range result.Cases {
-		response := caseResponseFromModel(item, nil)
-		response.ModeratorDiscordUserID = ""
-		response.Metadata = nil
-		response.Actions = nil
-		responses = append(responses, response)
+		appeal, appealErr := s.store.GetAppealByCaseID(ctx, item.ID)
+		if appealErr != nil {
+			return nil, appealErr
+		}
+		appealID, appealStatus := "", model.AppealStatus("")
+		if appeal != nil {
+			appealID, appealStatus = appeal.ID, appeal.Status
+		}
+		responses = append(responses, MemberCaseSummary{ID: item.ID, GuildID: item.GuildID, CaseNumber: item.CaseNumber, Reason: item.Reason, Validity: item.Validity, CreatedAt: item.CreatedAt, SelectedLevel: selectedLevelResponse(item.TemplateSnapshotJSON), Appealable: caseSnapshotAppealable(item.TemplateSnapshotJSON) && item.Validity == model.CaseValidityValid && appeal == nil, AppealID: appealID, AppealStatus: appealStatus})
 	}
 	if err := s.memberReadAudit(ctx, guildID, memberDiscordUserID, "member_case.list", "guild", guildID); err != nil {
 		return nil, err
 	}
-	return &CaseListResponse{Cases: responses, Total: result.Total, Limit: limit, Offset: offset}, nil
+	return &MemberCaseListResponse{Cases: responses, Total: result.Total, Limit: limit, Offset: offset}, nil
 }
 
 // GetMemberCase returns a privacy-safe case detail only when the authenticated identity owns the case.
@@ -861,7 +889,15 @@ func (s *CaseService) GetMemberCase(ctx context.Context, caseID, memberDiscordUs
 	if len(actions) > 0 {
 		enforcement = &MemberEnforcementOutcome{ActionType: actions[0].ActionType, Status: actions[0].Status}
 	}
-	return &MemberCaseDetail{ID: item.ID, GuildID: item.GuildID, CaseNumber: item.CaseNumber, TemplateID: item.TemplateID, Reason: item.Reason, Validity: item.Validity, VoidedReason: item.VoidedReason, ReplacementCaseID: item.ReplacementCaseID, CreatedAt: item.CreatedAt, ContextValues: parseCaseContextValues(item.ContextValuesJSON), SelectedLevel: selectedLevelResponse(item.TemplateSnapshotJSON), Enforcement: enforcement, Evidence: caseEvidenceResponses(evidence, attachments, true), Events: caseEventResponses(publicEvents), Notification: caseNotificationResponse(notification, true), Appealable: appealable}, nil
+	appeal, err := s.store.GetAppealByCaseID(ctx, item.ID)
+	if err != nil {
+		return nil, err
+	}
+	appealID, appealStatus := "", model.AppealStatus("")
+	if appeal != nil {
+		appealID, appealStatus = appeal.ID, appeal.Status
+	}
+	return &MemberCaseDetail{ID: item.ID, GuildID: item.GuildID, CaseNumber: item.CaseNumber, TemplateID: item.TemplateID, Reason: item.Reason, Validity: item.Validity, VoidedReason: item.VoidedReason, ReplacementCaseID: item.ReplacementCaseID, CreatedAt: item.CreatedAt, ContextValues: parseCaseContextValues(item.ContextValuesJSON), SelectedLevel: selectedLevelResponse(item.TemplateSnapshotJSON), Enforcement: enforcement, Evidence: caseEvidenceResponses(evidence, attachments, true), Events: caseEventResponses(publicEvents), Notification: caseNotificationResponse(notification, true), Appealable: appealable && item.Validity == model.CaseValidityValid && appeal == nil, AppealID: appealID, AppealStatus: appealStatus}, nil
 }
 
 // memberReadAudit records target-owned reads without requiring a current staff or guild membership cache.
