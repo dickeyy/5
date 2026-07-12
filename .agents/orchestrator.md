@@ -28,6 +28,8 @@ add newly discovered required work when it is necessary for conformance with
 - Do not run parallel write-heavy slices against overlapping files or APIs.
 - Parallelize read-only analysis freely.
 - Delegate implementation slices to subagents.
+- Assign each implementation slice to a fresh subagent. One subagent owns one
+  slice only; do not reuse a prior slice owner for a later task.
 - Each implementation subagent owns one branch, one isolated worktree, and one
   pull request.
 - A subagent must not merge its own pull request.
@@ -77,11 +79,25 @@ The orchestrator may validate a slice only after its subagent has completed the
 single Codex review-and-fix lifecycle, except for a documented large-rework
 second-review exception.
 
-For each submitted slice, the orchestrator must independently verify:
+Post-Codex validation is an evidence-focused acceptance gate, not a second full
+code-review lifecycle. The orchestrator should verify the subagent's structured
+handoff, PR state, Codex result, acceptance-criteria coverage, scope boundaries,
+and recorded validation results. Do not routinely repeat a line-by-line diff
+review or rerun the complete validation suite when the slice owner already ran
+the required commands successfully and Codex reported no bugs.
+
+When all required slice and repository checks pass, the PR has completed its one
+Codex review request, Codex reports no actionable bugs, the worktree is clean,
+and the handoff accounts for the acceptance criteria and documentation, accept
+the slice and advance to the next dependency. PRs remain unmerged, so later
+cross-slice or repository-wide validation may harden an accepted slice if new
+evidence exposes a problem.
+
+The orchestrator must still independently verify from the submitted evidence:
 
 - acceptance criteria against `v5.md`;
 - consistency with adjacent functionality;
-- tests and required validation commands;
+- that required validation commands were run and passed;
 - PR and Codex review status;
 - disposition of every review finding;
 - that the PR received no more than one Codex review request unless a documented
@@ -89,6 +105,12 @@ For each submitted slice, the orchestrator must independently verify:
 - absence of unjustified scope expansion;
 - documentation and TODO updates;
 - whether the slice exposes additional v5 work.
+
+Run additional commands or inspect implementation details only when evidence is
+missing, contradictory, a Codex finding required a fix, the change is unusually
+high risk, or an acceptance/scope boundary remains uncertain. After review
+fixes, target the extra check at the finding and affected behavior; do not ask
+Codex for another review or repeat unrelated validation by default.
 
 The orchestrator must reject or return incomplete slices to a subagent rather
 than silently repairing them in the orchestration thread.
