@@ -42,13 +42,16 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create Discord bot: %w", err)
 	}
+	queue := workqueue.New(cfg.EventQueue.Size, cfg.EventQueue.Workers)
+	services := quack.NewWithConfigDependencies(cfg, repositories, bot, bot, queue)
+	if err := discordbot.RegisterGuildLifecycle(bot.Session, services); err != nil {
+		return fmt.Errorf("register Discord guild lifecycle: %w", err)
+	}
 	if err := bot.Open(); err != nil {
 		return fmt.Errorf("connect Discord bot: %w", err)
 	}
 	defer bot.Close()
 
-	queue := workqueue.New(cfg.EventQueue.Size, cfg.EventQueue.Workers)
-	services := quack.NewWithConfigDependencies(cfg, repositories, bot, bot, queue)
 	queue.Start(ctx, services.Actions.ProcessCaseActions, repositories)
 	defer queue.Stop()
 

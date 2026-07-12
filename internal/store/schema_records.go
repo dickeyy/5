@@ -24,6 +24,25 @@ type GuildRecord struct {
 	IsActive           bool   `gorm:"not null;default:true;index"`
 }
 
+// GuildSettingsRecord is the GORM persistence representation of guild-owned setup and module enablement state.
+type GuildSettingsRecord struct {
+	ULIDModelRecord
+	GuildID                           string     `gorm:"type:char(26);not null;uniqueIndex"`
+	AuditMirrorChannelDiscordID       string     `gorm:"size:32;not null;default:''"`
+	ManagedEvidenceChannelDiscordID   string     `gorm:"size:32;not null;default:''"`
+	NotificationIntroduction          string     `gorm:"type:text;not null"`
+	NotificationFooter                string     `gorm:"type:text;not null"`
+	TicketsEnabled                    bool       `gorm:"not null;default:false"`
+	GeneralLoggingEnabled             bool       `gorm:"not null;default:false"`
+	HoneypotEnabled                   bool       `gorm:"not null;default:false"`
+	StarterPolicyTemplateID           string     `gorm:"type:char(26);not null;default:''"`
+	StarterPolicyNoticePending        bool       `gorm:"not null;default:true"`
+	StarterPolicyNoticeAcknowledgedAt *time.Time `gorm:"index"`
+}
+
+// TableName keeps the adapter record aligned with migration 0004's guild_settings table.
+func (GuildSettingsRecord) TableName() string { return "guild_settings" }
+
 // StaffMemberRecord is the GORM persistence representation of staff member; domain models remain storage-agnostic.
 type StaffMemberRecord struct {
 	ULIDModelRecord

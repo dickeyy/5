@@ -251,10 +251,11 @@ func TestMigration0003MapsCasesInventoriesRetiredEventsAndRollsBackExactly(t *te
 		t.Fatalf("load retired event before migration: %v", err)
 	}
 
-	if err := runMigrations(db, registeredMigrations()); err != nil {
+	through0003 := registeredMigrations()[:3]
+	if err := runMigrations(db, through0003); err != nil {
 		t.Fatalf("apply migration 0003: %v", err)
 	}
-	if err := runMigrations(db, registeredMigrations()); err != nil {
+	if err := runMigrations(db, through0003); err != nil {
 		t.Fatalf("rerun migration 0003: %v", err)
 	}
 	for _, fixture := range fixtures {
@@ -290,7 +291,7 @@ func TestMigration0003MapsCasesInventoriesRetiredEventsAndRollsBackExactly(t *te
 		t.Fatalf("retired events crossed live boundary: %+v", liveEvents)
 	}
 
-	if err := rollbackLastMigration(db, registeredMigrations()); err != nil {
+	if err := rollbackLastMigration(db, through0003); err != nil {
 		t.Fatalf("roll back migration 0003: %v", err)
 	}
 	if db.Migrator().HasTable(&migration0003CaseCompatibility{}) {
@@ -350,7 +351,8 @@ func TestMigration0003RejectsUnknownValuesWithoutMutation(t *testing.T) {
 
 func TestMigration0003RollbackDowngradesPostMigrationCases(t *testing.T) {
 	db := openSQLiteMigrationDB(t)
-	if err := runMigrations(db, registeredMigrations()); err != nil {
+	through0003 := registeredMigrations()[:3]
+	if err := runMigrations(db, through0003); err != nil {
 		t.Fatalf("apply migrations: %v", err)
 	}
 	now := time.Now().UTC()
@@ -368,7 +370,7 @@ func TestMigration0003RollbackDowngradesPostMigrationCases(t *testing.T) {
 		t.Fatalf("create post-migration case: %v", err)
 	}
 
-	if err := rollbackLastMigration(db, registeredMigrations()); err != nil {
+	if err := rollbackLastMigration(db, through0003); err != nil {
 		t.Fatalf("roll back with post-migration case: %v", err)
 	}
 	var persisted migration0003Case
@@ -697,6 +699,9 @@ func TestRollbackRefusesForwardOnlyBaselineWithoutChangingHistory(t *testing.T) 
 	}
 
 	if err := repositories.RollbackLastMigration(); err != nil {
+		t.Fatalf("roll back reversible guild settings migration: %v", err)
+	}
+	if err := repositories.RollbackLastMigration(); err != nil {
 		t.Fatalf("roll back reversible case validity migration: %v", err)
 	}
 	if err := repositories.RollbackLastMigration(); err != nil {
@@ -707,6 +712,43 @@ func TestRollbackRefusesForwardOnlyBaselineWithoutChangingHistory(t *testing.T) 
 		t.Fatalf("expected forward-only refusal, got %v", err)
 	}
 	assertRepresentativeHistory(t, db, want)
+}
+
+func TestMigration0004SeedsSettingsRerunsAndRollsBackWithoutHistoryLoss(t *testing.T) {
+	db := openSQLiteMigrationDB(t)
+	through0003 := registeredMigrations()[:3]
+	if err := runMigrations(db, through0003); err != nil {
+		t.Fatalf("apply migrations through 0003: %v", err)
+	}
+	want := insertRepresentativeHistory(t, db)
+	if err := runMigrations(db, registeredMigrations()); err != nil {
+		t.Fatalf("apply migration 0004: %v", err)
+	}
+	if err := runMigrations(db, registeredMigrations()); err != nil {
+		t.Fatalf("rerun migration 0004: %v", err)
+	}
+	var settings []migration0004GuildSettingsRecord
+	if err := db.Find(&settings).Error; err != nil {
+		t.Fatalf("list seeded guild settings: %v", err)
+	}
+	if len(settings) != 1 || settings[0].GuildID != want.GuildID || !settings[0].StarterPolicyNoticePending || settings[0].StarterPolicyTemplateID != "" {
+		t.Fatalf("unexpected migration 0004 seed: %+v", settings)
+	}
+	assertRepresentativeHistory(t, db, want)
+	if err := rollbackLastMigration(db, registeredMigrations()); err != nil {
+		t.Fatalf("roll back migration 0004: %v", err)
+	}
+	if db.Migrator().HasTable(&migration0004GuildSettingsRecord{}) {
+		t.Fatal("guild settings table remained after rollback")
+	}
+	assertRepresentativeHistory(t, db, want)
+	if err := runMigrations(db, registeredMigrations()); err != nil {
+		t.Fatalf("reapply migration 0004: %v", err)
+	}
+	var count int64
+	if err := db.Model(&migration0004GuildSettingsRecord{}).Where("guild_id = ?", want.GuildID).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("expected one re-seeded settings row, count=%d err=%v", count, err)
+	}
 }
 
 func TestMigrationChecksumRejectsExecutableOrSchemaMutationWithoutIdentityChange(t *testing.T) {

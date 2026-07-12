@@ -40,6 +40,16 @@ migration-owned table. Cases created after migration 0003 are explicitly mapped
 from canonical validity/source values back to the compatible legacy
 `open`/`voided` and source labels before the ledger entry is removed.
 
+Migration 0004 creates one `guild_settings` row per guild. It stores core audit
+mirror and managed-evidence channel references, bounded notification
+introduction/footer text, independent ticket/logging/honeypot enablement, the
+starter-template identity, and one-time starter-review notice state. Existing
+guilds receive conservative defaults without changing any guild, staff,
+template, case, event, action, attempt, appeal, ticket, audit, identifier, or
+history row. Its reviewed inverse drops only `guild_settings`; rerunning forward
+re-seeds one row per guild. SQLite and isolated real-MySQL coverage exercise
+forward, rerun, preservation, rollback, and reapplication.
+
 ## Forward procedure
 
 1. Back up MySQL and verify the backup before deploying schema-changing code.

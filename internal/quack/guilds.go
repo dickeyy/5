@@ -53,9 +53,64 @@ type DiscordStaffContextInput struct {
 	LastActiveAt   time.Time
 }
 
+// DiscordGuildLifecycleInput carries authoritative guild metadata and an optional complete channel inventory from a gateway event.
+type DiscordGuildLifecycleInput struct {
+	DiscordGuildID         string
+	Name                   string
+	Icon                   string
+	OwnerDiscordUserID     string
+	KnownChannelDiscordIDs []string
+}
+
 // NewGuildService constructs guild service with required dependencies explicit so callers control lifecycle and substitution.
 func NewGuildService(store Repository, discord DiscordClient) *GuildService {
 	return &GuildService{store: store, discord: discord}
+}
+
+// BootstrapDiscordGuild atomically installs or reactivates a guild, refreshes metadata, repairs stale channels, and ensures one starter policy.
+func (s *GuildService) BootstrapDiscordGuild(ctx context.Context, input DiscordGuildLifecycleInput) (*model.BootstrapGuildResult, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("guild service is not configured")
+	}
+	guildID := strings.TrimSpace(input.DiscordGuildID)
+	if guildID == "" || strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.OwnerDiscordUserID) == "" {
+		return nil, errors.New("guild id, name, and owner are required")
+	}
+	return s.store.BootstrapGuild(ctx, model.BootstrapGuildParams{
+		DiscordGuildID: guildID, Name: strings.TrimSpace(input.Name),
+		IconURL:                discordGuildIconURL(guildID, strings.TrimSpace(input.Icon)),
+		OwnerDiscordUserID:     strings.TrimSpace(input.OwnerDiscordUserID),
+		KnownChannelDiscordIDs: input.KnownChannelDiscordIDs,
+	})
+}
+
+// DeactivateDiscordGuild marks a true guild departure inactive while preserving settings, starter policy, and history.
+func (s *GuildService) DeactivateDiscordGuild(ctx context.Context, discordGuildID string) (*model.Guild, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("guild service is not configured")
+	}
+	return s.store.DeactivateGuild(ctx, strings.TrimSpace(discordGuildID), systemGuildAudit("guild.lifecycle.leave", "guild"))
+}
+
+// ClearDeletedChannel removes stale core settings references when Discord confirms a configured channel was deleted.
+func (s *GuildService) ClearDeletedChannel(ctx context.Context, discordGuildID, channelID string) (*model.GuildSettings, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("guild service is not configured")
+	}
+	guild, err := s.store.GetGuildByDiscordID(ctx, strings.TrimSpace(discordGuildID))
+	if err != nil || guild == nil {
+		return nil, err
+	}
+	return s.store.ClearGuildChannelReferences(ctx, guild.ID, strings.TrimSpace(channelID), systemGuildAudit("guild_settings.channel_reference.cleared", "guild_settings"))
+}
+
+// systemGuildAudit creates adapter-attributed lifecycle evidence without pretending the bot is a Discord staff member.
+func systemGuildAudit(action, resourceType string) *model.AuditLogEntry {
+	return &model.AuditLogEntry{
+		ActorDiscordUserID: "quack-system", Source: model.AuditSourceDiscord,
+		Action: action, ResourceType: resourceType, Result: model.AuditResultSuccess,
+		MetadataJSON: "{}",
+	}
 }
 
 // ListUserManageableGuilds returns user manageable guilds subject to authorization, ordering, and filtering constraints.
@@ -305,6 +360,8 @@ func discordPermissionMap(canModerate, canManage bool) map[model.PermissionActio
 		model.PermissionActionAppealReview:       canModerate,
 		model.PermissionActionTicketResolve:      canModerate,
 		model.PermissionActionAuditRead:          canManage,
+		model.PermissionActionGuildSettingsRead:  canManage,
+		model.PermissionActionGuildSettingsWrite: canManage,
 	}
 }
 

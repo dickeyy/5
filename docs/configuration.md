@@ -86,6 +86,40 @@ The API server only allows credentialed browser requests from
 If the dashboard runs on a different origin, update `internal/httpapi/server.go` before
 expecting cookie-based requests to work.
 
+## Discord Install Permissions and Intents
+
+The install URL needs the `bot` and `applications.commands` OAuth scopes. Core
+case responses require the bot to view the invoking staff channel, send
+messages, embed links, and read message history. Configured v5 enforcement also
+requires the bot's `Moderate Members`, `Kick Members`, or `Ban Members`
+permission for the action an admin places on a template; V5-003 owns the live
+actor/bot permission and hierarchy preflight before a punitive case is created.
+
+The managed-evidence slice will additionally require `Manage Channels` and
+permission-overwrite access to create and repair its staff-only channel. Merely
+persisting the configured evidence-channel reference in the current guild
+settings contract does not create or permission that channel. Audit mirroring
+uses the normal view/send/embed permissions in its selected staff channel.
+
+Gateway intent needs by product surface are:
+
+- Core guild lifecycle and application-command interactions: `Guilds`; no
+  privileged intent is inherently required for the current setup/settings
+  flow.
+- Message evidence, honeypot messages, and message-based general logging:
+  `Guild Messages` plus the privileged `Message Content` intent when content is
+  consumed outside an interaction payload.
+- General-logging member join/leave events: the privileged `Guild Members`
+  intent.
+- Tickets driven by interactions: no additional privileged intent by itself.
+
+The current binary still requests the legacy broad integer mask `3276543`,
+which includes privileged intents. Production applications using that binary
+must enable every privileged intent it requests in the Discord developer
+portal or Discord may reject the gateway session. Reducing this mask to the
+minimum enabled feature set remains tracked work; `Guild Presences` is not a v5
+product requirement.
+
 ## Config Loading Rules
 
 `lib.LoadConfig()` reads `.env` through `github.com/joho/godotenv` and then

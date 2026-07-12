@@ -441,6 +441,109 @@ func TestTemplateRoutesRejectRetiredProductFields(t *testing.T) {
 	}
 }
 
+func TestGuildSettingsRoutesReadWriteAcknowledgeAndAuditDenied(t *testing.T) {
+	managerRouter, managerSessionID, managerStore := newTemplateRouteHarnessWithStore(t, uint64(discordgo.PermissionManageGuild))
+	patch := httptest.NewRequest(http.MethodPatch, "/guilds/guild-1/settings", bytes.NewBufferString(`{
+		"audit_mirror_channel_discord_id":"100000000000000001",
+		"managed_evidence_channel_discord_id":"100000000000000002",
+		"notification_introduction":"Welcome",
+		"notification_footer":"Footer",
+		"tickets_enabled":true,
+		"general_logging_enabled":false,
+		"honeypot_enabled":true
+	}`))
+	patch.Header.Set("Authorization", "Bearer "+managerSessionID)
+	patch.Header.Set("Content-Type", "application/json")
+	patchResponse := httptest.NewRecorder()
+	managerRouter.ServeHTTP(patchResponse, patch)
+	if patchResponse.Code != http.StatusOK {
+		t.Fatalf("expected settings patch status %d, got %d body=%s", http.StatusOK, patchResponse.Code, patchResponse.Body.String())
+	}
+	malformed := httptest.NewRequest(http.MethodPatch, "/guilds/guild-1/settings", bytes.NewBufferString(`{"unknown_setting":true}`))
+	malformed.Header.Set("Authorization", "Bearer "+managerSessionID)
+	malformed.Header.Set("Content-Type", "application/json")
+	malformedResponse := httptest.NewRecorder()
+	managerRouter.ServeHTTP(malformedResponse, malformed)
+	if malformedResponse.Code != http.StatusBadRequest {
+		t.Fatalf("expected malformed settings status %d, got %d body=%s", http.StatusBadRequest, malformedResponse.Code, malformedResponse.Body.String())
+	}
+
+	get := httptest.NewRequest(http.MethodGet, "/guilds/guild-1/settings", nil)
+	get.Header.Set("Authorization", "Bearer "+managerSessionID)
+	getResponse := httptest.NewRecorder()
+	managerRouter.ServeHTTP(getResponse, get)
+	if getResponse.Code != http.StatusOK {
+		t.Fatalf("expected settings get status %d, got %d body=%s", http.StatusOK, getResponse.Code, getResponse.Body.String())
+	}
+	var body struct {
+		Settings quack.GuildSettingsResponse `json:"settings"`
+	}
+	if err := json.Unmarshal(getResponse.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode settings response: %v", err)
+	}
+	if body.Settings.AuditMirrorChannelDiscordID != "100000000000000001" || !body.Settings.TicketsEnabled || !body.Settings.HoneypotEnabled || !body.Settings.StarterPolicyReviewRequired {
+		t.Fatalf("unexpected settings response: %+v", body.Settings)
+	}
+
+	ack := httptest.NewRequest(http.MethodPost, "/guilds/guild-1/settings/starter-policy-notice/acknowledge", nil)
+	ack.Header.Set("Authorization", "Bearer "+managerSessionID)
+	ackResponse := httptest.NewRecorder()
+	managerRouter.ServeHTTP(ackResponse, ack)
+	if ackResponse.Code != http.StatusOK || strings.Contains(ackResponse.Body.String(), `"starter_policy_review_required":true`) {
+		t.Fatalf("starter notice acknowledgement failed: status=%d body=%s", ackResponse.Code, ackResponse.Body.String())
+	}
+
+	managerGuild, err := managerStore.GetGuildByDiscordID(context.Background(), "guild-1")
+	if err != nil || managerGuild == nil {
+		t.Fatalf("load manager guild: guild=%+v err=%v", managerGuild, err)
+	}
+	managerAudits, err := managerStore.ListAuditLogEntries(context.Background(), managerGuild.ID)
+	if err != nil {
+		t.Fatalf("list malformed settings audit: %v", err)
+	}
+	foundFailure := false
+	for _, audit := range managerAudits {
+		if audit.Action == "guild_settings.update" && audit.Result == model.AuditResultFailure {
+			foundFailure = true
+		}
+	}
+	if !foundFailure {
+		t.Fatalf("missing malformed payload failure audit: %+v", managerAudits)
+	}
+	starterSettings, err := managerStore.GetGuildSettings(context.Background(), managerGuild.ID)
+	if err != nil || starterSettings.StarterPolicyTemplateID == "" {
+		t.Fatalf("missing starter settings after API flow: settings=%+v err=%v", starterSettings, err)
+	}
+	starter, err := managerStore.GetCaseTemplateExpanded(context.Background(), managerGuild.ID, starterSettings.StarterPolicyTemplateID)
+	if err != nil || starter == nil || starter.Template.ArchivedAt != nil {
+		t.Fatalf("acknowledgement made starter inactive: starter=%+v err=%v", starter, err)
+	}
+
+	moderatorRouter, moderatorSessionID, moderatorStore := newTemplateRouteHarnessWithStore(t, uint64(discordgo.PermissionModerateMembers))
+	denied := httptest.NewRequest(http.MethodPatch, "/guilds/guild-1/settings", bytes.NewBufferString(`{"unknown_setting":true}`))
+	denied.Header.Set("Authorization", "Bearer "+moderatorSessionID)
+	denied.Header.Set("Content-Type", "application/json")
+	deniedResponse := httptest.NewRecorder()
+	moderatorRouter.ServeHTTP(deniedResponse, denied)
+	if deniedResponse.Code != http.StatusForbidden {
+		t.Fatalf("expected denied settings status %d, got %d body=%s", http.StatusForbidden, deniedResponse.Code, deniedResponse.Body.String())
+	}
+	moderatorGuild, _ := moderatorStore.GetGuildByDiscordID(context.Background(), "guild-1")
+	audits, err := moderatorStore.ListAuditLogEntries(context.Background(), moderatorGuild.ID)
+	if err != nil {
+		t.Fatalf("list denied settings audit: %v", err)
+	}
+	foundDenied := false
+	for _, audit := range audits {
+		if audit.Action == "guild_settings.update" && audit.Result == model.AuditResultDenied {
+			foundDenied = true
+		}
+	}
+	if !foundDenied {
+		t.Fatalf("missing denied settings audit: %+v", audits)
+	}
+}
+
 func TestTemplateRouteRejectsQuarantinedLegacyPolicyExplicitly(t *testing.T) {
 	router, sessionID, repositories := newTemplateRouteHarnessWithStore(t, uint64(discordgo.PermissionAdministrator))
 	guild, err := repositories.UpsertGuild(context.Background(), storage.UpsertGuildParams{
@@ -839,6 +942,11 @@ func newTemplateRouteHarnessWithStore(t *testing.T, permissionBits uint64) (*gin
 	store := testutil.NewSQLiteRedisStore(t)
 	if err := store.Migrate(); err != nil {
 		t.Fatalf("migrate schema: %v", err)
+	}
+	if _, err := store.BootstrapGuild(context.Background(), model.BootstrapGuildParams{
+		DiscordGuildID: "guild-1", Name: "Guild", OwnerDiscordUserID: "owner-1",
+	}); err != nil {
+		t.Fatalf("bootstrap route guild: %v", err)
 	}
 
 	services := quack.NewWithDiscordClient(store, routeFakeDiscordClient{

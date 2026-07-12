@@ -15,6 +15,8 @@ const (
 	PermissionActionAppealReview       PermissionAction = "appeal.review"
 	PermissionActionTicketResolve      PermissionAction = "ticket.resolve"
 	PermissionActionAuditRead          PermissionAction = "audit.read"
+	PermissionActionGuildSettingsRead  PermissionAction = "guild_settings.read"
+	PermissionActionGuildSettingsWrite PermissionAction = "guild_settings.write"
 )
 
 // CaseValidity identifies whether a case participates in escalation history.
@@ -131,6 +133,7 @@ type AuditResult string
 const (
 	AuditResultSuccess AuditResult = "success"
 	AuditResultFailure AuditResult = "failure"
+	AuditResultDenied  AuditResult = "denied"
 )
 
 // ULIDModel represents the persistence-free domain state for a ulidmodel.
@@ -148,6 +151,22 @@ type Guild struct {
 	IconURL            string
 	OwnerDiscordUserID string
 	IsActive           bool
+}
+
+// GuildSettings contains guild-owned Quack configuration without embedding optional-module runtime state in the moderation core.
+type GuildSettings struct {
+	ULIDModel
+	GuildID                           string
+	AuditMirrorChannelDiscordID       string
+	ManagedEvidenceChannelDiscordID   string
+	NotificationIntroduction          string
+	NotificationFooter                string
+	TicketsEnabled                    bool
+	GeneralLoggingEnabled             bool
+	HoneypotEnabled                   bool
+	StarterPolicyTemplateID           string
+	StarterPolicyNoticePending        bool
+	StarterPolicyNoticeAcknowledgedAt *time.Time
 }
 
 // StaffMember represents the persistence-free domain state for a staff member.

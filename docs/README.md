@@ -23,7 +23,7 @@ the high-level mismatch without making the technical docs inaccurate.
 The live backend currently has four main runtime surfaces:
 
 - Discord bot startup, slash-command registration, and interaction dispatch in `cmd/quack/main.go`, `internal/discordbot/commands/`, and `internal/discordbot/interactions/`.
-- HTTP API routes for status, ops status, auth, guild context, templates, case reads and creation, and guild audit reads in `internal/httpapi/server.go` and `internal/httpapi/routes/`.
+- HTTP API routes for status, ops status, auth, guild context/settings, templates, case reads and creation, and guild audit reads in `internal/httpapi/server.go` and `internal/httpapi/routes/`.
 - Case-action queue processing in `internal/workqueue/queue.go` and `internal/workqueue/queue.go`.
 - Local container packaging for MySQL, Redis, and the app profile in `compose.yaml` and `Dockerfile`.
 

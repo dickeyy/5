@@ -17,6 +17,11 @@ type Repository interface {
 	RefreshSessionTTL(context.Context, string, time.Duration) error
 	GetGuildByDiscordID(context.Context, string) (*model.Guild, error)
 	UpsertGuild(context.Context, model.UpsertGuildParams) (*model.Guild, error)
+	BootstrapGuild(context.Context, model.BootstrapGuildParams) (*model.BootstrapGuildResult, error)
+	DeactivateGuild(context.Context, string, *model.AuditLogEntry) (*model.Guild, error)
+	GetGuildSettings(context.Context, string) (*model.GuildSettings, error)
+	UpdateGuildSettings(context.Context, model.UpdateGuildSettingsParams) (*model.GuildSettings, error)
+	ClearGuildChannelReferences(context.Context, string, string, *model.AuditLogEntry) (*model.GuildSettings, error)
 	UpsertStaffMember(context.Context, model.UpsertStaffMemberParams) (*model.StaffMember, error)
 	GetStaffMember(context.Context, string, string) (*model.StaffMember, error)
 	CreateCaseTemplate(context.Context, model.CreateCaseTemplateParams) (*model.ExpandedCaseTemplate, error)
