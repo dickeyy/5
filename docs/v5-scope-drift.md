@@ -57,12 +57,7 @@ The current backend already supports important parts of the intended v5 directio
 
 ## Behavior That Must Change
 
-The live template storage record still embeds GORM's soft-delete field. Even
-though migration compatibility must preserve historical `deleted_at` values,
-current v5 storage must not retain an implicit delete lifecycle alongside the
-product's explicit archive and restore lifecycle. QP-G owns the final storage
-adjudication; this entry remains open until its accepted head proves live reads
-and writes use archive state only while frozen compatibility data is preserved.
+No storage or integration-owned product mismatch remains in this section.
 
 ## Rejected Concepts to Remove
 
@@ -74,12 +69,16 @@ These concepts appear in current models, documentation, or backlog history but d
 
 Historical database compatibility may require a later migration rather than immediate column removal. Keeping old data temporarily does not make the rejected concept part of the product.
 
+The accepted QP-G storage head retires live GORM soft-delete semantics while
+preserving the frozen compatibility column, converts residual legacy delete
+state to archive state in logical migration 0410, and provides command-scope
+checks plus the documented cutover that removes direct punishment commands.
+
 ## Missing Core Behavior
 
-The intended v5 core still requires product behavior that is not complete today:
-
-- V4 historical-case import that does not affect escalation.
-- Removal of legacy direct moderation commands after migration.
+The accepted QP-G package supplies the final privacy-safe, idempotent v4
+historical-case importer, batch/source ledgers, dry-run and rollback controls,
+non-escalating history projection, and direct-command cutover validation.
 
 QP-E's audit/statistics contracts and the separately owned appeal/honeypot
 contracts are installed on the combined QI-2 runtime anchor.

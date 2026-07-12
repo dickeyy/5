@@ -11,8 +11,8 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Remove severity from templates, cases, API contracts, live storage records, snapshots, filters, and tests while retaining frozen compatibility columns only.
 - [x] Remove weight from cases, escalation behavior, live storage records, API contracts, and tests while retaining the frozen compatibility column only.
 - [x] Remove the separate enabled state from live templates, levels, and level actions while retaining frozen compatibility columns only.
-- [ ] Make reversible archive and restore the only template availability lifecycle.
-- [ ] Remove soft-delete concepts that imply templates or cases can be deleted outside the defined archive/void flows.
+- [x] Make reversible archive and restore the only template availability lifecycle.
+- [x] Remove soft-delete concepts that imply templates or cases can be deleted outside the defined archive/void flows.
 - [x] Remove moderator reason overrides from case inputs, HTTP routes, Discord commands, snapshots, and tests.
 - [x] Enforce zero or one timeout, kick, or ban action per template level.
 - [x] Remove ordered multi-action behavior and `continue_on_error` from the product model.
@@ -423,47 +423,47 @@ Items are grouped by concern, not by implementation order or priority. Completed
 
 ## V4 Migration and Coexistence
 
-- [ ] Define the final v4 historical-case import format.
-- [ ] Import v4 cases as clearly labeled historical records.
-- [ ] Preserve useful v4 case identity, guild, target, moderator, reason, type, context link, and creation time.
-- [ ] Prevent imported v4 cases from contributing to v5 template escalation.
-- [ ] Prevent imported records from creating v5 action executions or member notifications.
-- [ ] Keep imported records readable in authorized staff and member history views.
-- [ ] Decide how legacy moderator identities are displayed when the user is no longer available.
-- [ ] Add dry-run import reports before any data is written.
-- [ ] Add import validation with per-record warnings and failures.
-- [ ] Make imports idempotent and safely repeatable.
-- [ ] Record import batches, source identifiers, counts, failures, and checksums.
-- [ ] Audit every import batch and material import failure.
-- [ ] Keep v4 and v5 database schemas and Redis keys isolated during coexistence.
-- [ ] Add command-scope checks so v4 and v5 do not register conflicting slash commands.
-- [ ] Document the transition that removes v4 direct moderation commands after migration.
-- [ ] Add module-specific migration hooks without making core migration depend on unfinished modules.
-- [ ] Add migration fixtures covering warnings, timeouts, kicks, bans, departed members, missing users, and malformed legacy rows.
-- [ ] Add migration rollback and rerun tests.
-- [ ] Add a real-data dry-run checklist that does not expose member data in logs.
+- [x] Define the final v4 historical-case import format.
+- [x] Import v4 cases as clearly labeled historical records.
+- [x] Preserve useful v4 case identity, guild, target, moderator, reason, type, context link, and creation time.
+- [x] Prevent imported v4 cases from contributing to v5 template escalation.
+- [x] Prevent imported records from creating v5 action executions or member notifications.
+- [x] Keep imported records readable in authorized staff and member history views.
+- [x] Decide how legacy moderator identities are displayed when the user is no longer available.
+- [x] Add dry-run import reports before any data is written.
+- [x] Add import validation with per-record warnings and failures.
+- [x] Make imports idempotent and safely repeatable.
+- [x] Record import batches, source identifiers, counts, failures, and checksums.
+- [x] Audit every import batch and material import failure.
+- [x] Keep v4 and v5 database schemas and Redis keys isolated during coexistence.
+- [x] Add command-scope checks so v4 and v5 do not register conflicting slash commands.
+- [x] Document the transition that removes v4 direct moderation commands after migration.
+- [x] Add module-specific migration hooks without making core migration depend on unfinished modules.
+- [x] Add migration fixtures covering warnings, timeouts, kicks, bans, departed members, missing users, and malformed legacy rows.
+- [x] Add migration rollback and rerun tests.
+- [x] Add a real-data dry-run checklist that does not expose member data in logs.
 
 ## Database and Storage Reliability
 
 - [x] Replace production reliance on startup-only `AutoMigrate` with versioned, reviewable database migrations.
 - [x] Remove startup `AutoMigrate` instead of retaining a separate local-development schema path.
-- [ ] Add forward and rollback migration procedures for every v5 model realignment.
+- [x] Add forward and rollback migration procedures for every v5 model realignment.
 - [x] Test the migration foundation against the current pre-ledger v5 schema and representative stored data.
 - [x] Preserve table names, IDs, case numbers, snapshots, action attempts, events, and audit history through the migration foundation.
-- [ ] Add database constraints for one default level per template where feasible.
-- [ ] Add database constraints for zero or one enforcement action per level where feasible.
+- [x] Add database constraints for one default level per template where feasible.
+- [x] Add database constraints for zero or one enforcement action per level where feasible.
 - [x] Add database constraints for one appeal per case.
-- [ ] Add uniqueness and index coverage for template identity/version, guild case numbers, member history, audit filters, action claims, evidence, and module settings.
+- [x] Add uniqueness and index coverage for template identity/version, guild case numbers, member history, audit filters, action claims, evidence, and module settings.
 - [ ] Add mapper tests for every new or changed domain/storage record.
 - [ ] Add MySQL integration tests for JSON fields, indexes, foreign keys, locks, and transaction rollbacks.
 - [ ] Add integration tests proving concurrent case creation keeps unique numbers and correct escalation after the model changes.
 - [x] Add integration tests proving void and appeal acceptance cannot race with escalation counts.
 - [ ] Add claim-lease recovery for action executions left running after crashes.
 - [ ] Add safe cleanup or archival policies for expired OAuth state and sessions.
-- [ ] Define backup and restore procedures for MySQL.
+- [x] Define backup and restore procedures for MySQL.
 - [ ] Define the required Redis durability and recovery behavior for sessions and command cache.
-- [ ] Test backup restoration into a clean environment.
-- [ ] Verify that restoring storage cannot duplicate action execution or case numbering.
+- [x] Test backup restoration into a clean environment.
+- [x] Verify that restoring storage cannot duplicate action execution or case numbering.
 
 ## Queue, Concurrency, and Recovery
 
