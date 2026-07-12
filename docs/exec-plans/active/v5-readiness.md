@@ -190,6 +190,11 @@ QI-1 B/C wiring is green: focused/race/vet/diff checks pass, and
 `docs/integration/qi-1-p1.md` records the QP-A conflict/migration plan. QP-A is
 reviewable at `2e5bd6e` on PR #8 with one Codex request pending.
 
+QP-A package evidence accepted at `0c76447`: three local review findings fixed;
+the route-mount P1 transferred to and closed by QI-1. All accepted P1 heads are
+combined at `50a5058` on PR #9 with focused/MySQL/race/full/vet/build/diff gates
+green and one Codex review request pending.
+
 ### Parallel wave P2 - product completion from QI-1
 
 | Package | Absorbed requirements | Exclusive implementation surface | Migration range |
@@ -996,10 +1001,10 @@ by the macro-package ledger.
 | V5-001C | ACCEPTED | `slice/v5-001c-case-validity` | [#3](https://github.com/dickeyy/5/pull/3) | 1 complete, one P2 fixed | passed evidence gate |
 | V5-002 | ACCEPTED | `slice/v5-002-guild-bootstrap` | [#4](https://github.com/dickeyy/5/pull/4) | 1 complete, two findings fixed | passed evidence gate |
 | V5-003 | ACCEPTED | `slice/v5-003-live-authorization` | [#5](https://github.com/dickeyy/5/pull/5) | 1 complete, one P2 fixed | passed evidence gate |
-| QP-A | FIXING | `package/qp-a-core-moderation` at `0c76447` | [#8](https://github.com/dickeyy/5/pull/8) | 1 complete; 2 P1/2 P2 | three fixed; route-mount P1 assigned to QI-1 |
+| QP-A | ACCEPTED | `package/qp-a-core-moderation` at `0c76447` | [#8](https://github.com/dickeyy/5/pull/8) | 1 complete; 2 P1/2 P2 | three fixed; integration P1 closed in QI-1 |
 | QP-B | ACCEPTED | `package/qp-b-http-auth` at `b2f3e0a` | [#7](https://github.com/dickeyy/5/pull/7) | 1 complete; P1/P2 fixed | passed evidence gate |
 | QP-C | ACCEPTED | `package/qp-c-tickets-logging` at `4579d14` | [#6](https://github.com/dickeyy/5/pull/6) | 1 complete; four P2s fixed | passed evidence gate |
-| QI-1 | IN_PROGRESS | `integration/qi-1-p1` with QP-B/QP-C merged | pending | 0 | must close QP-A production route-mount P1 after merge |
+| QI-1 | REVIEW_WAIT | `integration/qi-1-p1` at `50a5058` | [#9](https://github.com/dickeyy/5/pull/9) | 1 requested | all P1 heads integrated; wave gates green |
 | QP-D | PLANNED | pending | pending | 0 | absorbs member V5-007, V5-013/014/017C |
 | QP-E | PLANNED | pending | pending | 0 | absorbs V5-015/016 |
 | QP-F | PLANNED | pending | pending | 0 | absorbs V5-021/022 |
