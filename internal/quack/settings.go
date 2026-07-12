@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -114,6 +115,25 @@ func (s *GuildSettingsService) Update(ctx context.Context, guildContext *GuildSt
 	return &response, nil
 }
 
+// RejectUpdatePayload audits a transport-level settings write rejection while preserving authorization precedence.
+func (s *GuildSettingsService) RejectUpdatePayload(ctx context.Context, guildContext *GuildStaffContext, payloadErr error) error {
+	ctx = ensureTraceContext(ctx)
+	if s == nil || s.store == nil || guildContext == nil || guildContext.Guild == nil || guildContext.Staff == nil {
+		return errors.New("guild settings service is not configured")
+	}
+	if !guildContext.Can(model.PermissionActionGuildSettingsWrite) {
+		_ = s.audit(ctx, guildContext, "guild_settings.update", model.AuditResultDenied, ErrGuildSettingsPermissionDenied.Error())
+		return ErrGuildSettingsPermissionDenied
+	}
+	reason := "invalid guild settings payload"
+	if payloadErr != nil {
+		reason = payloadErr.Error()
+	}
+	err := fmt.Errorf("%w: %s", ErrGuildSettingsValidation, reason)
+	_ = s.audit(ctx, guildContext, "guild_settings.update", model.AuditResultFailure, err.Error())
+	return err
+}
+
 // AcknowledgeStarterPolicyNotice explicitly completes the one-time review notice without changing starter-template availability.
 func (s *GuildSettingsService) AcknowledgeStarterPolicyNotice(ctx context.Context, guildContext *GuildStaffContext) (*GuildSettingsResponse, error) {
 	ctx = ensureTraceContext(ctx)
@@ -193,11 +213,18 @@ func applyGuildSettingsInput(settings *model.GuildSettings, input GuildSettingsI
 	return nil
 }
 
-// normalizeDiscordChannelReference accepts an empty clear operation or a bounded Discord snowflake string.
+// normalizeDiscordChannelReference accepts an empty clear operation or a decimal Discord snowflake.
 func normalizeDiscordChannelReference(raw string) (string, error) {
 	value := strings.TrimSpace(raw)
-	if len(value) > 32 {
-		return "", fmt.Errorf("%w: Discord channel reference exceeds 32 characters", ErrGuildSettingsValidation)
+	if value == "" {
+		return "", nil
+	}
+	if len(value) > 20 {
+		return "", fmt.Errorf("%w: Discord channel reference exceeds 20 digits", ErrGuildSettingsValidation)
+	}
+	snowflake, err := strconv.ParseUint(value, 10, 64)
+	if err != nil || snowflake == 0 || strconv.FormatUint(snowflake, 10) != value {
+		return "", fmt.Errorf("%w: Discord channel reference must be a decimal snowflake", ErrGuildSettingsValidation)
 	}
 	return value, nil
 }

@@ -24,7 +24,7 @@ func TestGuildSettingsServiceAuthorizationAuditAndNotice(t *testing.T) {
 	moderator := templateGuildContext(t, repositories, "settings-guild", "moderator-1", uint64(discordgo.PermissionModerateMembers))
 	service := quack.NewGuildSettingsService(repositories)
 
-	auditChannel, evidenceChannel := "audit-1", "evidence-1"
+	auditChannel, evidenceChannel := "100000000000000001", "100000000000000002"
 	intro, footer := "Welcome to this guild", "Review case details in Quack"
 	tickets, logging, honeypot := true, true, false
 	updated, err := service.Update(ctx, manager, quack.GuildSettingsInput{
@@ -46,6 +46,10 @@ func TestGuildSettingsServiceAuthorizationAuditAndNotice(t *testing.T) {
 	tooLong := strings.Repeat("x", 2001)
 	if _, err := service.Update(ctx, manager, quack.GuildSettingsInput{NotificationIntroduction: &tooLong}); !errors.Is(err, quack.ErrGuildSettingsValidation) {
 		t.Fatalf("expected validation failure, got %v", err)
+	}
+	invalidChannel := "not-a-channel"
+	if _, err := service.Update(ctx, manager, quack.GuildSettingsInput{AuditMirrorChannelDiscordID: &invalidChannel}); !errors.Is(err, quack.ErrGuildSettingsValidation) {
+		t.Fatalf("expected non-snowflake channel rejection, got %v", err)
 	}
 
 	audits, err := repositories.ListAuditLogEntries(ctx, bootstrap.Guild.ID)

@@ -444,8 +444,8 @@ func TestTemplateRoutesRejectRetiredProductFields(t *testing.T) {
 func TestGuildSettingsRoutesReadWriteAcknowledgeAndAuditDenied(t *testing.T) {
 	managerRouter, managerSessionID, managerStore := newTemplateRouteHarnessWithStore(t, uint64(discordgo.PermissionManageGuild))
 	patch := httptest.NewRequest(http.MethodPatch, "/guilds/guild-1/settings", bytes.NewBufferString(`{
-		"audit_mirror_channel_discord_id":"audit-1",
-		"managed_evidence_channel_discord_id":"evidence-1",
+		"audit_mirror_channel_discord_id":"100000000000000001",
+		"managed_evidence_channel_discord_id":"100000000000000002",
 		"notification_introduction":"Welcome",
 		"notification_footer":"Footer",
 		"tickets_enabled":true,
@@ -458,6 +458,14 @@ func TestGuildSettingsRoutesReadWriteAcknowledgeAndAuditDenied(t *testing.T) {
 	managerRouter.ServeHTTP(patchResponse, patch)
 	if patchResponse.Code != http.StatusOK {
 		t.Fatalf("expected settings patch status %d, got %d body=%s", http.StatusOK, patchResponse.Code, patchResponse.Body.String())
+	}
+	malformed := httptest.NewRequest(http.MethodPatch, "/guilds/guild-1/settings", bytes.NewBufferString(`{"unknown_setting":true}`))
+	malformed.Header.Set("Authorization", "Bearer "+managerSessionID)
+	malformed.Header.Set("Content-Type", "application/json")
+	malformedResponse := httptest.NewRecorder()
+	managerRouter.ServeHTTP(malformedResponse, malformed)
+	if malformedResponse.Code != http.StatusBadRequest {
+		t.Fatalf("expected malformed settings status %d, got %d body=%s", http.StatusBadRequest, malformedResponse.Code, malformedResponse.Body.String())
 	}
 
 	get := httptest.NewRequest(http.MethodGet, "/guilds/guild-1/settings", nil)
@@ -473,7 +481,7 @@ func TestGuildSettingsRoutesReadWriteAcknowledgeAndAuditDenied(t *testing.T) {
 	if err := json.Unmarshal(getResponse.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode settings response: %v", err)
 	}
-	if body.Settings.AuditMirrorChannelDiscordID != "audit-1" || !body.Settings.TicketsEnabled || !body.Settings.HoneypotEnabled || !body.Settings.StarterPolicyReviewRequired {
+	if body.Settings.AuditMirrorChannelDiscordID != "100000000000000001" || !body.Settings.TicketsEnabled || !body.Settings.HoneypotEnabled || !body.Settings.StarterPolicyReviewRequired {
 		t.Fatalf("unexpected settings response: %+v", body.Settings)
 	}
 
@@ -489,6 +497,19 @@ func TestGuildSettingsRoutesReadWriteAcknowledgeAndAuditDenied(t *testing.T) {
 	if err != nil || managerGuild == nil {
 		t.Fatalf("load manager guild: guild=%+v err=%v", managerGuild, err)
 	}
+	managerAudits, err := managerStore.ListAuditLogEntries(context.Background(), managerGuild.ID)
+	if err != nil {
+		t.Fatalf("list malformed settings audit: %v", err)
+	}
+	foundFailure := false
+	for _, audit := range managerAudits {
+		if audit.Action == "guild_settings.update" && audit.Result == model.AuditResultFailure {
+			foundFailure = true
+		}
+	}
+	if !foundFailure {
+		t.Fatalf("missing malformed payload failure audit: %+v", managerAudits)
+	}
 	starterSettings, err := managerStore.GetGuildSettings(context.Background(), managerGuild.ID)
 	if err != nil || starterSettings.StarterPolicyTemplateID == "" {
 		t.Fatalf("missing starter settings after API flow: settings=%+v err=%v", starterSettings, err)
@@ -499,7 +520,7 @@ func TestGuildSettingsRoutesReadWriteAcknowledgeAndAuditDenied(t *testing.T) {
 	}
 
 	moderatorRouter, moderatorSessionID, moderatorStore := newTemplateRouteHarnessWithStore(t, uint64(discordgo.PermissionModerateMembers))
-	denied := httptest.NewRequest(http.MethodPatch, "/guilds/guild-1/settings", bytes.NewBufferString(`{"tickets_enabled":true}`))
+	denied := httptest.NewRequest(http.MethodPatch, "/guilds/guild-1/settings", bytes.NewBufferString(`{"unknown_setting":true}`))
 	denied.Header.Set("Authorization", "Bearer "+moderatorSessionID)
 	denied.Header.Set("Content-Type", "application/json")
 	deniedResponse := httptest.NewRecorder()

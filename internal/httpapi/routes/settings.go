@@ -25,7 +25,7 @@ func getGuildSettings(c *gin.Context, services *quack.Services) {
 func updateGuildSettings(c *gin.Context, services *quack.Services) {
 	var input quack.GuildSettingsInput
 	if err := bindGuildSettingsInput(c, &input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid guild settings payload"})
+		writeGuildSettingsError(c, services.Settings.RejectUpdatePayload(c.Request.Context(), middleware.GetGuildContext(c), err))
 		return
 	}
 	settings, err := services.Settings.Update(c.Request.Context(), middleware.GetGuildContext(c), input)
