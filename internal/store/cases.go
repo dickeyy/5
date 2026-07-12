@@ -13,6 +13,9 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// retiredCaseEventTypes are preserved compatibility rows that must not cross the live v5 event boundary.
+var retiredCaseEventTypes = []string{"note_added", "note_edited", "note_deleted", "status_changed"}
+
 // CreateCaseParams aliases the core create case params contract so Store satisfies the port without maintaining a second data shape.
 type CreateCaseParams = model.CreateCaseParams
 
@@ -54,11 +57,11 @@ func (s *Store) CreateCase(ctx context.Context, params CreateCaseParams) (*Creat
 	if err := prepareULIDModel(&caseModel.ULIDModel, now); err != nil {
 		return nil, fmt.Errorf("prepare case model: %w", err)
 	}
-	if caseModel.Status == "" {
-		caseModel.Status = model.CaseStatusOpen
+	if caseModel.Validity == "" {
+		caseModel.Validity = model.CaseValidityValid
 	}
 	if caseModel.Source == "" {
-		caseModel.Source = model.CaseSourceAPI
+		caseModel.Source = model.CaseSourceDashboard
 	}
 	if caseModel.TemplateSnapshotJSON == "" {
 		caseModel.TemplateSnapshotJSON = "{}"
@@ -159,7 +162,7 @@ func (s *Store) CountTemplateCasesForTarget(ctx context.Context, params CountTem
 		Where("guild_id = ?", params.GuildID).
 		Where("template_id = ?", params.TemplateID).
 		Where("target_discord_user_id = ?", params.TargetDiscordUserID).
-		Where("status <> ?", model.CaseStatusVoided)
+		Where("status <> ?", model.CaseValidityVoided)
 	var count int64
 	if err := query.Count(&count).Error; err != nil {
 		return 0, fmt.Errorf("count template cases for target: %w", err)
@@ -248,7 +251,7 @@ func (s *Store) TargetCaseSummary(ctx context.Context, guildID, targetDiscordUse
 	}
 
 	summary := &TargetCaseSummary{
-		ByStatus:   map[model.CaseStatus]int64{},
+		ByValidity: map[model.CaseValidity]int64{},
 		ByTemplate: map[string]int64{},
 	}
 
@@ -261,15 +264,15 @@ func (s *Store) TargetCaseSummary(ctx context.Context, guildID, targetDiscordUse
 		return nil, fmt.Errorf("count target cases: %w", err)
 	}
 
-	var statusRows []struct {
-		Status model.CaseStatus
-		Count  int64
+	var validityRows []struct {
+		Validity model.CaseValidity `gorm:"column:status"`
+		Count    int64
 	}
-	if err := targetCases().Select("status, COUNT(*) AS count").Group("status").Scan(&statusRows).Error; err != nil {
-		return nil, fmt.Errorf("count target cases by status: %w", err)
+	if err := targetCases().Select("status, COUNT(*) AS count").Group("status").Scan(&validityRows).Error; err != nil {
+		return nil, fmt.Errorf("count target cases by validity: %w", err)
 	}
-	for _, row := range statusRows {
-		summary.ByStatus[row.Status] = row.Count
+	for _, row := range validityRows {
+		summary.ByValidity[row.Validity] = row.Count
 	}
 
 	var templateRows []struct {
@@ -293,7 +296,11 @@ func (s *Store) ListCaseEvents(ctx context.Context, caseID string) ([]model.Case
 	}
 
 	var events []model.CaseEvent
-	if err := s.db.WithContext(ctx).Where("case_id = ?", caseID).Order("created_at ASC").Find(&events).Error; err != nil {
+	if err := s.db.WithContext(ctx).
+		Where("case_id = ?", caseID).
+		Where("event_type NOT IN ?", retiredCaseEventTypes).
+		Order("created_at ASC").
+		Find(&events).Error; err != nil {
 		return nil, fmt.Errorf("list case events: %w", err)
 	}
 
@@ -346,8 +353,8 @@ func filteredCasesQuery(query *gorm.DB, params ListCasesParams) *gorm.DB {
 	if params.TemplateID != "" {
 		query = query.Where("template_id = ?", params.TemplateID)
 	}
-	if params.Status != "" {
-		query = query.Where("status = ?", params.Status)
+	if params.Validity != "" {
+		query = query.Where("status = ?", params.Validity)
 	}
 	return query
 }
@@ -435,14 +442,6 @@ func (s *Store) ClaimNextCaseAction(ctx context.Context, params ClaimCaseActionP
 		execution.UpdatedAt = now
 		if err := tx.Select("*").Save(&execution).Error; err != nil {
 			return fmt.Errorf("mark case action running: %w", err)
-		}
-
-		if caseModel.Status == model.CaseStatusOpen {
-			caseModel.Status = model.CaseStatusActionRunning
-			caseModel.UpdatedAt = now
-			if err := tx.Save(&caseModel).Error; err != nil {
-				return fmt.Errorf("mark case action running: %w", err)
-			}
 		}
 
 		claimed = &ClaimedCaseAction{
@@ -546,7 +545,7 @@ func (s *Store) CompleteCaseAction(ctx context.Context, params CompleteCaseActio
 			return err
 		}
 
-		return updateCaseStatusFromActions(tx, execution.CaseID, now)
+		return nil
 	})
 }
 
@@ -581,7 +580,7 @@ func (s *Store) SkipCaseActions(ctx context.Context, params SkipCaseActionsParam
 			}
 		}
 
-		return updateCaseStatusFromActions(tx, params.CaseID, now)
+		return nil
 	})
 }
 
@@ -714,43 +713,6 @@ func appendCaseEvent(tx *gorm.DB, event *model.CaseEvent, now time.Time) error {
 	}
 	if err := tx.Select("*").Create(event).Error; err != nil {
 		return fmt.Errorf("create case event: %w", err)
-	}
-	return nil
-}
-
-// updateCaseStatusFromActions updates case status from actions while retaining validation, compatibility, and audit requirements.
-func updateCaseStatusFromActions(tx *gorm.DB, caseID string, now time.Time) error {
-	var executions []model.CaseActionExecution
-	if err := tx.Where("case_id = ?", caseID).Find(&executions).Error; err != nil {
-		return fmt.Errorf("list case actions for status: %w", err)
-	}
-	if len(executions) == 0 {
-		return nil
-	}
-
-	nextStatus := model.CaseStatusCompleted
-	for _, execution := range executions {
-		switch execution.Status {
-		case model.ActionExecutionFailed:
-			nextStatus = model.CaseStatusFailed
-		case model.ActionExecutionPending, model.ActionExecutionRunning, model.ActionExecutionRetrying:
-			if nextStatus != model.CaseStatusFailed {
-				nextStatus = model.CaseStatusActionRunning
-			}
-		}
-	}
-
-	updates := map[string]any{
-		"status":     nextStatus,
-		"updated_at": now,
-	}
-	if nextStatus == model.CaseStatusCompleted || nextStatus == model.CaseStatusFailed {
-		updates["resolved_at"] = now
-		updates["resolved_by_discord_user_id"] = "system"
-	}
-
-	if err := tx.Model(&model.Case{}).Where("id = ?", caseID).Updates(updates).Error; err != nil {
-		return fmt.Errorf("update case status: %w", err)
 	}
 	return nil
 }

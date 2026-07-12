@@ -37,19 +37,19 @@ type StaffMemberRecord struct {
 // CaseTemplateRecord is the GORM persistence representation of case template; domain models remain storage-agnostic.
 type CaseTemplateRecord struct {
 	ULIDModelRecord
-	GuildID                string             `gorm:"type:char(26);not null;uniqueIndex:idx_case_template_guild_slug,priority:1;index:idx_case_template_guild_enabled,priority:1"`
-	Slug                   string             `gorm:"size:64;not null;uniqueIndex:idx_case_template_guild_slug,priority:2"`
-	Name                   string             `gorm:"size:191;not null"`
-	Description            string             `gorm:"type:text;not null"`
-	ReasonTemplate         string             `gorm:"type:text;not null"`
-	DefaultSeverity        model.CaseSeverity `gorm:"size:32;not null;default:'medium'"`
-	Appealable             bool               `gorm:"not null;default:false"`
-	Enabled                bool               `gorm:"not null;default:true;index:idx_case_template_guild_enabled,priority:2"`
-	Version                uint               `gorm:"not null;default:1"`
-	CreatedByDiscordUserID string             `gorm:"size:32;not null"`
-	UpdatedByDiscordUserID string             `gorm:"size:32;not null"`
-	ArchivedAt             *time.Time         `gorm:"index"`
-	DeletedAt              gorm.DeletedAt     `gorm:"index"`
+	GuildID                string         `gorm:"type:char(26);not null;uniqueIndex:idx_case_template_guild_slug,priority:1;index:idx_case_template_guild_enabled,priority:1"`
+	Slug                   string         `gorm:"size:64;not null;uniqueIndex:idx_case_template_guild_slug,priority:2"`
+	Name                   string         `gorm:"size:191;not null"`
+	Description            string         `gorm:"type:text;not null"`
+	ReasonTemplate         string         `gorm:"type:text;not null"`
+	DefaultSeverity        string         `gorm:"size:32;not null;default:'medium'"`
+	Appealable             bool           `gorm:"not null;default:false"`
+	Enabled                bool           `gorm:"not null;default:true;index:idx_case_template_guild_enabled,priority:2"`
+	Version                uint           `gorm:"not null;default:1"`
+	CreatedByDiscordUserID string         `gorm:"size:32;not null"`
+	UpdatedByDiscordUserID string         `gorm:"size:32;not null"`
+	ArchivedAt             *time.Time     `gorm:"index"`
+	DeletedAt              gorm.DeletedAt `gorm:"index"`
 }
 
 // CaseTemplateLevelRecord is the GORM persistence representation of case template level; domain models remain storage-agnostic.
@@ -94,16 +94,12 @@ type CaseRecord struct {
 	TargetDiscordUserID     string             `gorm:"size:32;not null;index:idx_case_guild_target,priority:2"`
 	ModeratorDiscordUserID  string             `gorm:"size:32;not null;index:idx_case_guild_mod,priority:2"`
 	Reason                  string             `gorm:"type:text;not null"`
-	Severity                model.CaseSeverity `gorm:"size:32;not null;default:'medium'"`
-	Weight                  int                `gorm:"not null;default:1"`
-	Status                  model.CaseStatus   `gorm:"size:32;not null;default:'open';index:idx_case_guild_status,priority:2"`
-	Source                  model.CaseSource   `gorm:"size:32;not null;default:'discord_command';index"`
+	Validity                model.CaseValidity `gorm:"column:status;size:32;not null;default:'valid';index:idx_case_guild_status,priority:2"`
+	Source                  model.CaseSource   `gorm:"size:32;not null;default:'dashboard';index"`
 	CorrelationID           string             `gorm:"size:128;index"`
 	ContextChannelDiscordID string             `gorm:"size:32"`
 	ContextMessageDiscordID string             `gorm:"size:32"`
 	ContextURL              string             `gorm:"size:1024"`
-	ResolvedAt              *time.Time         `gorm:"index"`
-	ResolvedByDiscordUserID string             `gorm:"size:32"`
 	MetadataJSON            string             `gorm:"type:json;not null"`
 }
 
@@ -159,8 +155,6 @@ type CaseEventRecord struct {
 	Visibility         model.EventVisibility `gorm:"size:32;not null;default:'staff'"`
 	Body               string                `gorm:"type:text;not null"`
 	MetadataJSON       string                `gorm:"type:json;not null"`
-	EditedAt           *time.Time
-	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
 
 // AppealRecord is the GORM persistence representation of appeal; domain models remain storage-agnostic.

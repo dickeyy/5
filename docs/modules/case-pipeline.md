@@ -31,8 +31,7 @@ cases first.
    metadata.
 2. Load the expanded template with `GetCaseTemplateExpanded`.
 3. Reject archived templates.
-4. Resolve the case reason from `reason_override` or the template
-   `reason_template`.
+4. Copy the immutable official reason from the template `reason_template`.
 5. Choose the selected template level based on prior case count for the same
    target and template.
 6. Build `TemplateSnapshotJSON` so the case keeps the policy that was used at
@@ -74,7 +73,7 @@ snapshot, action executions, action attempts grouped under each execution, and
 timeline events ordered oldest first.
 
 Target user history is the case list scoped to one Discord user plus summary
-counts by status and template. Audit log reads are exposed separately through
+counts by validity and template. Audit log reads are exposed separately through
 `GET /guilds/:discordGuildID/audit-log`, require `audit.read`, and support
 offset pagination plus filters for actor, action, resource, and result.
 
@@ -97,17 +96,18 @@ Storage then fills in:
 `storage.CreateCase` also assigns the next per-guild case number inside the
 transaction.
 
-## Status Progression
+## Case Validity
 
-Initial case status is `open`. Later updates come from the action engine in
-`internal/store/updateCaseStatusFromActions`:
+Every live case has exactly one validity value: `valid` or `voided`. New cases
+start valid. Action execution state remains on `case_action_executions`, and
+appeal state remains on appeal records; neither changes case validity. The
+future void workflow is the only product operation that may set a case to
+voided.
 
-- `action_running` while any execution is pending, running, or retrying
-- `completed` when all executions succeed or are otherwise terminal without failure
-- `failed` when any execution is failed
-
-Resolved timestamps are currently written automatically when the case reaches
-`completed` or `failed`.
+Migration 0003 maps the former mixed status values to validity while retaining
+the exact previous values in reversible migration-owned bookkeeping. Retired
+note and generic status-change events remain stored for compatibility but are
+excluded from live v5 event reads.
 
 ## Maintainability Notes
 

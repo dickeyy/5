@@ -45,8 +45,8 @@ func TestCommandDefinitionDefinesCaseAdd(t *testing.T) {
 	}
 
 	add := command.Options[0]
-	if len(add.Options) != 3 {
-		t.Fatalf("expected template/user/reason options, got %+v", add.Options)
+	if len(add.Options) != 2 {
+		t.Fatalf("expected template/user options, got %+v", add.Options)
 	}
 	if !add.Options[0].Autocomplete {
 		t.Fatalf("expected template option to support autocomplete")
@@ -60,7 +60,7 @@ func TestHandleCaseInteractionCreatesCase(t *testing.T) {
 	result := HandleCaseInteraction(ui.Context{
 		Context:     ctx,
 		Services:    services,
-		Interaction: caseAddInteraction(templateID, "target-1", "manual reason", uint64(discordgo.PermissionModerateMembers)),
+		Interaction: caseAddInteraction(templateID, "target-1", uint64(discordgo.PermissionModerateMembers)),
 	})
 	response := result.Response
 	if response == nil {
@@ -110,11 +110,11 @@ func TestHandleCaseInteractionCreatesCase(t *testing.T) {
 	if len(cases) != 1 {
 		t.Fatalf("expected one case, got %+v", cases)
 	}
-	if cases[0].Source != model.CaseSourceDiscordCommand || cases[0].TargetDiscordUserID != "target-1" {
+	if cases[0].Source != model.CaseSourceDiscord || cases[0].TargetDiscordUserID != "target-1" {
 		t.Fatalf("unexpected case: %+v", cases[0])
 	}
-	if cases[0].Reason != "manual reason" {
-		t.Fatalf("expected reason override, got %q", cases[0].Reason)
+	if cases[0].Reason != "Spam" {
+		t.Fatalf("expected immutable template reason, got %q", cases[0].Reason)
 	}
 }
 
@@ -124,7 +124,7 @@ func TestHandleCaseInteractionDeniesMissingPermission(t *testing.T) {
 	result := HandleCaseInteraction(ui.Context{
 		Context:     context.Background(),
 		Services:    services,
-		Interaction: caseAddInteraction(templateID, "target-1", "", 0),
+		Interaction: caseAddInteraction(templateID, "target-1", 0),
 	})
 	response := result.Response
 	if response == nil || response.Data == nil || len(response.Data.Embeds) != 1 || !strings.Contains(response.Data.Embeds[0].Description, "do not have permission") {
@@ -323,7 +323,7 @@ func caseCommandGuildContext(t *testing.T, services *quack.Services) *quack.Guil
 	return guildContext
 }
 
-func caseAddInteraction(templateID, targetID, reason string, permissions uint64) *discordgo.InteractionCreate {
+func caseAddInteraction(templateID, targetID string, permissions uint64) *discordgo.InteractionCreate {
 	options := []*discordgo.ApplicationCommandInteractionDataOption{
 		{
 			Name:  "template",
@@ -335,13 +335,6 @@ func caseAddInteraction(templateID, targetID, reason string, permissions uint64)
 			Type:  discordgo.ApplicationCommandOptionUser,
 			Value: targetID,
 		},
-	}
-	if reason != "" {
-		options = append(options, &discordgo.ApplicationCommandInteractionDataOption{
-			Name:  "reason",
-			Type:  discordgo.ApplicationCommandOptionString,
-			Value: reason,
-		})
 	}
 
 	return interaction(discordgo.InteractionApplicationCommand, permissions, []*discordgo.ApplicationCommandInteractionDataOption{

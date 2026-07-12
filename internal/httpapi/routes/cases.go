@@ -1,13 +1,26 @@
 package routes
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/internal/httpapi/middleware"
 	"github.com/quackdiscord/bot/internal/quack"
+	"github.com/quackdiscord/bot/internal/quack/model"
 )
+
+// caseCreateRequest is the strict dashboard contract; adapter-owned reason and source cannot be supplied by callers.
+type caseCreateRequest struct {
+	TemplateID              string          `json:"template_id"`
+	TargetDiscordUserID     string          `json:"target_discord_user_id"`
+	ContextChannelDiscordID string          `json:"context_channel_discord_id"`
+	ContextMessageDiscordID string          `json:"context_message_discord_id"`
+	ContextURL              string          `json:"context_url"`
+	Metadata                json.RawMessage `json:"metadata"`
+}
 
 // listCases returns cases subject to authorization, ordering, and filtering constraints.
 func listCases(c *gin.Context, services *quack.Services) {
@@ -22,13 +35,27 @@ func listCases(c *gin.Context, services *quack.Services) {
 
 // createCase creates case while preserving validation, authorization, and persistence invariants.
 func createCase(c *gin.Context, services *quack.Services) {
-	var input quack.CaseInput
-	if err := c.ShouldBindJSON(&input); err != nil {
+	var input caseCreateRequest
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid case payload"})
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid case payload"})
 		return
 	}
 
-	created, err := services.Cases.Create(c.Request.Context(), middleware.GetGuildContext(c), input)
+	created, err := services.Cases.Create(c.Request.Context(), middleware.GetGuildContext(c), quack.CaseInput{
+		TemplateID:              input.TemplateID,
+		TargetDiscordUserID:     input.TargetDiscordUserID,
+		Source:                  model.CaseSourceDashboard,
+		ContextChannelDiscordID: input.ContextChannelDiscordID,
+		ContextMessageDiscordID: input.ContextMessageDiscordID,
+		ContextURL:              input.ContextURL,
+		Metadata:                input.Metadata,
+	})
 	if err != nil {
 		writeCaseError(c, err)
 		return
@@ -86,7 +113,7 @@ func caseListInput(c *gin.Context) quack.CaseListInput {
 		TargetDiscordUserID:    c.Query("target_discord_user_id"),
 		ModeratorDiscordUserID: c.Query("moderator_discord_user_id"),
 		TemplateID:             c.Query("template_id"),
-		Status:                 c.Query("status"),
+		Validity:               c.Query("validity"),
 	}
 }
 

@@ -115,12 +115,6 @@ func CaseCommandDefinition() *discordgo.ApplicationCommand {
 						Description: "User to moderate.",
 						Required:    true,
 					},
-					{
-						Type:        discordgo.ApplicationCommandOptionString,
-						Name:        "reason",
-						Description: "Optional reason override.",
-						Required:    false,
-					},
 				},
 			},
 		},
@@ -166,16 +160,10 @@ func createCaseFromInteraction(ctx context.Context, services *quack.Services, in
 		return nil, err
 	}
 
-	reason := ""
-	if reasonOption := add.GetOption("reason"); reasonOption != nil {
-		reason = reasonOption.StringValue()
-	}
-
 	created, err := services.Cases.Create(ctx, guildContext, quack.CaseInput{
 		TemplateID:              templateID,
 		TargetDiscordUserID:     optionStringValue(userOption),
-		ReasonOverride:          reason,
-		Source:                  model.CaseSourceDiscordCommand,
+		Source:                  model.CaseSourceDiscord,
 		ContextChannelDiscordID: interaction.ChannelID,
 	})
 	if err != nil {

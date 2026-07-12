@@ -17,36 +17,22 @@ const (
 	PermissionActionAuditRead          PermissionAction = "audit.read"
 )
 
-// CaseSeverity identifies the supported case severity values stored and exchanged by Quack.
-type CaseSeverity string
+// CaseValidity identifies whether a case participates in escalation history.
+type CaseValidity string
 
 const (
-	CaseSeverityLow      CaseSeverity = "low"
-	CaseSeverityMedium   CaseSeverity = "medium"
-	CaseSeverityHigh     CaseSeverity = "high"
-	CaseSeverityCritical CaseSeverity = "critical"
-)
-
-// CaseStatus identifies the supported case status values stored and exchanged by Quack.
-type CaseStatus string
-
-const (
-	CaseStatusOpen          CaseStatus = "open"
-	CaseStatusActionRunning CaseStatus = "action_running"
-	CaseStatusCompleted     CaseStatus = "completed"
-	CaseStatusFailed        CaseStatus = "failed"
-	CaseStatusAppealed      CaseStatus = "appealed"
-	CaseStatusVoided        CaseStatus = "voided"
+	CaseValidityValid  CaseValidity = "valid"
+	CaseValidityVoided CaseValidity = "voided"
 )
 
 // CaseSource identifies the supported case source values stored and exchanged by Quack.
 type CaseSource string
 
 const (
-	CaseSourceDiscordCommand CaseSource = "discord_command"
-	CaseSourceAPI            CaseSource = "api"
-	CaseSourceAutomation     CaseSource = "automation"
-	CaseSourceImport         CaseSource = "import"
+	CaseSourceDashboard CaseSource = "dashboard"
+	CaseSourceDiscord   CaseSource = "discord"
+	CaseSourceHoneypot  CaseSource = "honeypot"
+	CaseSourceV4Import  CaseSource = "v4_import"
 )
 
 // ActionType identifies the supported action type values stored and exchanged by Quack.
@@ -104,14 +90,10 @@ type CaseEventType string
 
 const (
 	CaseEventCreated         CaseEventType = "case_created"
-	CaseEventNoteAdded       CaseEventType = "note_added"
-	CaseEventNoteEdited      CaseEventType = "note_edited"
-	CaseEventNoteDeleted     CaseEventType = "note_deleted"
 	CaseEventActionQueued    CaseEventType = "action_queued"
 	CaseEventActionSucceeded CaseEventType = "action_succeeded"
 	CaseEventActionFailed    CaseEventType = "action_failed"
 	CaseEventAppealCreated   CaseEventType = "appeal_created"
-	CaseEventStatusChanged   CaseEventType = "status_changed"
 )
 
 // AppealStatus identifies the supported appeal status values stored and exchanged by Quack.
@@ -224,16 +206,12 @@ type Case struct {
 	TargetDiscordUserID     string
 	ModeratorDiscordUserID  string
 	Reason                  string
-	Severity                CaseSeverity
-	Weight                  int
-	Status                  CaseStatus
+	Validity                CaseValidity `gorm:"column:status"`
 	Source                  CaseSource
 	CorrelationID           string
 	ContextChannelDiscordID string
 	ContextMessageDiscordID string
 	ContextURL              string
-	ResolvedAt              *time.Time
-	ResolvedByDiscordUserID string
 	MetadataJSON            string
 }
 
@@ -289,8 +267,6 @@ type CaseEvent struct {
 	Visibility         EventVisibility
 	Body               string
 	MetadataJSON       string
-	EditedAt           *time.Time
-	DeletedAt          *time.Time
 }
 
 // Appeal represents the persistence-free domain state for a appeal.
