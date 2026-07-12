@@ -269,7 +269,10 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 #### V5-001C - Simplify case validity, sources, reason, and event model
 
 - Status: IN_PROGRESS
-- Assignment: implementation subagent using `v5-implementation-slice`
+- Assignment: fresh implementation subagent `/root/slice_v5_001c` using
+  `v5-implementation-slice`; the initially reused V5-001 owner was interrupted
+  before editing and the worktree was verified clean when the one-agent-per-slice
+  policy was clarified.
 - Branch: `slice/v5-001c-case-validity`
 - Worktree: `/tmp/quack-v5-worktrees/v5-001c`
 - Base/PR target: `slice/v5-001-template-model` at accepted head `6e5f206`
@@ -279,6 +282,11 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
   mapper exclude those retired event types. Their presence does not quarantine
   an otherwise valid case. Reviewed rollback must restore each exact prior case
   status/source value and remove only migration-owned bookkeeping.
+- Source mapping decision 2026-07-11: migration 0003 maps `api` to `dashboard`,
+  `discord_command` to `discord`, `automation` to `honeypot`, and `import` to
+  `v4_import`; unknown persisted source values fail migration explicitly. The
+  existing code never creates the broad legacy `automation` value, while v5
+  defines honeypots as its automatic case-creation origin.
 - Requirements: `v5.md` Cases, Correcting a Case, Member Access, Firm Boundaries.
 - Acceptance criteria:
   - Live case contracts/storage behavior contain no severity, weight, moderator
