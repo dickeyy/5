@@ -1,6 +1,6 @@
 # Quack v5 Readiness Execution Plan
 
-Status: ACTIVE — PARALLEL WAVE P1 IN PROGRESS
+Status: ACTIVE — PARALLEL WAVE P2 IN PROGRESS
 Owner: v5 orchestrator  
 Authoritative product definition: [`v5.md`](../../../v5.md)  
 Supporting inventory: [`TODO.md`](../../../TODO.md), [`docs/v5-scope-drift.md`](../../v5-scope-drift.md)
@@ -206,6 +206,19 @@ green and one Codex review request pending.
 QI-2 combines accepted P2 heads, performs central registration and cross-feature
 reconciliation, and runs full repository/MySQL/race/build gates. Behavioral
 integration changes receive one fresh integration owner and PR/review.
+
+P2 assignments from accepted QI-1 head `11650a5`:
+
+- QP-D: fresh owner `/root/qp_d_appeals`, branch
+  `package/qp-d-appeals-member`, worktree `/tmp/quack-v5-worktrees/qp-d`.
+- QP-E: fresh owner `/root/qp_e_audit_ux`, branch
+  `package/qp-e-audit-discord`, worktree `/tmp/quack-v5-worktrees/qp-e`.
+- QP-F: fresh owner `/root/qp_f_honeypot`, branch
+  `package/qp-f-honeypot-isolation`, worktree `/tmp/quack-v5-worktrees/qp-f`.
+
+QI-1 accepted at `11650a5`: one review, two valid P2s fixed/resolved, all P1
+packages integrated, route-mount P1 closed, and focused/MySQL/race/full/vet/
+build/diff gates green.
 
 ### Parallel wave P3 - migration and operations from QI-2
 
@@ -1004,10 +1017,10 @@ by the macro-package ledger.
 | QP-A | ACCEPTED | `package/qp-a-core-moderation` at `0c76447` | [#8](https://github.com/dickeyy/5/pull/8) | 1 complete; 2 P1/2 P2 | three fixed; integration P1 closed in QI-1 |
 | QP-B | ACCEPTED | `package/qp-b-http-auth` at `b2f3e0a` | [#7](https://github.com/dickeyy/5/pull/7) | 1 complete; P1/P2 fixed | passed evidence gate |
 | QP-C | ACCEPTED | `package/qp-c-tickets-logging` at `4579d14` | [#6](https://github.com/dickeyy/5/pull/6) | 1 complete; four P2s fixed | passed evidence gate |
-| QI-1 | REVIEW_WAIT | `integration/qi-1-p1` at `50a5058` | [#9](https://github.com/dickeyy/5/pull/9) | 1 requested | all P1 heads integrated; wave gates green |
-| QP-D | PLANNED | pending | pending | 0 | absorbs member V5-007, V5-013/014/017C |
-| QP-E | PLANNED | pending | pending | 0 | absorbs V5-015/016 |
-| QP-F | PLANNED | pending | pending | 0 | absorbs V5-021/022 |
+| QI-1 | ACCEPTED | `integration/qi-1-p1` at `11650a5` | [#9](https://github.com/dickeyy/5/pull/9) | 1 complete; two P2s fixed | passed wave evidence gate |
+| QP-D | IN_PROGRESS | `package/qp-d-appeals-member` | pending | 0 | absorbs member V5-007, V5-013/014/017C |
+| QP-E | IN_PROGRESS | `package/qp-e-audit-discord` | pending | 0 | absorbs V5-015/016 |
+| QP-F | IN_PROGRESS | `package/qp-f-honeypot-isolation` | pending | 0 | absorbs V5-021/022 |
 | QI-2 | PLANNED | pending | conditional | conditional | P2 integration anchor |
 | QP-G | PLANNED | pending | pending | 0 | absorbs V5-023/024 |
 | QP-H | PLANNED | pending | pending | 0 | absorbs remaining V5-017/025 |
