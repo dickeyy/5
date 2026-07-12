@@ -274,6 +274,28 @@ type AppealEventRecord struct {
 	MetadataJSON       string `gorm:"type:json;not null"`
 }
 
+// GuildAppealSettingsRecord persists the validated form used by future appeals in one guild.
+type GuildAppealSettingsRecord struct {
+	ULIDModelRecord
+	GuildID                string `gorm:"type:char(26);not null;uniqueIndex"`
+	QuestionsJSON          string `gorm:"type:json;not null"`
+	UpdatedByDiscordUserID string `gorm:"size:32;not null"`
+}
+
+// AppealNotificationRecord persists one idempotent member or staff outbox message per timeline event.
+type AppealNotificationRecord struct {
+	ULIDModelRecord
+	AppealID            string                           `gorm:"type:char(26);not null;index"`
+	EventID             string                           `gorm:"type:char(26);not null;uniqueIndex"`
+	GuildID             string                           `gorm:"type:char(26);not null;index"`
+	TargetDiscordUserID string                           `gorm:"size:32;not null;index"`
+	Audience            model.AppealNotificationAudience `gorm:"size:32;not null;index"`
+	Status              model.AppealNotificationStatus   `gorm:"size:32;not null;index"`
+	Body                string                           `gorm:"type:text;not null"`
+	DeliveryMessageID   string                           `gorm:"size:32;not null"`
+	LastErrorCode       string                           `gorm:"size:64;not null"`
+}
+
 // TicketRecord is the GORM persistence representation of ticket; domain models remain storage-agnostic.
 type TicketRecord struct {
 	ULIDModelRecord
@@ -378,6 +400,12 @@ func (CaseNotificationRecord) TableName() string { return "case_notifications" }
 
 // TableName preserves the pre-refactor table name so migrations and existing v5 data remain compatible.
 func (CaseEventRecord) TableName() string { return "case_events" }
+
+// TableName identifies the logical 0200 guild appeal settings table.
+func (GuildAppealSettingsRecord) TableName() string { return "guild_appeal_settings" }
+
+// TableName identifies the logical 0200 appeal notification outbox.
+func (AppealNotificationRecord) TableName() string { return "appeal_notifications" }
 
 // TableName preserves the pre-refactor table name so migrations and existing v5 data remain compatible.
 func (AppealRecord) TableName() string { return "appeals" }

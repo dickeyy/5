@@ -82,7 +82,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Require normal template application targets to be current human guild members.
 - [x] Keep imported history and explicit reversal flows able to reference departed members without weakening normal target rules.
 - [x] List dashboard guild access for moderators with Quack capabilities instead of requiring `Manage Guild` for every staff entry point.
-- [ ] Provide a member-facing guild/case entry path that does not depend on the banned user still appearing in Discord's guild list.
+- [x] Provide a member-facing guild/case entry path that does not depend on the banned user still appearing in Discord's guild list.
 - [x] Add consistent authorization errors for dashboard and Discord callers.
 - [x] Audit denied sensitive operations with actor, guild, requested capability, request ID, and correlation ID.
 - [x] Add permission-matrix tests covering owner, Administrator, Manage Guild, Moderate Members, Kick Members, Ban Members, former staff, and ordinary members.
@@ -155,7 +155,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Include valid and voided cases in member history with clear labels.
 - [x] Hide moderator identities from member-facing case responses.
 - [x] Hide raw Discord errors, worker IDs, internal retry fields, and technical action payloads from member-facing responses.
-- [ ] Show official reason, visible context, evidence, selected outcome, public history, and appeal state to the member.
+- [x] Show official reason, visible context, evidence, selected outcome, public history, and appeal state to the member.
 - [x] Define and enforce public, staff, and internal case-event response views without reintroducing free-form notes.
 - [x] Audit permission-sensitive case and history reads.
 - [ ] Add concurrency tests for simultaneous case creation and voiding in the same guild.
@@ -279,7 +279,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 ## Authentication and Backend API
 
 - [x] Add member-authenticated routes for listing and reading the caller's own cases.
-- [ ] Add member-authenticated routes for creating, reading, and updating the caller's appeal.
+- [x] Add member-authenticated routes for creating, reading, and updating the caller's appeal.
 - [x] Keep member access independent of current guild membership when a case targets their Discord ID.
 - [ ] Add staff routes for case voiding, failed-action review, retry, dismissal, reversals, and staff statistics.
 - [x] Add admin routes for template import, export, restore, context definitions, and guild settings.
@@ -308,29 +308,29 @@ Items are grouped by concern, not by implementation order or priority. Completed
 
 ## Appeals
 
-- [ ] Replace placeholder appeal records with the final case-linked appeal model.
-- [ ] Add guild-configurable appeal questions and Quack's default appeal form.
-- [ ] Validate appeal question ordering, required fields, and supported simple input types.
-- [ ] Snapshot the appeal form used when a member submits an appeal.
-- [ ] Snapshot case appealability so later template edits do not change existing cases.
-- [ ] Enforce at most one appeal record per case with a database uniqueness constraint.
-- [ ] Allow only the target Discord identity to create and read a member-facing appeal.
-- [ ] Allow banned and departed members to appeal after Discord authentication.
-- [ ] Reject appeals for non-appealable, voided, or unrelated cases with clear errors.
-- [ ] Add appeal submission, staff response, request-more-information, reopen, accept, reject, and close behavior.
-- [ ] Reopen the existing appeal for more information instead of creating another appeal.
-- [ ] Require `Moderate Members` or higher for appeal review.
-- [ ] Record member and staff appeal events as an immutable timeline.
-- [ ] Hide staff identities from the member-facing appeal history while retaining them in audit data.
-- [ ] Make accepting an appeal atomically void the case.
-- [ ] Keep rejected or closed appeals from changing case validity.
-- [ ] Offer timeout removal or unban as a separate staff-confirmed operation after acceptance.
-- [ ] Never silently reverse Discord enforcement when an appeal is accepted.
-- [ ] Notify the member when staff request information or decide the appeal.
+- [x] Replace placeholder appeal records with the final case-linked appeal model.
+- [x] Add guild-configurable appeal questions and Quack's default appeal form.
+- [x] Validate appeal question ordering, required fields, and supported simple input types.
+- [x] Snapshot the appeal form used when a member submits an appeal.
+- [x] Snapshot case appealability so later template edits do not change existing cases.
+- [x] Enforce at most one appeal record per case with a database uniqueness constraint.
+- [x] Allow only the target Discord identity to create and read a member-facing appeal.
+- [x] Allow banned and departed members to appeal after Discord authentication.
+- [x] Reject appeals for non-appealable, voided, or unrelated cases with clear errors.
+- [x] Add appeal submission, staff response, request-more-information, reopen, accept, reject, and close behavior.
+- [x] Reopen the existing appeal for more information instead of creating another appeal.
+- [x] Require `Moderate Members` or higher for appeal review.
+- [x] Record member and staff appeal events as an immutable timeline.
+- [x] Hide staff identities from the member-facing appeal history while retaining them in audit data.
+- [x] Make accepting an appeal atomically void the case.
+- [x] Keep rejected or closed appeals from changing case validity.
+- [x] Offer timeout removal or unban as a separate staff-confirmed operation after acceptance.
+- [x] Never silently reverse Discord enforcement when an appeal is accepted.
+- [x] Notify the member when staff request information or decide the appeal.
 - [ ] Add Discord notification entry links for eligible appeals.
-- [ ] Add staff appeal queue and filtering backend behavior.
-- [ ] Audit appeal reads, submissions, status changes, decisions, and reversal requests.
-- [ ] Add concurrency tests for duplicate submissions and simultaneous appeal decisions.
+- [x] Add staff appeal queue and filtering backend behavior.
+- [x] Audit appeal reads, submissions, status changes, decisions, and reversal requests.
+- [x] Add concurrency tests for duplicate submissions and simultaneous appeal decisions.
 - [ ] Add end-to-end tests for accepted, rejected, reopened, closed, and failed-reversal appeals.
 
 ## Audit Log and Staff Statistics
@@ -450,12 +450,12 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Preserve table names, IDs, case numbers, snapshots, action attempts, events, and audit history through the migration foundation.
 - [ ] Add database constraints for one default level per template where feasible.
 - [ ] Add database constraints for zero or one enforcement action per level where feasible.
-- [ ] Add database constraints for one appeal per case.
+- [x] Add database constraints for one appeal per case.
 - [ ] Add uniqueness and index coverage for template identity/version, guild case numbers, member history, audit filters, action claims, evidence, and module settings.
 - [ ] Add mapper tests for every new or changed domain/storage record.
 - [ ] Add MySQL integration tests for JSON fields, indexes, foreign keys, locks, and transaction rollbacks.
 - [ ] Add integration tests proving concurrent case creation keeps unique numbers and correct escalation after the model changes.
-- [ ] Add integration tests proving void and appeal acceptance cannot race with escalation counts.
+- [x] Add integration tests proving void and appeal acceptance cannot race with escalation counts.
 - [ ] Add claim-lease recovery for action executions left running after crashes.
 - [ ] Add safe cleanup or archival policies for expired OAuth state and sessions.
 - [ ] Define backup and restore procedures for MySQL.
@@ -511,7 +511,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [ ] Add case tests for context, evidence, target validation, voiding, replacement, member visibility, and action-independent validity.
 - [ ] Add action tests for every Discord result, retry classification, idempotency boundary, manual control, and reversal.
 - [ ] Add notification tests proving one message at most and accurate outcome rendering.
-- [ ] Add appeal tests for ownership, one-per-case, reopen, decisions, voiding, and reversals.
+- [x] Add appeal tests for ownership, one-per-case, reopen, decisions, voiding, and reversals.
 - [ ] Add audit tests for completeness, denied operations, read events, redaction, immutability, and all-moderator access.
 - [ ] Add backend API contract tests for every staff, admin, member, and module endpoint.
 - [ ] Add full Discord interaction tests for slash commands, message commands, autocomplete, components, modals, deferred edits, and public/private responses.

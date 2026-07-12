@@ -138,10 +138,11 @@ const (
 type AppealStatus string
 
 const (
-	AppealStatusPending  AppealStatus = "pending"
-	AppealStatusAccepted AppealStatus = "accepted"
-	AppealStatusRejected AppealStatus = "rejected"
-	AppealStatusClosed   AppealStatus = "closed"
+	AppealStatusPending          AppealStatus = "pending"
+	AppealStatusNeedsInformation AppealStatus = "needs_information"
+	AppealStatusAccepted         AppealStatus = "accepted"
+	AppealStatusRejected         AppealStatus = "rejected"
+	AppealStatusClosed           AppealStatus = "closed"
 )
 
 // TicketStatus identifies the supported ticket status values stored and exchanged by Quack.
@@ -404,6 +405,9 @@ type Appeal struct {
 	TargetDiscordUserID     string
 	Status                  AppealStatus
 	Content                 string
+	QuestionSnapshotJSON    string
+	AnswersJSON             string
+	Version                 uint64
 	DecisionReason          string
 	ReviewedByDiscordUserID string
 	ReviewedAt              *time.Time
@@ -418,6 +422,7 @@ type AppealEvent struct {
 	GuildID            string
 	EventType          string
 	ActorDiscordUserID string
+	ActorType          string
 	Body               string
 	MetadataJSON       string
 }
