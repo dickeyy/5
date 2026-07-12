@@ -21,6 +21,10 @@ matrix in `docs/v5-readiness.md`.
   and validation commands before implementation begins.
 - Every slice is committed, pushed, opened as a pull request, and receives an
   explicit standalone `@codex review` request.
+- Request Codex review exactly once per PR by default. Apply review findings,
+  validate, and hand the fixed head to the orchestrator without another ping.
+  A second request is allowed only for documented large substantive rework;
+  additional review loops are not an acceptance gate.
 - The slice owner triages every Codex finding and completes fixes and
   revalidation before returning the slice.
 - Orchestrator acceptance happens only after the review-and-fix lifecycle and
@@ -145,12 +149,12 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 
 #### V5-001M - Versioned migration foundation
 
-- Status: REVIEW_WAIT
+- Status: ACCEPTED
 - Assignment: implementation subagent using `v5-implementation-slice`
 - Branch: `slice/v5-001m-versioned-migrations`
 - Worktree: `/tmp/quack-v5-worktrees/v5-001m`
 - Base branch: `orchestrator/v5-readiness`
-- Commit: `e67e99a`
+- Commits: `e67e99a`, `99c018a`, `7608e1a`
 - PR/review: [PR #1](https://github.com/dickeyy/5/pull/1); standalone
   `@codex review` posted 2026-07-11; Codex round 1 reviewed `e67e99a` with no
   findings. Orchestrator validation round 1 REJECTED and returned to owner:
@@ -167,8 +171,21 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
   still imports live domain enum types, so later model cleanup could break or
   change the applied migration. Finding was valid/in-scope; fix `7608e1a`
   replaces live aliases with primitive storage types and adds a regression
-  guard. Real MySQL/full validation reported passing; thread resolved and Codex
-  round 3 requested on the new head.
+  guard. Real MySQL/full validation reported passing and the thread was resolved.
+  A round-3 request had already been posted before the user clarified the
+  single-review policy; it is not awaited or treated as a gate, and no further
+  review request will be posted. Future slices follow the updated skill exactly.
+- Orchestrator validation round 2: ACCEPTED 2026-07-11.
+  - Inspected final diff and migration/CLI/docs/TODO/scope boundaries; no
+    unjustified product-model work or unrelated files.
+  - `go test -v ./internal/store -run 'TestMySQLMigrat' -count=1` against the
+    healthy Compose MySQL: PASS (forward/rerun/preservation/refusal and partial
+    DDL rollback dirty-state recovery).
+  - `go test ./...`: PASS with loopback permission.
+  - `go vet -buildvcs=false ./...`: PASS.
+  - `go build -buildvcs=false` for `cmd/quack` and `cmd/quack-migrate`: PASS.
+  - `git diff --check`: PASS; worktree clean and synchronized with origin.
+  - All orchestrator and Codex findings are fixed; no unresolved P0/P1/P2.
 - Requirements: history must remain understandable; important records are not
   hard-deleted; TODO Database and Storage Reliability.
 - Acceptance criteria:
@@ -717,7 +734,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 | Slice | Status | Branch | PR | Codex rounds | Orchestrator validation |
 | --- | --- | --- | --- | --- | --- |
 | V5-000 | ACCEPTED | orchestration worktree | n/a | n/a | passed |
-| V5-001M | REVIEW_WAIT | `slice/v5-001m-versioned-migrations` | [#1](https://github.com/dickeyy/5/pull/1) | 2 complete, 3 pending | rejected round 1 |
+| V5-001M | ACCEPTED | `slice/v5-001m-versioned-migrations` | [#1](https://github.com/dickeyy/5/pull/1) | 1 default + 1 large-rework exception; extra request ignored | passed round 2 |
 | V5-001 | PLANNED | pending | pending | 0 | pending |
 | V5-002 | PLANNED | pending | pending | 0 | pending |
 | V5-003 | PLANNED | pending | pending | 0 | pending |
@@ -783,6 +800,9 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
   material is never a dashboard JSON contract.
 - Cumulative stacked branches preserve the no-PR-merge constraint while allowing
   dependent implementation and final integrated validation.
+- Slice review policy follows the updated skill: one `@codex review` request,
+  fixes, then orchestrator validation. Only a documented large substantive
+  rework can justify one second request.
 
 ## Blockers and risks
 
@@ -797,10 +817,9 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
   and authorization for external moderation/channel changes.
 - BLOCKER: representative v4 import, production backup/restore, and rollback
   evidence require sanitized v4 data and operator-provided MySQL/Redis targets.
-- RESOLVED/FAILED 2026-07-11: the existing healthy Compose MySQL can run
+- RESOLVED 2026-07-11: the existing healthy Compose MySQL can run
   isolated migration databases through its documented development root account.
-  V5-001M real-MySQL execution is no longer blocked, but orchestrator validation
-  round 1 found one failing MySQL preservation test and returned the slice.
+  V5-001M round-1 failure was fixed; final real-MySQL validation passes.
 - RISK: 473 TODO items include manual infrastructure, backup/restore, real-guild,
   and outage rehearsals that require external environments or credentials.
   These remain planned; inability to execute them cannot be silently called a
@@ -809,8 +828,9 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
   Module-specific definitions may choose implementation details only within the
   stated product boundaries; any product-level change requires updating `v5.md`
   first.
-- RISK: the current production migration path is `AutoMigrate`; model cleanup
-  must not destroy existing v5 data before V5-024 finalizes versioned migrations.
+- RESOLVED by accepted V5-001M: the cumulative implementation path now uses a
+  versioned, checksum-bound ledger with dirty rollback recovery instead of
+  startup `AutoMigrate`. V5-024 still owns final constraints and restore evidence.
 
 ## Discoveries and adjudications
 
@@ -838,6 +858,10 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 - 2026-07-11: V5-001M Codex round 1 found no issues, but independent validation
   caught a failing real-MySQL test plus checksum-integrity and partial-rollback
   recovery gaps. Review success is not substituted for orchestrator acceptance.
+- 2026-07-11: The user clarified the intended single-review lifecycle after PR
+  #1 had already received multiple pings. The already-posted extra request is
+  documented and ignored as a gate; all future slices request review once,
+  apply fixes, and return directly to orchestrator validation.
 - 2026-07-11: `TODO.md` is supporting inventory, not proof of incompleteness by
   itself. Items are checked only after implementation and evidence agree with
   `v5.md`; stale or duplicate items will be corrected during owning slices.
