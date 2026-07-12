@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
+	"github.com/quackdiscord/bot/internal/quack/idutil"
 	"github.com/quackdiscord/bot/internal/quack/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -333,6 +335,12 @@ func (s *Store) TransitionAppeal(ctx context.Context, params model.TransitionApp
 			if result := tx.Model(&CaseRecord{}).Where("id = ? AND status = ?", item.ID, model.CaseValidityValid).Updates(caseUpdates); result.Error != nil || result.RowsAffected != 1 {
 				return model.ErrAppealStateConflict
 			}
+			if err := tx.Model(&model.CaseActionExecution{}).Where("case_id = ? AND status IN ?", item.ID, []model.ActionExecutionStatus{model.ActionExecutionPending, model.ActionExecutionRetrying}).Updates(map[string]any{"status": model.ActionExecutionCancelled, "last_error_code": "case_voided", "last_error": "case was voided before enforcement", "finished_at": now, "next_retry_at": nil}).Error; err != nil {
+				return fmt.Errorf("cancel appeal-voided case actions: %w", err)
+			}
+			if err := tx.Model(&model.CaseNotification{}).Where("case_id = ? AND status IN ?", item.ID, []model.NotificationStatus{model.NotificationPending, model.NotificationPrepared, model.NotificationClaimed}).Updates(map[string]any{"status": model.NotificationFailed, "last_error_code": "case_voided", "last_error": "case was voided before notification", "lease_token": "", "lease_expires_at": nil, "updated_at": now}).Error; err != nil {
+				return fmt.Errorf("cancel appeal-voided case notification: %w", err)
+			}
 			caseEvent := model.CaseEvent{CaseID: item.ID, GuildID: item.GuildID, EventType: model.CaseEventVoided, ActorDiscordUserID: params.ActorDiscordUserID, ActorType: "staff", Visibility: model.EventVisibilityPublic, Body: "Case voided after appeal accepted", MetadataJSON: "{}"}
 			if err := appendCaseEvent(tx, &caseEvent, now); err != nil {
 				return err
@@ -388,13 +396,46 @@ func (s *Store) TransitionAppeal(ctx context.Context, params model.TransitionApp
 	return appealModel(updated), nil
 }
 
-// ListPendingAppealNotifications returns bounded outbox work for a notification adapter.
-func (s *Store) ListPendingAppealNotifications(ctx context.Context, limit int) ([]model.AppealNotification, error) {
+// ClaimPendingAppealNotifications atomically leases bounded outbox work so concurrent dispatchers cannot deliver one event twice.
+func (s *Store) ClaimPendingAppealNotifications(ctx context.Context, limit int) ([]model.AppealNotification, error) {
 	if s == nil || s.db == nil {
 		return nil, errors.New("database not connected")
 	}
+	if limit < 1 || limit > 100 {
+		return nil, errors.New("appeal notification claim limit is invalid")
+	}
+	now := time.Now().UTC()
+	token, err := idutil.NewULID()
+	if err != nil {
+		return nil, fmt.Errorf("create appeal notification lease token: %w", err)
+	}
+	expiresAt := now.Add(2 * time.Minute)
 	var records []AppealNotificationRecord
-	if err := s.db.WithContext(ctx).Where("status = ?", model.AppealNotificationPending).Order("created_at ASC").Limit(limit).Find(&records).Error; err != nil {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("status = ? OR (status = ? AND lease_expires_at <= ?)", model.AppealNotificationPending, model.AppealNotificationClaimed, now).
+			Order("created_at ASC").Limit(limit).Find(&records)
+		if result.Error != nil || len(records) == 0 {
+			return result.Error
+		}
+		ids := make([]string, 0, len(records))
+		for index := range records {
+			ids = append(ids, records[index].ID)
+			records[index].Status = model.AppealNotificationClaimed
+			records[index].LeaseToken = token
+			records[index].LeaseExpiresAt = &expiresAt
+			records[index].UpdatedAt = now
+		}
+		result = tx.Model(&AppealNotificationRecord{}).Where("id IN ?", ids).Updates(map[string]any{"status": model.AppealNotificationClaimed, "lease_token": token, "lease_expires_at": expiresAt, "updated_at": now})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != int64(len(records)) {
+			return model.ErrAppealStateConflict
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	items := make([]model.AppealNotification, 0, len(records))
@@ -409,7 +450,10 @@ func (s *Store) CompleteAppealNotification(ctx context.Context, params model.Com
 	if s == nil || s.db == nil {
 		return errors.New("database not connected")
 	}
-	result := s.db.WithContext(ctx).Model(&AppealNotificationRecord{}).Where("id = ? AND status = ?", params.NotificationID, model.AppealNotificationPending).Updates(map[string]any{"status": params.Status, "delivery_message_id": params.DeliveryMessageID, "last_error_code": params.ErrorCode, "updated_at": time.Now().UTC()})
+	if params.Status != model.AppealNotificationSent && params.Status != model.AppealNotificationFailed {
+		return errors.New("appeal notification completion status is invalid")
+	}
+	result := s.db.WithContext(ctx).Model(&AppealNotificationRecord{}).Where("id = ? AND status = ? AND lease_token = ?", params.NotificationID, model.AppealNotificationClaimed, params.LeaseToken).Updates(map[string]any{"status": params.Status, "delivery_message_id": params.DeliveryMessageID, "last_error_code": params.ErrorCode, "lease_token": "", "lease_expires_at": nil, "updated_at": time.Now().UTC()})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -467,9 +511,9 @@ func guildAppealSettingsModel(record GuildAppealSettingsRecord) *model.GuildAppe
 }
 
 func appealNotificationRecord(item model.AppealNotification) *AppealNotificationRecord {
-	return &AppealNotificationRecord{ULIDModelRecord: ULIDModelRecord{ID: item.ID, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}, AppealID: item.AppealID, EventID: item.EventID, GuildID: item.GuildID, TargetDiscordUserID: item.TargetDiscordUserID, Audience: item.Audience, Status: item.Status, Body: item.Body, DeliveryMessageID: item.DeliveryMessageID, LastErrorCode: item.LastErrorCode}
+	return &AppealNotificationRecord{ULIDModelRecord: ULIDModelRecord{ID: item.ID, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}, AppealID: item.AppealID, EventID: item.EventID, GuildID: item.GuildID, TargetDiscordUserID: item.TargetDiscordUserID, Audience: item.Audience, Status: item.Status, Body: item.Body, DeliveryMessageID: item.DeliveryMessageID, LastErrorCode: item.LastErrorCode, LeaseToken: item.LeaseToken, LeaseExpiresAt: item.LeaseExpiresAt}
 }
 
 func appealNotificationModel(record AppealNotificationRecord) model.AppealNotification {
-	return model.AppealNotification{ULIDModel: model.ULIDModel{ID: record.ID, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt}, AppealID: record.AppealID, EventID: record.EventID, GuildID: record.GuildID, TargetDiscordUserID: record.TargetDiscordUserID, Audience: record.Audience, Status: record.Status, Body: record.Body, DeliveryMessageID: record.DeliveryMessageID, LastErrorCode: record.LastErrorCode}
+	return model.AppealNotification{ULIDModel: model.ULIDModel{ID: record.ID, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt}, AppealID: record.AppealID, EventID: record.EventID, GuildID: record.GuildID, TargetDiscordUserID: record.TargetDiscordUserID, Audience: record.Audience, Status: record.Status, Body: record.Body, DeliveryMessageID: record.DeliveryMessageID, LastErrorCode: record.LastErrorCode, LeaseToken: record.LeaseToken, LeaseExpiresAt: record.LeaseExpiresAt}
 }

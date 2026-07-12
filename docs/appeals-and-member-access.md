@@ -53,11 +53,17 @@ component registry. The secure `views.AppealEntryMessage` link belongs in
 eligible case notifications. These are integration-owned changes; QP-D does
 not edit the central router, runtime, command registry, or migration registry.
 
+Appeal acceptance cancels pending or retrying enforcement and undelivered case
+notifications in the same transaction that voids the case. Appeal notification
+dispatchers atomically lease outbox rows before sending, reclaim expired leases,
+and reject stale completion tokens so concurrent workers cannot double-send.
+
 ## Validation
 
 Focused tests cover default and configured forms, immutable snapshots,
 ownership and unrelated-user denial, departed-member access, valid and voided
 case projections, duplicate submission, every state transition, staff-identity
 redaction, atomic acceptance, direct-void/decision races, explicit reversals,
-member/staff outbox delivery, Discord views, HTTP replay, fail-closed Redis,
+queued-work cancellation, concurrent leased member/staff outbox delivery,
+expired-lease recovery, Discord views, HTTP replay, fail-closed Redis,
 logical 0200 preservation, and real MySQL schema/transaction behavior.

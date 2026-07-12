@@ -1,6 +1,9 @@
 package model
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 var (
 	// ErrAppealAlreadyExists reports the one-appeal-per-case uniqueness boundary.
@@ -69,6 +72,7 @@ type AppealNotificationStatus string
 
 const (
 	AppealNotificationPending AppealNotificationStatus = "pending"
+	AppealNotificationClaimed AppealNotificationStatus = "claimed"
 	AppealNotificationSent    AppealNotificationStatus = "sent"
 	AppealNotificationFailed  AppealNotificationStatus = "failed"
 )
@@ -85,4 +89,6 @@ type AppealNotification struct {
 	Body                string
 	DeliveryMessageID   string
 	LastErrorCode       string
+	LeaseToken          string
+	LeaseExpiresAt      *time.Time
 }

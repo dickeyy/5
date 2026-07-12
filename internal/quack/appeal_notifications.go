@@ -33,7 +33,7 @@ func (d *AppealNotificationDispatcher) DispatchPending(ctx context.Context, limi
 	if limit < 1 || limit > 100 {
 		return errors.New("appeal notification limit is invalid")
 	}
-	items, err := d.store.ListPendingAppealNotifications(ctx, limit)
+	items, err := d.store.ClaimPendingAppealNotifications(ctx, limit)
 	if err != nil {
 		return err
 	}
@@ -48,7 +48,7 @@ func (d *AppealNotificationDispatcher) DispatchPending(ctx context.Context, limi
 		default:
 			sendErr = errors.New("appeal notification audience is invalid")
 		}
-		params := model.CompleteAppealNotificationParams{NotificationID: item.ID, DeliveryMessageID: messageID, Status: model.AppealNotificationSent}
+		params := model.CompleteAppealNotificationParams{NotificationID: item.ID, LeaseToken: item.LeaseToken, DeliveryMessageID: messageID, Status: model.AppealNotificationSent}
 		if sendErr != nil {
 			params.Status = model.AppealNotificationFailed
 			params.ErrorCode = appealNotificationErrorCode(sendErr)

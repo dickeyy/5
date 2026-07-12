@@ -142,7 +142,7 @@ func (r *appealRouteRepository) TransitionAppeal(context.Context, model.Transiti
 	return r.appeal, nil
 }
 
-func (r *appealRouteRepository) ListPendingAppealNotifications(context.Context, int) ([]model.AppealNotification, error) {
+func (r *appealRouteRepository) ClaimPendingAppealNotifications(context.Context, int) ([]model.AppealNotification, error) {
 	return nil, nil
 }
 

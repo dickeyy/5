@@ -54,8 +54,8 @@ func (migration0200LegacyAppeal) TableName() string { return "appeals" }
 
 const migration0200Definition = `appeals-and-member-access-v1
 logical migration: 0200 appeals_and_member_access
-schema: case-unique appeals with question and answer snapshots, immutable actor-typed timeline, guild appeal form settings, and notification outbox
-invariants: one non-null appeal per case; member/staff notification bodies are independent of staff identity; accepted decisions atomically void cases
+schema: case-unique appeals with question and answer snapshots, immutable actor-typed timeline, guild appeal form settings, and leased notification outbox
+invariants: one non-null appeal per case; member/staff notification bodies are independent of staff identity; accepted decisions atomically void cases and cancel queued enforcement/notification work
 rollback: forward-only because appeal timelines and decisions are permanent moderation history`
 
 // migration0200Appeals returns the logical 0200 migration at an integration-assigned contiguous ledger version.

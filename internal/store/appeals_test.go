@@ -155,6 +155,14 @@ func TestAppealServiceOwnershipSnapshotTimelineAndAtomicAcceptance(t *testing.T)
 	if err := repository.db.Create(&originalAction).Error; err != nil {
 		t.Fatalf("create original enforcement: %v", err)
 	}
+	queuedAction := model.CaseActionExecution{ULIDModel: model.ULIDModel{ID: "01KXAPPEALACTION0000000002", CreatedAt: now, UpdatedAt: now}, CaseID: caseModel.ID, Position: 1, ActionType: model.ActionTimeoutUser, Status: model.ActionExecutionPending, IdempotencyKey: "appeal-pending-timeout", ConfigSnapshotJSON: "{}", SafeForRetry: true}
+	if err := repository.db.Create(&queuedAction).Error; err != nil {
+		t.Fatalf("create queued enforcement: %v", err)
+	}
+	queuedCaseNotification := model.CaseNotification{ULIDModel: model.ULIDModel{ID: "01KXAPPEALNOTICE00000000001", CreatedAt: now, UpdatedAt: now}, CaseID: caseModel.ID, Status: model.NotificationPending}
+	if err := repository.db.Create(&queuedCaseNotification).Error; err != nil {
+		t.Fatalf("create queued case notification: %v", err)
+	}
 	service := quack.NewAppealService(repository)
 
 	settings, err := service.GetSettings(ctx, guild.ID)
@@ -211,8 +219,12 @@ func TestAppealServiceOwnershipSnapshotTimelineAndAtomicAcceptance(t *testing.T)
 		t.Fatalf("accept appeal: %+v err=%v", accepted, err)
 	}
 	actionsBeforeReversal, err := repository.ListCaseActionExecutions(ctx, caseModel.ID)
-	if err != nil || len(actionsBeforeReversal) != 1 {
+	if err != nil || len(actionsBeforeReversal) != 2 || actionsBeforeReversal[1].Status != model.ActionExecutionCancelled || actionsBeforeReversal[1].LastErrorCode != "case_voided" {
 		t.Fatalf("acceptance silently queued a reversal: actions=%+v err=%v", actionsBeforeReversal, err)
+	}
+	var cancelledNotification model.CaseNotification
+	if err := repository.db.First(&cancelledNotification, "id = ?", queuedCaseNotification.ID).Error; err != nil || cancelledNotification.Status != model.NotificationFailed || cancelledNotification.LastErrorCode != "case_voided" {
+		t.Fatalf("appeal acceptance did not cancel queued case notification: %+v err=%v", cancelledNotification, err)
 	}
 	appealID := appeal.ID
 	queued, err := repository.QueueCaseReversal(ctx, model.QueueCaseReversalParams{GuildID: guild.ID, CaseID: caseModel.ID, ActorDiscordUserID: "moderator", OriginalExecutionID: originalAction.ID, ActionType: model.ActionUnbanUser, AppealID: &appealID})
@@ -239,7 +251,12 @@ func TestAppealServiceOwnershipSnapshotTimelineAndAtomicAcceptance(t *testing.T)
 	if strings.Contains(string(encodedMember), "moderator") || strings.Contains(string(encodedMember), "worker") || strings.Contains(string(encodedMember), "last_error") {
 		t.Fatalf("member case projection exposed staff or internal fields: %s", encodedMember)
 	}
-	notifications, err := repository.ListPendingAppealNotifications(ctx, 10)
+	var notificationRecords []AppealNotificationRecord
+	err = repository.db.Where("status = ?", model.AppealNotificationPending).Order("created_at ASC").Find(&notificationRecords).Error
+	notifications := make([]model.AppealNotification, 0, len(notificationRecords))
+	for _, record := range notificationRecords {
+		notifications = append(notifications, appealNotificationModel(record))
+	}
 	if err != nil || len(notifications) < 2 {
 		t.Fatalf("expected staff and member notifications, got %+v err=%v", notifications, err)
 	}
@@ -249,12 +266,26 @@ func TestAppealServiceOwnershipSnapshotTimelineAndAtomicAcceptance(t *testing.T)
 		}
 	}
 	client := &appealNotificationClientStub{}
-	if err := quack.NewAppealNotificationDispatcher(repository, client).DispatchPending(ctx, 10); err != nil {
-		t.Fatalf("dispatch appeal notifications: %v", err)
+	var dispatchErrors [2]error
+	var dispatchWait sync.WaitGroup
+	for index := range dispatchErrors {
+		dispatchWait.Add(1)
+		go func(index int) {
+			defer dispatchWait.Done()
+			dispatchErrors[index] = quack.NewAppealNotificationDispatcher(repository, client).DispatchPending(ctx, 10)
+		}(index)
 	}
-	remaining, err := repository.ListPendingAppealNotifications(ctx, 10)
-	if err != nil || len(remaining) != 0 || client.member == 0 || client.staff == 0 {
-		t.Fatalf("notification adapter did not deliver both audiences: remaining=%d member=%d staff=%d err=%v", len(remaining), client.member, client.staff, err)
+	dispatchWait.Wait()
+	for _, dispatchErr := range dispatchErrors {
+		if dispatchErr != nil {
+			t.Fatalf("dispatch appeal notifications: %v", dispatchErr)
+		}
+	}
+	var remaining int64
+	err = repository.db.Model(&AppealNotificationRecord{}).Where("status IN ?", []model.AppealNotificationStatus{model.AppealNotificationPending, model.AppealNotificationClaimed}).Count(&remaining).Error
+	memberSends, staffSends := client.counts()
+	if err != nil || remaining != 0 || memberSends == 0 || staffSends == 0 || memberSends+staffSends != len(notifications) {
+		t.Fatalf("notification adapter did not deliver each item once: remaining=%d member=%d staff=%d expected=%d err=%v", remaining, memberSends, staffSends, len(notifications), err)
 	}
 }
 
@@ -296,6 +327,34 @@ func TestAppealServiceRejectsIneligibleCasesAndConcurrentDecisions(t *testing.T)
 	wait.Wait()
 	if successes != 1 {
 		t.Fatalf("expected exactly one concurrent decision, got %d", successes)
+	}
+}
+
+func TestAppealNotificationClaimRecoversExpiredLeaseAndRejectsStaleCompletion(t *testing.T) {
+	ctx := context.Background()
+	repository, guild := newAppealTestStore(t)
+	item := createAppealableCase(t, repository, guild.ID, "target", true)
+	service := quack.NewAppealService(repository)
+	if _, err := service.Submit(ctx, item.ID, "target", quack.AppealSubmissionInput{Answers: []model.AppealAnswer{{QuestionID: "reason", Value: "Please reconsider."}}}); err != nil {
+		t.Fatalf("submit appeal: %v", err)
+	}
+	first, err := repository.ClaimPendingAppealNotifications(ctx, 1)
+	if err != nil || len(first) != 1 || first[0].Status != model.AppealNotificationClaimed || first[0].LeaseToken == "" {
+		t.Fatalf("first claim: %+v err=%v", first, err)
+	}
+	expired := time.Now().UTC().Add(-time.Minute)
+	if err := repository.db.Model(&AppealNotificationRecord{}).Where("id = ?", first[0].ID).Update("lease_expires_at", expired).Error; err != nil {
+		t.Fatalf("expire first claim: %v", err)
+	}
+	second, err := repository.ClaimPendingAppealNotifications(ctx, 1)
+	if err != nil || len(second) != 1 || second[0].ID != first[0].ID || second[0].LeaseToken == first[0].LeaseToken {
+		t.Fatalf("reclaimed notification: first=%+v second=%+v err=%v", first, second, err)
+	}
+	if err := repository.CompleteAppealNotification(ctx, model.CompleteAppealNotificationParams{NotificationID: first[0].ID, LeaseToken: first[0].LeaseToken, Status: model.AppealNotificationSent}); !errors.Is(err, model.ErrAppealStateConflict) {
+		t.Fatalf("stale lease completed reclaimed notification: %v", err)
+	}
+	if err := repository.CompleteAppealNotification(ctx, model.CompleteAppealNotificationParams{NotificationID: second[0].ID, LeaseToken: second[0].LeaseToken, Status: model.AppealNotificationSent}); err != nil {
+		t.Fatalf("current lease completion: %v", err)
 	}
 }
 
@@ -363,6 +422,7 @@ func TestAppealAcceptanceAndDirectVoidCannotProduceAcceptedValidCase(t *testing.
 }
 
 type appealNotificationClientStub struct {
+	mutex  sync.Mutex
 	member int
 	staff  int
 }
@@ -372,11 +432,21 @@ func insertLegacyAppeal(db *gorm.DB, appeal *migration0200LegacyAppeal) error {
 }
 
 func (c *appealNotificationClientStub) SendAppealMemberNotification(context.Context, string, string) (string, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	c.member++
 	return "member-message", nil
 }
 
 func (c *appealNotificationClientStub) SendAppealStaffNotification(context.Context, string, string) (string, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	c.staff++
 	return "staff-message", nil
+}
+
+func (c *appealNotificationClientStub) counts() (int, int) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return c.member, c.staff
 }

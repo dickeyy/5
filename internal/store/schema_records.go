@@ -294,6 +294,8 @@ type AppealNotificationRecord struct {
 	Body                string                           `gorm:"type:text;not null"`
 	DeliveryMessageID   string                           `gorm:"size:32;not null"`
 	LastErrorCode       string                           `gorm:"size:64;not null"`
+	LeaseToken          string                           `gorm:"size:64;not null;index"`
+	LeaseExpiresAt      *time.Time                       `gorm:"index"`
 }
 
 // TicketRecord is the GORM persistence representation of ticket; domain models remain storage-agnostic.
