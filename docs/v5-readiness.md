@@ -1,15 +1,18 @@
 # Quack v5 Readiness
 
 Verdict: **NOT READY**
-Combined implementation anchor: `final/qp-i-readiness` at `067a23d` plus the
-uncommitted QP-I evidence/test reconciliation described below
+Combined implementation anchor: `final/qp-i-readiness` at `73236be` plus this
+uncommitted final readiness reconciliation
 Last reconciled: 2026-07-12
 
-The implementation is product-complete except for one returned queue-fairness
-gap and final validation/publication work. Quack cannot be declared READY yet
-because the post-fix repository/MySQL/Redis gate is mechanically blocked until
-the shared execution quota resets at 08:13 MDT, and the required real-guild
-rehearsal has not been authorized or executed. Release-infrastructure changes
+The repository implementation and local strict validation are complete. Quack
+cannot be declared READY because the required clean-install and Discord-action
+rehearsal in a non-production guild has not been authorized or executed, and
+no product owner has accepted that missing release evidence as a readiness
+exception. `v5.md` requires exact new-guild bootstrap and Discord-authoritative
+behavior, so adapter and isolated end-to-end tests do not prove the external
+installation boundary. The QP-I Codex review lifecycle is also pending at this
+pre-publication anchor. Release-infrastructure changes
 are explicitly deferred under the user's prohibition and are not represented
 as passes.
 
@@ -27,8 +30,8 @@ EXECUTED**, never inferred from unit tests.
 | R03 | Dashboard/Discord parity, member ownership after departure, no Discord template builder, internal dashboard/adapter HTTP boundary | Shared `quack.Services`, central route/command registrars, QP-B sessions/policies, QP-D member routes, `dashboard-api-policy-v5.md` | PASS |
 | R04 | Template fields, identity/versioning, one default, archive/restore, policy-only confirmed import/export | Template service/store/routes, migration compatibility, logical 0410 constraints, template service/route/archive-only tests | PASS |
 | R05 | All-time same-template non-voided escalation including the new case and exact starter policy | Guild bootstrap/lifecycle and case lock/selection tests, `TestMySQLConcurrentCaseCreationSelectsDistinctEscalation` | PASS in isolated adapters; real-guild starter rehearsal NOT EXECUTED |
-| R06 | Unique immutable guild case number; valid/voided; void+replacement correction; privacy-safe member history | Case service/store/routes and target projection tests; QP-G recovery manifest and MySQL concurrency; new concurrent create/void regression awaiting blocked rerun | PENDING FINAL RERUN |
-| R07 | Five structured context types; member-visible context; message/link evidence; managed copies and explicit partial capture | Context wizard/service, evidence parser/capture/store, managed-channel lifecycle; live/deleted/inaccessible/cross-guild/unsupported/oversized regression awaiting blocked rerun | PENDING FINAL RERUN; real Discord copy NOT EXECUTED |
+| R06 | Unique immutable guild case number; valid/voided; void+replacement correction; privacy-safe member history | Case service/store/routes and target projection tests; QP-G recovery manifest and MySQL concurrency; `TestMySQLConcurrentCaseCreationAndVoidPreserveNumberingAndValidity` | PASS |
+| R07 | Five structured context types; member-visible context; message/link evidence; managed copies and explicit partial capture | Context wizard/service, evidence parser/capture/store, managed-channel lifecycle; live/deleted/inaccessible/cross-guild/unsupported/oversized regressions in `evidence_test.go` | PASS in isolated adapters; real Discord copy NOT EXECUTED |
 | R08 | Zero/one timeout, kick, ban; exact settings; target safety; safe retry and authorized manual recovery | Action adapters/services, migration 0410 action constraint, lease/fencing and recovery tests, Discord classification tests | PASS |
 | R09 | At most one accurate post-outcome notification; no override; visible failure; retry/dismiss/void; limited public Discord result | Durable notification state machine, action/notification integration tests, moderator views/components | PASS in isolated adapters; real DM/action NOT EXECUTED |
 | R10 | One case-linked appeal; snapshotted form; reopen/info; atomic accept+void; explicit authorized reversal | Migration 0200, appeal service/store/routes/outbox/components and full accepted/rejected/reopened/closed/concurrency tests | PASS; real-guild appeal/reversal NOT EXECUTED |
@@ -36,19 +39,17 @@ EXECUTED**, never inferred from unit tests.
 | R12 | Tickets, general logging and honeypots remain isolated; honeypot alone applies a normal template; utilities do not shape core | QP-C/QP-F modules, QI-2 registrars/workers/migrations, module integration/isolation/privacy tests | PASS |
 | R13 | V4 historical readable import with no escalation/action/notification; module-owned migrations; isolated coexistence and direct-command cutover | QP-G at `17f938b`, logical 0400/0410 registered as physical 10/11, importer/CLI/rollback/restore/command-scope tests and docs | PASS with sanitized fixtures; operator real-data import NOT EXECUTED |
 | R14 | Every firm boundary: no cross-guild/template escalation, public automation API, moderator level/reason override, multi-action, severity/weight/window, notes, hard delete, Quack staff roles, Discord builder or audit/logging conflation | Canonical contracts, archive-only record, 0410 constraints, source/API policy scan, package isolation and security tests | PASS |
-| R15 | Release quality: migrations, real storage, full test/vet/build/race, E2E, security, clean install/upgrade/restore/coexistence/shutdown and real-guild checklist | `scripts/v5-readiness.sh`, `internal/readiness/v5_rehearsal_test.go`, [`v5-rehearsal.md`](v5-rehearsal.md), storage/ops runbooks | BLOCKED: final rerun, queue fairness and real guild remain |
+| R15 | Release quality: migrations, real storage, full test/vet/build/race, E2E, security, clean install/upgrade/restore/coexistence/shutdown and real-guild checklist | Strict `scripts/v5-readiness.sh --final` PASS; `internal/readiness/v5_rehearsal_test.go`; [`v5-rehearsal.md`](v5-rehearsal.md); storage/ops runbooks | PASS local gates; real guild NOT EXECUTED, therefore release evidence incomplete |
 
 ## Supporting inventory reconciliation
 
-The initial QI-2 audit found 122 unchecked TODO entries. Five remain open:
+The initial QI-2 audit found 122 unchecked TODO entries. No unchecked entry
+remains. The external rehearsal is explicitly adjudicated, but not passed:
 
 | TODO | State and owner |
 | --- | --- |
-| Concurrent case creation and voiding | QP-I regression added; blocked validation rerun |
-| Complete evidence outcome matrix | QP-I regression added; blocked validation rerun |
-| Queue fairness across guilds/cases | Returned to the same QP-H owner; awaiting guild-fair selection head and targeted/race evidence |
-| Clean install in a new Discord guild | NOT EXECUTED; requires explicit authorization and test guild/application credentials |
-| Final backend release checklist | This document; remains open until final gates and verdict are recorded |
+| Clean install in a new Discord guild | DEFERRED / NOT EXECUTED; requires explicit user authorization and test guild/application credentials. `v5.md`'s join/bootstrap and Discord-authority rules make this missing release evidence, so the verdict remains NOT READY. |
+| Final backend release checklist | COMPLETE in this document; local strict gates pass and external gaps are recorded without being promoted to passes. |
 
 Infrastructure-only work is checked as explicitly deferred with its product and
 authorization reason in `TODO.md`: CI jobs, scanners, coverage enforcement,
@@ -80,8 +81,8 @@ No unresolved actionable P0 remains.
 | #12 QP-D | Atomic-cancellation P1 and outbox-lease P2 fixed at `24f3e4d` |
 | #13 QI-2 | Honeypot internal-guild identity P1 fixed at `6b999c1` |
 | #14 QP-G | Exactly one review of `dd542c0`; recovery-manifest P2 fixed at `17f938b`; central-registry P1 transferred and closed by QP-I physical versions 10/11 |
-| #15 QP-H | Exactly one review of `d66357a`; bearer-format replay identity P2 fixed by normalized session extraction, and stale Discord gateway readiness P2 fixed by transition handlers/tests; both threads resolved at `e3e01b6`, no second request. Queue fairness is a later TODO audit gap, not an unresolved Codex finding |
-| QP-I | PR/review not opened; final gate and publication pending |
+| #15 QP-H | Exactly one review of `d66357a`; bearer-format replay identity P2 fixed by normalized session extraction, and stale Discord gateway readiness P2 fixed by transition handlers/tests; both threads resolved at `e3e01b6`, no second request. The later queue-fairness TODO audit gap is fixed at `44f18c9` and integrated at `73236be`. |
+| QP-I | PR/review not opened at this evidence anchor; local strict gate passes and publication is next. |
 
 ## Validation evidence
 
@@ -93,11 +94,22 @@ Passed evidence:
 - QP-I after QP-G integration: central 0400 then 0410 registry, store and
   composition tests PASS; real MySQL `go test ./internal/store -count=1` PASS
   in 27.175 seconds.
+- QP-H fairness follow-up at `44f18c9`: guild-rotating bounded selection,
+  within-guild action priority, SQLite/MySQL targeted tests and race evidence
+  PASS; integrated at `73236be`.
 - QP-I combined-head focused config/HTTP/Discord/runtime/workqueue/store/
   readiness tests PASS after isolating the first pre-0410 route fixture.
-- QP-I non-network final static gates after all current edits:
+- Final combined strict gate PASS:
+  `QUACK_TEST_MYSQL_DSN=... QUACK_TEST_REDIS_URL=...
+  GOCACHE=/tmp/quack-v5-qp-i-gocache ./scripts/v5-readiness.sh --final`.
+  It passed focused readiness/quack/store/HTTP/Discord/module tests, targeted
+  race tests, repository-wide `go test ./...`, `go vet ./...`, builds for
+  `quack`, `quack-migrate`, `quack-v4-import`, and `quack-storage-verify`, the
+  full MySQL/Redis-enabled repository suite, the repository-native two-process
+  Redis write/verify persistence probe, and `git diff --check`.
+- QP-I non-network final static gates after current edits:
   `go vet ./...` PASS, `go build -buildvcs=false ./...` PASS,
-  `git diff --check` PASS.
+  `bash -n scripts/v5-readiness.sh` PASS, `git diff --check` PASS.
 - Tracked-file credential pattern scan and committed `.env` scan: PASS with no
   matches outside examples.
 - Firm-boundary source scan: no live severity/weight/window/reason-override/
@@ -105,32 +117,11 @@ Passed evidence:
   `Unscoped` template access. `gorm.DeletedAt` exists only in frozen migrations;
   the live record uses a compatibility pointer with no GORM delete semantics.
 
-Blocked or incomplete evidence:
-
-- `scripts/v5-readiness.sh --final` exposed a second pre-0410 template-service
-  fixture after 0410 correctly rejected its duplicate action. The fixture was
-  isolated, but the required rerun was policy-rejected because the shared
-  execution quota is exhausted until 08:13 MDT. No pass is claimed.
-- New evidence, create/void and fuzz regressions compile under vet/build but
-  have not run after their edits.
-- QP-H queue fairness correction is pending.
-
-Exact remaining privileged validation, to run once after integrating the QP-H
-fairness head:
-
-```sh
-env \
-  QUACK_TEST_MYSQL_DSN='root:quack-root@tcp(127.0.0.1:3306)/mysql?charset=utf8mb4&parseTime=True&loc=Local' \
-  QUACK_TEST_REDIS_URL='redis://127.0.0.1:6379' \
-  GOCACHE=/tmp/quack-v5-qp-i-gocache \
-  ./scripts/v5-readiness.sh --final
-```
-
 ## External evidence and accepted exceptions
 
 | Evidence | State | Dependency / adjudication |
 | --- | --- | --- |
-| Disposable MySQL/Redis final gate | BLOCKED RERUN | Shared execution quota reset; local targets are known and were previously reachable |
+| Disposable MySQL/Redis final gate | PASS | Combined strict harness passed full MySQL/Redis-enabled tests and the native two-process Redis persistence probe |
 | Sanitized representative v4 fixtures | PASS | Repository-owned non-sensitive fixtures; operator real-data run remains NOT EXECUTED |
 | Clean install and actions in a real Discord guild | NOT EXECUTED | Requires explicit user authorization, non-production guild/application, safe test members and managed channels |
 | Timeout/kick/ban/DM/evidence copy/audit mirror/reversal against Discord | NOT EXECUTED | Same external authorization and credentials |
@@ -141,21 +132,21 @@ env \
 
 | Gate | Current result |
 | --- | --- |
-| TODO complete or product-reason adjudicated | INCOMPLETE: three local validation/fairness items and real-guild rehearsal remain open |
+| TODO complete or product-reason adjudicated | PASS: all entries complete or explicitly deferred with the authorization/product reason; deferral is not represented as release evidence |
 | Scope drift resolved or accepted | PASS for implemented repository behavior |
 | Every applicable `v5.md` requirement checked | PASS inventory R01-R15; R15 evidence incomplete |
-| Every slice validation passed | Accepted packages PASS; QP-I final gate incomplete |
+| Every slice validation passed | PASS, including QP-I strict final gate |
 | Every slice review/fix lifecycle complete | Accepted packages PASS; QP-I lifecycle not started |
 | No actionable P0/P1 review finding | PASS on accepted heads; QP-G transferred P1 closed centrally |
-| Newly discovered work completed/adjudicated | INCOMPLETE: queue fairness returned to QP-H |
-| Repository-wide applicable gates pass | NOT CONFIRMED after final fixes because rerun is blocked |
+| Newly discovered work completed/adjudicated | PASS: queue fairness integrated and validated |
+| Repository-wide applicable local gates pass | PASS, including MySQL/Redis, race, vet, builds, migrations and isolated E2E |
 | Final readiness matrix exists | PASS, this document |
-| Final READY/NOT READY report with evidence | **NOT READY**, for the blockers above |
+| Final READY/NOT READY report with evidence | **NOT READY**: real-guild install/actions are NOT EXECUTED without an accepted exception; QP-I review lifecycle is pending at this anchor |
 
-## Publication steps still prohibited from implicit execution
+## Publication lifecycle
 
-After the final gate passes: commit the QP-I reconciliation, push
-`final/qp-i-readiness`, open one non-draft PR against `integration/qi-2-p2`,
-post exactly one standalone `@codex review`, fix valid findings without a
-second request by default, revalidate proportionately, and update this verdict.
-Do not merge the PR or change release infrastructure/settings.
+Commit this QP-I reconciliation, push `final/qp-i-readiness`, open one
+non-draft PR against `integration/qi-2-p2`, post exactly one standalone
+`@codex review`, fix valid findings without a second request by default, and
+revalidate proportionately. Do not merge the PR or change release
+infrastructure/settings.

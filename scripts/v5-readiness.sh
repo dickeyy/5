@@ -35,11 +35,16 @@ if [[ "$mode" == "--final" ]]; then
     QUACK_TEST_REDIS_URL="$QUACK_TEST_REDIS_URL" \
     go test ./...
 
-  if ! command -v redis-cli >/dev/null 2>&1; then
-    echo "final readiness requires redis-cli for the external Redis probe" >&2
-    exit 1
-  fi
-  redis-cli -u "$QUACK_TEST_REDIS_URL" --no-auth-warning PING | grep -qx PONG
+  redis_probe_namespace="final-$(date -u +%Y%m%dT%H%M%S%N)-$$-${RANDOM}"
+  redis_probe_token="$(date -u +%s%N)-$$-${RANDOM}-${RANDOM}"
+  REDIS_URL="$QUACK_TEST_REDIS_URL" \
+    QUACK_RECOVERY_NAMESPACE="$redis_probe_namespace" \
+    QUACK_RECOVERY_TOKEN="$redis_probe_token" \
+    /tmp/quack-v5-readiness-storage-verify redis-write
+  REDIS_URL="$QUACK_TEST_REDIS_URL" \
+    QUACK_RECOVERY_NAMESPACE="$redis_probe_namespace" \
+    QUACK_RECOVERY_TOKEN="$redis_probe_token" \
+    /tmp/quack-v5-readiness-storage-verify redis-verify
 fi
 
 git diff --check

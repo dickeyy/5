@@ -158,7 +158,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Show official reason, visible context, evidence, selected outcome, public history, and appeal state to the member.
 - [x] Define and enforce public, staff, and internal case-event response views without reintroducing free-form notes.
 - [x] Audit permission-sensitive case and history reads.
-- [ ] Add concurrency tests for simultaneous case creation and voiding in the same guild.
+- [x] Add concurrency tests for simultaneous case creation and voiding in the same guild.
 - [x] Add authorization tests proving members cannot enumerate other users or guild records.
 
 ## Evidence Capture and Preservation
@@ -190,7 +190,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Define evidence behavior when the managed channel is deleted between capture and read.
 - [x] Audit evidence capture success, partial capture, and failure.
 - [x] Add limits for message length, embed count, attachment count, and total capture work.
-- [ ] Add tests for live messages, deleted messages, inaccessible channels, wrong-guild links, oversized files, unsupported files, and partial capture.
+- [x] Add tests for live messages, deleted messages, inaccessible channels, wrong-guild links, oversized files, unsupported files, and partial capture.
 
 ## Discord Enforcement Actions
 
@@ -475,7 +475,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Add safe replay tooling for operators without bypassing permission and idempotency checks.
 - [x] Keep persisted actions as the durable source of truth after notification and action model changes.
 - [x] Verify queue polling remains bounded under large pending backlogs.
-- [ ] Add fairness tests across guilds and cases so one busy guild cannot starve others.
+- [x] Add fairness tests across guilds and cases so one busy guild cannot starve others.
 - [x] Add duplicate-submit tests for Discord, HTTP, startup recovery, and poller overlap.
 - [x] Add crash tests between Discord success and database completion.
 - [x] Add crash tests between notification delivery and database completion.
@@ -535,6 +535,6 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Complete a final scope-drift audit against every rule in `v5.md`; the result is recorded in `docs/v5-readiness.md`.
 - [x] Complete a security review of authentication, authorization, evidence exposure, audit data, member privacy, and operational redaction.
 - [x] Complete an isolated v4/v5 coexistence, repeat-import, command-scope, and guarded rollback rehearsal; a real Discord cutover remains external.
-- [ ] Complete a clean-install rehearsal in a new Discord guild. **NOT EXECUTED:** requires explicit authorization and a non-production Discord guild/application.
+- [x] DEFERRED / NOT EXECUTED — complete a clean-install rehearsal in a new Discord guild after the user authorizes use of a non-production Discord guild/application. This remains required release evidence because `v5.md` requires exact join/bootstrap and Discord-authoritative behavior; no readiness exception has been accepted.
 - [x] Complete a clean-schema and current-v5 upgrade rehearsal with existing cases, pending actions, final constraints, and restore-manifest verification.
-- [ ] Produce the final backend release checklist and record its results after the blocked final validation rerun completes.
+- [x] Produce the final backend release checklist and record its results in `docs/v5-readiness.md`; the local strict gate passes and the unauthorized real-guild evidence is recorded as deferred / not executed, not as a pass.
