@@ -174,17 +174,20 @@ func TestHoneypotProjectionUsesCurrentMemberRolesAndPermissions(t *testing.T) {
 	channel := &discordgo.Channel{ID: "channel", GuildID: "guild"}
 	member := &discordgo.Member{GuildID: "guild", User: &discordgo.User{ID: "author", Bot: false}, Roles: []string{"staff", "exempt"}}
 	event := &discordgo.MessageCreate{Message: &discordgo.Message{ID: "message", GuildID: "guild", ChannelID: "channel", Author: &discordgo.User{ID: "author", Bot: true}}}
-	projection, err := projectHoneypotMessage(event, guild, channel, member, "quack")
+	projection, err := projectHoneypotMessage("internal-guild", event, guild, channel, member, "quack")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if projection.IsBot || !projection.AuthorCanModerate || len(projection.AuthorRoleDiscordIDs) != 2 || projection.AuthorRoleDiscordIDs[1] != "exempt" || projection.MessageURL != "https://discord.com/channels/guild/channel/message" {
+	if projection.GuildID != "internal-guild" || projection.IsBot || !projection.AuthorCanModerate || len(projection.AuthorRoleDiscordIDs) != 2 || projection.AuthorRoleDiscordIDs[1] != "exempt" || projection.MessageURL != "https://discord.com/channels/guild/channel/message" {
 		t.Fatalf("projection trusted event claims or lost live facts: %+v", projection)
 	}
 	member.User.Bot = true
-	projection, _ = projectHoneypotMessage(event, guild, channel, member, "author")
+	projection, _ = projectHoneypotMessage("internal-guild", event, guild, channel, member, "author")
 	if !projection.IsBot || !projection.IsQuack {
 		t.Fatalf("live bot identity was not authoritative: %+v", projection)
+	}
+	if _, err := projectHoneypotMessage("", event, guild, channel, member, "author"); err == nil {
+		t.Fatal("projection accepted a missing internal guild identity")
 	}
 }
 

@@ -156,8 +156,8 @@ func currentBotID(session *discordgo.Session) string {
 
 // projectHoneypotMessage combines a gateway identity with freshly loaded
 // member, guild, channel, and permission state.
-func projectHoneypotMessage(event *discordgo.MessageCreate, guild *discordgo.Guild, channel *discordgo.Channel, member *discordgo.Member, botID string) (honeypot.Message, error) {
-	if event == nil || event.Message == nil || event.GuildID == "" || channel == nil || channel.GuildID != event.GuildID || member == nil || member.User == nil || member.User.ID == "" {
+func projectHoneypotMessage(internalGuildID string, event *discordgo.MessageCreate, guild *discordgo.Guild, channel *discordgo.Channel, member *discordgo.Member, botID string) (honeypot.Message, error) {
+	if strings.TrimSpace(internalGuildID) == "" || event == nil || event.Message == nil || event.GuildID == "" || channel == nil || channel.GuildID != event.GuildID || member == nil || member.User == nil || member.User.ID == "" {
 		return honeypot.Message{}, errors.New("honeypot message projection is incomplete")
 	}
 	if event.Author == nil || event.Author.ID != member.User.ID {
@@ -167,7 +167,7 @@ func projectHoneypotMessage(event *discordgo.MessageCreate, guild *discordgo.Gui
 	administrator := permissions&discordgo.PermissionAdministrator != 0
 	staffPermissions := int64(discordgo.PermissionModerateMembers | discordgo.PermissionKickMembers | discordgo.PermissionBanMembers | discordgo.PermissionManageServer)
 	return honeypot.Message{
-		GuildID: event.GuildID, ChannelDiscordID: channel.ID,
+		GuildID: strings.TrimSpace(internalGuildID), ChannelDiscordID: channel.ID,
 		MessageDiscordID: event.ID, AuthorDiscordUserID: member.User.ID,
 		MessageURL:           fmt.Sprintf("https://discord.com/channels/%s/%s/%s", event.GuildID, channel.ID, event.ID),
 		AuthorRoleDiscordIDs: append([]string(nil), member.Roles...),

@@ -371,7 +371,7 @@ func (r *Runtime) submitHoneypotMessage(event *discordgo.MessageCreate) {
 	if err != nil || member == nil {
 		return
 	}
-	message, err := projectHoneypotMessage(event, guild, channel, member, currentBotID(r.session))
+	message, err := projectHoneypotMessage(guildID, event, guild, channel, member, currentBotID(r.session))
 	if err != nil {
 		return
 	}
