@@ -209,9 +209,11 @@ integration changes receive one fresh integration owner and PR/review.
 
 P2 assignments from accepted QI-1 head `11650a5`:
 
-- QP-D: fresh owner `/root/qp_d_appeals`, branch
+- QP-D: implementation completed by `/root/qp_d_appeals`; lifecycle completion
+  owner `/root/qp_d_lifecycle_finish`, branch
   `package/qp-d-appeals-member`, worktree `/tmp/quack-v5-worktrees/qp-d`.
-- QP-E: fresh owner `/root/qp_e_audit_ux`, branch
+- QP-E: implementation completed by `/root/qp_e_audit_ux`; lifecycle completion
+  owner `/root/qp_e_lifecycle_finish`, branch
   `package/qp-e-audit-discord`, worktree `/tmp/quack-v5-worktrees/qp-e`.
 - QP-F: fresh owner `/root/qp_f_honeypot`, branch
   `package/qp-f-honeypot-isolation`, worktree `/tmp/quack-v5-worktrees/qp-f`.
@@ -222,8 +224,15 @@ build/diff gates green.
 
 QP-F accepted at `fc6d82c`: one review, one valid P2 fixed/resolved, and module/
 race/MySQL/full/vet/build gates green. It merged cleanly into
-`integration/qi-2-p2`; fresh owner `/root/qi_2_integration` is wiring honeypot
-runtime/routes/migration/drift/intents while QP-D/QP-E remain active.
+`integration/qi-2-p2`; lifecycle owner `/root/qi_2_integration_finish` is
+checkpointing the completed honeypot runtime/routes/migration/drift/intents
+integration while QP-D/QP-E finish their publication and one-review lifecycles.
+
+The shared escalation-quota blocker recorded 2026-07-11 23:25 MDT expired at
+02:43 MDT. On 2026-07-12, distinct lifecycle owners resumed QP-D and QP-E in
+parallel to run their single missing environment gate, publish one PR each,
+request Codex once, and fix findings. QI-2 proceeds concurrently and will
+combine both reviewed heads without another idle integration setup phase.
 
 ### Parallel wave P3 - migration and operations from QI-2
 
@@ -1023,10 +1032,10 @@ by the macro-package ledger.
 | QP-B | ACCEPTED | `package/qp-b-http-auth` at `b2f3e0a` | [#7](https://github.com/dickeyy/5/pull/7) | 1 complete; P1/P2 fixed | passed evidence gate |
 | QP-C | ACCEPTED | `package/qp-c-tickets-logging` at `4579d14` | [#6](https://github.com/dickeyy/5/pull/6) | 1 complete; four P2s fixed | passed evidence gate |
 | QI-1 | ACCEPTED | `integration/qi-1-p1` at `11650a5` | [#9](https://github.com/dickeyy/5/pull/9) | 1 complete; two P2s fixed | passed wave evidence gate |
-| QP-D | IN_PROGRESS | `package/qp-d-appeals-member` | pending | 0 | absorbs member V5-007, V5-013/014/017C |
-| QP-E | IN_PROGRESS | `package/qp-e-audit-discord` | pending | 0 | absorbs V5-015/016 |
+| QP-D | IN_PROGRESS | `package/qp-d-appeals-member` uncommitted | pending | 0 | lifecycle owner running final MySQL/publication/review |
+| QP-E | IN_PROGRESS | `package/qp-e-audit-discord` uncommitted | pending | 0 | lifecycle owner running final full suite/publication/review |
 | QP-F | ACCEPTED | `package/qp-f-honeypot-isolation` at `fc6d82c` | [#10](https://github.com/dickeyy/5/pull/10) | 1 complete; one P2 fixed | passed evidence gate |
-| QI-2 | IN_PROGRESS | `integration/qi-2-p2` with QP-F merged | pending | 0 | fresh owner wiring; awaiting QP-D/QP-E |
+| QI-2 | IN_PROGRESS | `integration/qi-2-p2` with QP-F merged | pending | 0 | QP-F wiring green; awaiting reviewed QP-D/QP-E |
 | QP-G | PLANNED | pending | pending | 0 | absorbs V5-023/024 |
 | QP-H | PLANNED | pending | pending | 0 | absorbs remaining V5-017/025 |
 | QP-I | PLANNED | pending | pending | 0 | absorbs V5-026 and final readiness |
@@ -1074,6 +1083,8 @@ by the macro-package ledger.
 - RESOLVED 2026-07-11: GitHub CLI authentication and branch push both succeed
   outside the restricted network sandbox. The connector remains an independent
   structured metadata path, while slice PR/review lifecycle uses `gh`.
+- RESOLVED 2026-07-12: the temporary shared escalation quota expired; QP-D and
+  QP-E lifecycle completion resumed in parallel.
 - BLOCKER: changes to CI workflows, deployment resource limits, and release
   infrastructure are explicitly unauthorized. V5-025 may implement code,
   tests, local checks, and runbooks, but infrastructure edits require explicit
