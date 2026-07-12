@@ -66,6 +66,14 @@ func TestCommandDefinitionDefinesCaseAdd(t *testing.T) {
 	if !add.Options[0].Autocomplete {
 		t.Fatalf("expected template option to support autocomplete")
 	}
+	for position, option := range add.Options {
+		if position < 2 && !option.Required {
+			t.Fatalf("expected required options first, got %+v", add.Options)
+		}
+		if position >= 2 && option.Required {
+			t.Fatalf("required option follows optional options: %+v", add.Options)
+		}
+	}
 }
 
 func TestHandleCaseInteractionCreatesCase(t *testing.T) {

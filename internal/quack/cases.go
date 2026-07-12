@@ -136,17 +136,27 @@ type CaseResponse struct {
 
 // CaseEvidenceAttachmentResponse exposes stable evidence references without leaking the staff-only channel identity.
 type CaseEvidenceAttachmentResponse struct {
-	Filename, ContentType, OriginalURL, PreservedURL, CopyOutcome, Warning string
-	SizeBytes                                                              int64
+	Filename     string `json:"filename"`
+	ContentType  string `json:"content_type"`
+	OriginalURL  string `json:"original_url"`
+	PreservedURL string `json:"preserved_url,omitempty"`
+	CopyOutcome  string `json:"copy_outcome"`
+	Warning      string `json:"warning,omitempty"`
+	SizeBytes    int64  `json:"size_bytes"`
 }
 
 // CaseEvidenceResponse exposes an immutable message snapshot and bounded attachment metadata.
 type CaseEvidenceResponse struct {
-	ID, AuthorDiscordUserID, MessageURL, Content, CaptureOutcome, CaptureWarning string
-	MessageCreatedAt                                                             time.Time
-	MessageEditedAt                                                              *time.Time
-	Embeds                                                                       any
-	Attachments                                                                  []CaseEvidenceAttachmentResponse
+	ID                  string                           `json:"id"`
+	AuthorDiscordUserID string                           `json:"author_discord_user_id"`
+	MessageURL          string                           `json:"message_url"`
+	Content             string                           `json:"content"`
+	CaptureOutcome      string                           `json:"capture_outcome"`
+	CaptureWarning      string                           `json:"capture_warning,omitempty"`
+	MessageCreatedAt    time.Time                        `json:"message_created_at"`
+	MessageEditedAt     *time.Time                       `json:"message_edited_at,omitempty"`
+	Embeds              any                              `json:"embeds"`
+	Attachments         []CaseEvidenceAttachmentResponse `json:"attachments"`
 }
 
 // CaseNotificationResponse exposes delivery state separately from enforcement.
@@ -1275,6 +1285,7 @@ func validateCaseContextValues(fields []model.CaseTemplateContextField, inputs [
 				return "", nil, false, validationCaseError("required context value is missing: " + field.Key)
 			}
 			values = append(values, CaseContextValueResponse{Key: field.Key, Label: field.Label, FieldType: field.FieldType, Required: field.Required, Value: nil})
+			delete(byKey, field.Key)
 			continue
 		}
 		var value any

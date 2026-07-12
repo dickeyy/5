@@ -90,14 +90,14 @@ func TestCaseContextEvidenceVoidReplacementAndMemberProjection(t *testing.T) {
 		t.Fatalf("create evidence settings: %v", err)
 	}
 	input := validTemplateInput("evidence-policy")
-	input.ContextFields = []quack.TemplateContextFieldInput{{Key: "summary", Label: "Summary", FieldType: model.ContextFieldShortText, Position: 1, Required: true}, {Key: "message", Label: "Message", FieldType: model.ContextFieldMessageLink, Position: 2, Required: true}}
+	input.ContextFields = []quack.TemplateContextFieldInput{{Key: "summary", Label: "Summary", FieldType: model.ContextFieldShortText, Position: 1, Required: true}, {Key: "message", Label: "Message", FieldType: model.ContextFieldMessageLink, Position: 2, Required: true}, {Key: "details", Label: "Details", FieldType: model.ContextFieldLongText, Position: 3}}
 	template := createAppTemplate(t, ctx, store, admin, input)
 	link := "https://discord.com/channels/111111111111111111/222222222222222222/333333333333333333"
 	evidenceClient := &fakeEvidenceClient{message: quack.DiscordMessageSnapshot{GuildID: guildDiscordID, ChannelID: "222222222222222222", MessageID: "333333333333333333", AuthorDiscordUserID: "target-1", URL: link, Content: "original text", CreatedAt: time.Now().UTC(), Attachments: []quack.DiscordAttachmentSnapshot{{ID: "a1", Filename: "proof.png", ContentType: "image/png", SizeBytes: 100, URL: "https://cdn.discordapp.com/proof"}}}, preserved: quack.PreservedDiscordAttachment{URL: "https://cdn.discordapp.com/copy", MessageID: "copy-message", AttachmentID: "copy-attachment"}}
 	service := quack.NewCaseService(store).WithEvidenceCapture(quack.NewEvidenceService(evidenceClient, store))
 	summary, _ := json.Marshal("visible summary")
 	message, _ := json.Marshal(link)
-	created, err := service.Create(ctx, moderator, quack.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1", ContextValues: []quack.CaseContextValueInput{{Key: "summary", Value: summary}, {Key: "message", Value: message}}})
+	created, err := service.Create(ctx, moderator, quack.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1", ContextValues: []quack.CaseContextValueInput{{Key: "summary", Value: summary}, {Key: "message", Value: message}, {Key: "details", Value: json.RawMessage("null")}}})
 	if err != nil {
 		t.Fatalf("create evidence case: %v", err)
 	}
@@ -105,14 +105,14 @@ func TestCaseContextEvidenceVoidReplacementAndMemberProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(detail.ContextValues) != 2 || len(detail.Evidence) != 1 || len(detail.Evidence[0].Attachments) != 1 || detail.Evidence[0].Attachments[0].CopyOutcome != "preserved" {
+	if len(detail.ContextValues) != 3 || detail.ContextValues[2].Value != nil || len(detail.Evidence) != 1 || len(detail.Evidence[0].Attachments) != 1 || detail.Evidence[0].Attachments[0].CopyOutcome != "preserved" {
 		t.Fatalf("case snapshot incomplete: %+v", detail)
 	}
 	voided, err := service.Void(ctx, moderator, created.ID, "wrong policy", nil)
 	if err != nil || voided.Validity != model.CaseValidityVoided {
 		t.Fatalf("void failed: %+v err=%v", voided, err)
 	}
-	replacement, err := service.Create(ctx, moderator, quack.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1", ReplacesCaseID: created.ID, ContextValues: []quack.CaseContextValueInput{{Key: "summary", Value: summary}, {Key: "message", Value: message}}})
+	replacement, err := service.Create(ctx, moderator, quack.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1", ReplacesCaseID: created.ID, ContextValues: []quack.CaseContextValueInput{{Key: "summary", Value: summary}, {Key: "message", Value: message}, {Key: "details", Value: json.RawMessage("null")}}})
 	if err != nil {
 		t.Fatalf("replacement: %v", err)
 	}
@@ -123,11 +123,35 @@ func TestCaseContextEvidenceVoidReplacementAndMemberProjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("member detail: %v", err)
 	}
-	if member.Reason != "No spam" || len(member.ContextValues) != 2 || len(member.Evidence) != 1 {
+	if member.Reason != "No spam" || len(member.ContextValues) != 3 || len(member.Evidence) != 1 {
 		t.Fatalf("member projection incomplete: %+v", member)
 	}
 	if _, err := service.GetMemberCase(ctx, replacement.ID, "other-user"); err != quack.ErrCaseNotFound {
 		t.Fatalf("cross-user enumeration was not hidden: %v", err)
+	}
+}
+
+func TestCaseEvidenceResponsesUseStableJSONNames(t *testing.T) {
+	body, err := json.Marshal(quack.CaseEvidenceResponse{
+		ID:                  "evidence-1",
+		AuthorDiscordUserID: "member-1",
+		MessageURL:          "https://discord.com/channels/1/2/3",
+		MessageCreatedAt:    time.Now().UTC(),
+		Attachments: []quack.CaseEvidenceAttachmentResponse{{
+			Filename: "proof.png", ContentType: "image/png", OriginalURL: "https://cdn.example/original", SizeBytes: 10,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := string(body)
+	for _, key := range []string{`"author_discord_user_id"`, `"message_url"`, `"message_created_at"`, `"content_type"`, `"original_url"`, `"size_bytes"`} {
+		if !strings.Contains(encoded, key) {
+			t.Fatalf("evidence response omitted stable JSON key %s: %s", key, encoded)
+		}
+	}
+	if strings.Contains(encoded, "AuthorDiscordUserID") || strings.Contains(encoded, "OriginalURL") {
+		t.Fatalf("evidence response leaked Go field names: %s", encoded)
 	}
 }
 
