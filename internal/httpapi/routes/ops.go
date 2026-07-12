@@ -45,7 +45,11 @@ func guildOpsStatus(c *gin.Context, services *quack.Services) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "ops status failed"})
 		return
 	}
-	c.JSON(http.StatusOK, status)
+	health, healthErr := services.Guilds.OperationalGuildHealth(c.Request.Context(), c.Param("discordGuildID"))
+	if healthErr != nil {
+		health = quack.GuildOperationalHealth{Degraded: true, Reasons: []string{"guild_health_unavailable"}}
+	}
+	c.JSON(http.StatusOK, gin.H{"operations": status, "guild_health": health})
 }
 
 // guildOpsAuthorized encapsulates the guild ops authorized rule so callers share one consistent package implementation.
