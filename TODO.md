@@ -361,43 +361,43 @@ Items are grouped by concern, not by implementation order or priority. Completed
 
 ## Optional Ticket Module
 
-- [ ] Write a module-specific product definition for ticket settings, lifecycle, permissions, transcript retention, and Discord behavior.
-- [ ] Add independent per-guild ticket-module enablement and settings.
-- [ ] Add ticket entry-channel and private-thread configuration.
-- [ ] Create private Discord ticket threads or channels with validated staff/member permissions.
-- [ ] Add ticket open, resolve, cancel, and authorized reopen behavior defined by the module specification.
-- [ ] Keep tickets separate from cases, actions, appeals, escalation, and member moderation history.
-- [ ] Add ticket event timelines without reusing case-note behavior.
-- [ ] Capture ticket transcripts when a ticket closes.
-- [ ] Add authorized transcript read or export behavior.
-- [ ] Add Discord ticket creation, queue, view, reply, and close components.
-- [ ] Add backend APIs for ticket settings, status, queue, detail, and transcript access.
-- [ ] Audit ticket settings and lifecycle changes.
-- [ ] Handle missing or deleted ticket channels and parent channels.
-- [ ] Add ticket rate limits and duplicate-open protection.
-- [ ] Add module-specific v4 ticket migration with dry-run and idempotency support.
-- [ ] Add permission, privacy, lifecycle, transcript, Discord, and migration tests.
+- [x] Write a module-specific product definition for ticket settings, lifecycle, permissions, transcript retention, and Discord behavior.
+- [x] Add independent per-guild ticket-module enablement and settings.
+- [x] Add ticket entry-channel and private-thread configuration.
+- [x] Create private Discord ticket threads or channels with validated staff/member permissions.
+- [x] Add ticket open, resolve, cancel, and authorized reopen behavior defined by the module specification.
+- [x] Keep tickets separate from cases, actions, appeals, escalation, and member moderation history.
+- [x] Add ticket event timelines without reusing case-note behavior.
+- [x] Capture ticket transcripts when a ticket closes.
+- [x] Add authorized transcript read or export behavior.
+- [x] Add Discord ticket creation, queue, view, reply, and close components.
+- [x] Add backend APIs for ticket settings, status, queue, detail, and transcript access.
+- [x] Audit ticket settings and lifecycle changes.
+- [x] Handle missing or deleted ticket channels and parent channels.
+- [x] Add ticket rate limits and duplicate-open protection.
+- [x] Add module-specific v4 ticket migration with dry-run and idempotency support.
+- [x] Add permission, privacy, lifecycle, transcript, Discord, and migration tests.
 
 ## Optional General Logging Module
 
-- [ ] Write a module-specific product definition for logged events, channel routing, privacy, formatting, and retention boundaries.
-- [ ] Add independent per-guild general-logging enablement and settings.
-- [ ] Configure staff-only Discord destinations for message, member, moderation, and server events.
-- [ ] Validate logging-channel permissions and repair deleted channel references.
-- [ ] Add a bounded in-memory message cache for edit and delete context.
-- [ ] Make cache limits configurable and safe for large guilds.
-- [ ] Log configured message edits with before/after content when available.
-- [ ] Log configured message deletions and bulk deletions when cached context is available.
-- [ ] Log configured attachment and embed metadata without permanently archiving file contents.
-- [ ] Log configured member join and leave events.
-- [ ] Log configured Discord ban and unban events separately from Quack's audit log.
-- [ ] Log configured guild or channel changes selected by the module definition.
-- [ ] Keep general logging output in Discord instead of building a searchable permanent event archive.
-- [ ] Keep general logging failures and retries separate from case action execution.
-- [ ] Add Discord rate-limit handling and bounded retries for log delivery.
-- [ ] Redact tokens, webhook secrets, and content excluded by module privacy settings.
-- [ ] Add module-specific v4 logging-settings migration with dry-run and idempotency support.
-- [ ] Add cache, event, formatting, permission, retry, privacy, and migration tests.
+- [x] Write a module-specific product definition for logged events, channel routing, privacy, formatting, and retention boundaries.
+- [x] Add independent per-guild general-logging enablement and settings.
+- [x] Configure staff-only Discord destinations for message, member, moderation, and server events.
+- [x] Validate logging-channel permissions and repair deleted channel references.
+- [x] Add a bounded in-memory message cache for edit and delete context.
+- [x] Make cache limits configurable and safe for large guilds.
+- [x] Log configured message edits with before/after content when available.
+- [x] Log configured message deletions and bulk deletions when cached context is available.
+- [x] Log configured attachment and embed metadata without permanently archiving file contents.
+- [x] Log configured member join and leave events.
+- [x] Log configured Discord ban and unban events separately from Quack's audit log.
+- [x] Log configured guild or channel changes selected by the module definition.
+- [x] Keep general logging output in Discord instead of building a searchable permanent event archive.
+- [x] Keep general logging failures and retries separate from case action execution.
+- [x] Add Discord rate-limit handling and bounded retries for log delivery.
+- [x] Redact tokens, webhook secrets, and content excluded by module privacy settings.
+- [x] Add module-specific v4 logging-settings migration with dry-run and idempotency support.
+- [x] Add cache, event, formatting, permission, retry, privacy, and migration tests.
 
 ## Optional Honeypot Module
 
