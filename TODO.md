@@ -401,23 +401,23 @@ Items are grouped by concern, not by implementation order or priority. Completed
 
 ## Optional Honeypot Module
 
-- [ ] Write a module-specific product definition for honeypot setup, trigger rules, exemptions, and safety behavior.
-- [ ] Add independent per-guild honeypot enablement and settings.
-- [ ] Allow admins to select a honeypot channel and one active case template.
-- [ ] Validate that the selected template remains active and compatible with automated use.
-- [ ] Handle message events in configured honeypot channels.
-- [ ] Ignore Quack, other bots, and exempt staff according to the module definition.
-- [ ] Prevent recursive triggers from Quack responses or logging output.
-- [ ] Apply the configured template through the normal case creation transaction.
-- [ ] Mark honeypot cases with an explicit automated source.
-- [ ] Use the normal escalation, action, notification, evidence, permission, and audit records.
-- [ ] Define how actor permissions are represented for system-created honeypot cases without granting a fake staff identity.
-- [ ] Handle selected-template archive and honeypot-channel deletion safely.
-- [ ] Add honeypot trigger counts and outcomes to derived module statistics.
-- [ ] Add backend APIs for honeypot settings and status.
-- [ ] Audit honeypot configuration, triggers, failures, and created cases.
-- [ ] Add module-specific v4 honeypot migration with dry-run and idempotency support.
-- [ ] Add setup, exemption, loop-prevention, action, failure, and migration tests.
+- [x] Write a module-specific product definition for honeypot setup, trigger rules, exemptions, and safety behavior.
+- [x] Add independent per-guild honeypot enablement and settings.
+- [x] Allow admins to select a honeypot channel and one active case template.
+- [x] Validate that the selected template remains active and compatible with automated use.
+- [x] Handle message events in configured honeypot channels.
+- [x] Ignore Quack, other bots, and exempt staff according to the module definition.
+- [x] Prevent recursive triggers from Quack responses or logging output.
+- [x] Apply the configured template through the normal case creation transaction.
+- [x] Mark honeypot cases with an explicit automated source.
+- [x] Use the normal escalation, action, notification, evidence, permission, and audit records.
+- [x] Define how actor permissions are represented for system-created honeypot cases without granting a fake staff identity.
+- [x] Handle selected-template archive and honeypot-channel deletion safely.
+- [x] Add honeypot trigger counts and outcomes to derived module statistics.
+- [x] Add backend APIs for honeypot settings and status.
+- [x] Audit honeypot configuration, triggers, failures, and created cases.
+- [x] Add module-specific v4 honeypot migration with dry-run and idempotency support.
+- [x] Add setup, exemption, loop-prevention, action, failure, and migration tests.
 
 ## V4 Migration and Coexistence
 
