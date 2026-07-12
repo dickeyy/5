@@ -329,7 +329,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 
 #### V5-002 - Guild settings, lifecycle bootstrap, and starter policy
 
-- Status: FIXING
+- Status: ACCEPTED
 - Assignment: fresh implementation subagent `/root/slice_v5_002` using
   `v5-implementation-slice`; this owner is assigned only to V5-002.
 - Branch: `slice/v5-002-guild-bootstrap`
@@ -343,7 +343,21 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
   authorization denial; P3 configured Discord channel references validate only
   length rather than decimal snowflake form. Returned to the fresh owner for a
   targeted audited-rejection path, authorization precedence, strict decimal
-  `uint64` validation, and regression tests. No second review will be requested.
+  `uint64` validation, and regression tests. Fix commit `cec76ef` passed focused
+  and full validation; no second review was requested.
+- Orchestrator evidence gate: ACCEPTED 2026-07-11 at remote head
+  `cec76ef34addd131947e44259b22238256615083`.
+  - Structured handoff accounts for settings, exact starter levels/actions,
+    idempotent install/rejoin, non-destructive leave, stale channel cleanup,
+    migration 0004, documentation, and later-slice boundaries.
+  - Post-fix focused store/quack/Discord/HTTP tests, real MySQL migration tests,
+    `go test ./...`, vet, both builds, and diff checks: PASS.
+  - PR metadata confirms the correct base/head, one standalone review request,
+    and one Codex review. Both P2/P3 behaviors are fixed and regression-tested;
+    their GitHub threads remain cosmetically unresolved but contain no
+    unresolved implementation action.
+  - Worktree is clean and synchronized. Under the evidence-focused policy, no
+    redundant diff review or command rerun was performed.
 - Scope decision 2026-07-11: this slice persists and safely clears/repairs the
   managed-evidence channel reference, while Discord channel creation,
   permissioning, and attachment upload behavior remain owned by V5-009.
@@ -365,7 +379,12 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 
 #### V5-003 - Live Discord authorization and target-safety preflight
 
-- Status: PLANNED
+- Status: IN_PROGRESS
+- Assignment: fresh implementation subagent `/root/slice_v5_003` using
+  `v5-implementation-slice`; this owner is assigned only to V5-003.
+- Branch: `slice/v5-003-live-authorization`
+- Worktree: `/tmp/quack-v5-worktrees/v5-003`
+- Base/PR target: `slice/v5-002-guild-bootstrap` at accepted head `cec76ef`
 - Requirements: People and Permissions; Actions Target Safety.
 - Acceptance criteria:
   - Every sensitive write refreshes current Discord membership, permissions,
@@ -860,8 +879,8 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 | V5-001M | ACCEPTED | `slice/v5-001m-versioned-migrations` | [#1](https://github.com/dickeyy/5/pull/1) | 1 default + 1 large-rework exception; extra request ignored | passed round 2 |
 | V5-001 | ACCEPTED | `slice/v5-001-template-model` | [#2](https://github.com/dickeyy/5/pull/2) | 1 complete, no findings | passed round 2 |
 | V5-001C | ACCEPTED | `slice/v5-001c-case-validity` | [#3](https://github.com/dickeyy/5/pull/3) | 1 complete, one P2 fixed | passed evidence gate |
-| V5-002 | FIXING | `slice/v5-002-guild-bootstrap` | [#4](https://github.com/dickeyy/5/pull/4) | 1 complete, two findings fixing | pending |
-| V5-003 | PLANNED | pending | pending | 0 | pending |
+| V5-002 | ACCEPTED | `slice/v5-002-guild-bootstrap` | [#4](https://github.com/dickeyy/5/pull/4) | 1 complete, two findings fixed | passed evidence gate |
+| V5-003 | IN_PROGRESS | `slice/v5-003-live-authorization` | pending | 0 | pending |
 | V5-004 | PLANNED | pending | pending | 0 | pending |
 | V5-005 | PLANNED | pending | pending | 0 | pending |
 | V5-006 | PLANNED | pending | pending | 0 | pending |
