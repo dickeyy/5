@@ -329,7 +329,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 
 #### V5-002 - Guild settings, lifecycle bootstrap, and starter policy
 
-- Status: REVIEW_WAIT
+- Status: FIXING
 - Assignment: fresh implementation subagent `/root/slice_v5_002` using
   `v5-implementation-slice`; this owner is assigned only to V5-002.
 - Branch: `slice/v5-002-guild-bootstrap`
@@ -337,7 +337,13 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 - Base/PR target: `slice/v5-001c-case-validity` at accepted head `8adb20b`
 - Commit: `a4e605a`.
 - PR/review: [PR #4](https://github.com/dickeyy/5/pull/4); exactly one standalone
-  `@codex review` posted 2026-07-11 and awaiting completion.
+  `@codex review` posted 2026-07-11. Codex reviewed `a4e605a` and raised two
+  valid in-scope findings: P2 malformed/unknown/multiple-JSON PATCH payloads can
+  bypass required failure/denied auditing and expose validation before an
+  authorization denial; P3 configured Discord channel references validate only
+  length rather than decimal snowflake form. Returned to the fresh owner for a
+  targeted audited-rejection path, authorization precedence, strict decimal
+  `uint64` validation, and regression tests. No second review will be requested.
 - Scope decision 2026-07-11: this slice persists and safely clears/repairs the
   managed-evidence channel reference, while Discord channel creation,
   permissioning, and attachment upload behavior remain owned by V5-009.
@@ -854,7 +860,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 | V5-001M | ACCEPTED | `slice/v5-001m-versioned-migrations` | [#1](https://github.com/dickeyy/5/pull/1) | 1 default + 1 large-rework exception; extra request ignored | passed round 2 |
 | V5-001 | ACCEPTED | `slice/v5-001-template-model` | [#2](https://github.com/dickeyy/5/pull/2) | 1 complete, no findings | passed round 2 |
 | V5-001C | ACCEPTED | `slice/v5-001c-case-validity` | [#3](https://github.com/dickeyy/5/pull/3) | 1 complete, one P2 fixed | passed evidence gate |
-| V5-002 | REVIEW_WAIT | `slice/v5-002-guild-bootstrap` | [#4](https://github.com/dickeyy/5/pull/4) | 1 requested | pending |
+| V5-002 | FIXING | `slice/v5-002-guild-bootstrap` | [#4](https://github.com/dickeyy/5/pull/4) | 1 complete, two findings fixing | pending |
 | V5-003 | PLANNED | pending | pending | 0 | pending |
 | V5-004 | PLANNED | pending | pending | 0 | pending |
 | V5-005 | PLANNED | pending | pending | 0 | pending |
