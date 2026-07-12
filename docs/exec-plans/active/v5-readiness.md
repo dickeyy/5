@@ -273,6 +273,12 @@ QP-H exclusively owns API policy, ops, security, observability, and lifecycle
 code/docs. Central migration registration, shared ledgers, final composition,
 and readiness adjudication remain QP-I-owned to avoid parallel write conflicts.
 
+QP-I discovery routed to QP-G: the live `caseTemplateRecord` still embeds
+`gorm.DeletedAt`, which may preserve soft-delete behavior contrary to v5's
+archive/restore-only lifecycle. QP-G must adjudicate/fix this in storage
+finalization while retaining migration-frozen compatibility evidence; QP-I
+keeps the readiness item open until the reviewed head proves resolution.
+
 ### Final package
 
 QP-I absorbs V5-026. It integrates the final accepted heads, runs systematic
