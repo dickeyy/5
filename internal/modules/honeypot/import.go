@@ -106,6 +106,7 @@ func (i *Importer) importOne(ctx context.Context, row LegacySettings) (bool, err
 		if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "guild_id"}, {Name: "module_id"}}, DoUpdates: clause.AssignmentColumns([]string{"enabled", "config_json", "updated_at"})}).Create(&configuration).Error; err != nil {
 			return err
 		}
+		configuration = modules.Configuration{}
 		if err := tx.Where("guild_id = ? AND module_id = ?", row.GuildID, modules.Honeypots).First(&configuration).Error; err != nil {
 			return err
 		}

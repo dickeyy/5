@@ -293,6 +293,9 @@ func TestImportDryRunIdempotencyAndValidation(t *testing.T) {
 	actor := honeypot.Actor{GuildID: "guild-a", DiscordUserID: "admin", CanManage: true}
 	importer := honeypot.NewImporter(fixture.db, fixture.audit, fixture.validator, fixture.validator)
 	row := honeypot.LegacySettings{SourceID: "legacy-honeypot", GuildID: "guild-a", Enabled: true, Settings: honeypot.Settings{ChannelDiscordID: "trap", TemplateID: "template"}}
+	if _, err := fixture.registry.SetConfiguration(context.Background(), modules.Configuration{GuildID: "guild-a", ModuleID: modules.Honeypots, ConfigJSON: `{"channel_discord_id":"old-trap","template_id":"old-template"}`}); err != nil {
+		t.Fatal(err)
+	}
 	dry, err := importer.Import(context.Background(), actor, []honeypot.LegacySettings{row}, true)
 	if err != nil || len(dry) != 1 || !dry[0].WouldCreate {
 		t.Fatalf("dry=%+v err=%v", dry, err)
@@ -314,6 +317,10 @@ func TestImportDryRunIdempotencyAndValidation(t *testing.T) {
 	fixture.db.Model(&modules.ImportRecord{}).Where("module_id = ?", modules.Honeypots).Count(&count)
 	if count != 1 {
 		t.Fatalf("ledger rows=%d", count)
+	}
+	configuration, err := fixture.registry.Configuration(context.Background(), "guild-a", modules.Honeypots)
+	if err != nil || configuration == nil || !configuration.Enabled || configuration.ID == "" {
+		t.Fatalf("upserted configuration=%+v err=%v", configuration, err)
 	}
 	fixture.validator.channelErr = errors.New("missing permissions")
 	row.SourceID = "unsafe"
