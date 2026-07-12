@@ -12,7 +12,7 @@ no product owner has accepted that missing release evidence as a readiness
 exception. `v5.md` requires exact new-guild bootstrap and Discord-authoritative
 behavior, so adapter and isolated end-to-end tests do not prove the external
 installation boundary. The QP-I Codex review lifecycle is also pending at this
-pre-publication anchor. Release-infrastructure changes
+pre-review anchor. Release-infrastructure changes
 are explicitly deferred under the user's prohibition and are not represented
 as passes.
 
@@ -82,7 +82,7 @@ No unresolved actionable P0 remains.
 | #13 QI-2 | Honeypot internal-guild identity P1 fixed at `6b999c1` |
 | #14 QP-G | Exactly one review of `dd542c0`; recovery-manifest P2 fixed at `17f938b`; central-registry P1 transferred and closed by QP-I physical versions 10/11 |
 | #15 QP-H | Exactly one review of `d66357a`; bearer-format replay identity P2 fixed by normalized session extraction, and stale Discord gateway readiness P2 fixed by transition handlers/tests; both threads resolved at `e3e01b6`, no second request. The later queue-fairness TODO audit gap is fixed at `44f18c9` and integrated at `73236be`. |
-| QP-I | PR/review not opened at this evidence anchor; local strict gate passes and publication is next. |
+| #16 QP-I | Local strict gate passes; this PR is the single review surface and receives exactly one standalone Codex review request by default. |
 
 ## Validation evidence
 
@@ -145,8 +145,7 @@ Passed evidence:
 
 ## Publication lifecycle
 
-Commit this QP-I reconciliation, push `final/qp-i-readiness`, open one
-non-draft PR against `integration/qi-2-p2`, post exactly one standalone
-`@codex review`, fix valid findings without a second request by default, and
-revalidate proportionately. Do not merge the PR or change release
-infrastructure/settings.
+PR #16 is open from `final/qp-i-readiness` into `integration/qi-2-p2`. Post
+exactly one standalone `@codex review`, fix valid findings without a second
+request by default, and revalidate proportionately. Do not merge the PR or
+change release infrastructure/settings.
