@@ -288,6 +288,13 @@ PR #15 with focused/race/full/vet/build gates green and one Codex request
 pending. It changes no prohibited release infrastructure and documents the
 exact proposal/deferral instead.
 
+QP-G accepted at review-fix head `17f938b`: exactly one Codex request, its valid
+P2 recovery-manifest history gap fixed with targeted SQLite/MySQL/vet/build
+evidence, and the central 0400/0410 registration P1 transferred to QP-I. QP-H
+accepted at review-fix head `e3e01b6`: exactly one request, both valid P2s
+(normalized bearer identity and live Discord readiness transitions) fixed and
+resolved with targeted/race evidence. QP-I is combining both accepted heads.
+
 ### Final package
 
 QP-I absorbs V5-026. It integrates the final accepted heads, runs systematic
@@ -1093,9 +1100,9 @@ by the macro-package ledger.
 | QP-E | ACCEPTED | `package/qp-e-audit-discord` at `f7ace2f` | [#11](https://github.com/dickeyy/5/pull/11) | 1 complete; three integration findings | package gates green; findings transferred to QI-2 |
 | QP-F | ACCEPTED | `package/qp-f-honeypot-isolation` at `fc6d82c` | [#10](https://github.com/dickeyy/5/pull/10) | 1 complete; one P2 fixed | passed evidence gate |
 | QI-2 | ACCEPTED | `integration/qi-2-p2` at `6b999c1` | [#13](https://github.com/dickeyy/5/pull/13) | 1 complete; P1 fixed | focused/MySQL/race/full/vet/build green |
-| QP-G | REVIEW_PENDING | `package/qp-g-v4-storage` at `dd542c0` | [#14](https://github.com/dickeyy/5/pull/14) | 1 requested | focused/race/MySQL/Redis/full/vet/build green |
-| QP-H | REVIEW_PENDING | `package/qp-h-ops-security` at `d66357a` | [#15](https://github.com/dickeyy/5/pull/15) | 1 requested | focused/race/full/vet/build green; infra untouched |
-| QP-I | IN_PROGRESS | `final/qp-i-readiness` checkpoint `54df860` | pending | 0 | R01-R15/TODO/rehearsal scaffold green; awaits accepted QP-G/QP-H heads |
+| QP-G | ACCEPTED | `package/qp-g-v4-storage` at `17f938b` | [#14](https://github.com/dickeyy/5/pull/14) | 1 complete; P2 fixed, P1 transferred | focused/race/MySQL/Redis/full/vet/build green |
+| QP-H | ACCEPTED | `package/qp-h-ops-security` at `e3e01b6` | [#15](https://github.com/dickeyy/5/pull/15) | 1 complete; two P2s fixed | focused/race/full/vet/build green; infra untouched |
+| QP-I | IN_PROGRESS | `final/qp-i-readiness` checkpoint `54df860` | pending | 0 | integrating accepted QP-G/QP-H; final gates pending |
 
 ## Decisions
 
