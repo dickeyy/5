@@ -208,6 +208,16 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 - Branch: `slice/v5-001-template-model`
 - Worktree: `/tmp/quack-v5-worktrees/v5-001`
 - Base/PR target: `slice/v5-001m-versioned-migrations`
+- Commit: `bf9f204` (mechanically staged/committed/pushed by orchestrator after
+  the implementation owner hit an approval quota; implementation remained
+  entirely subagent-owned and unchanged).
+- Pre-review validation after final soft-delete refinement:
+  - focused store/quack/Discord/HTTP tests: PASS;
+  - both real-MySQL migration tests: PASS;
+  - `go test ./...`: PASS;
+  - `go vet -buildvcs=false ./...`: PASS;
+  - both application builds and staged `git diff --check`: PASS.
+- PR/review: publishing; no Codex request posted yet.
 - Requirements: `v5.md` Templates, Escalation Levels, Actions, Member
   Notifications, Firm Boundaries; matching scope drift rejected concepts.
 - Acceptance criteria:
@@ -890,6 +900,10 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
   #1 had already received multiple pings. The already-posted extra request is
   documented and ignored as a gate; all future slices request review once,
   apply fixes, and return directly to orchestrator validation.
+- 2026-07-11: V5-001 implementation completed while the subagent's Git-write
+  approval quota was exhausted. After the user said continue, the orchestrator
+  performed only staging/commit/push mechanics and independently reran the
+  latest real-MySQL and repository gates; the subagent resumed PR/review ownership.
 - 2026-07-11: `TODO.md` is supporting inventory, not proof of incompleteness by
   itself. Items are checked only after implementation and evidence agree with
   `v5.md`; stale or duplicate items will be corrected during owning slices.
