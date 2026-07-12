@@ -16,6 +16,7 @@ type Services struct {
 	Cases     *CaseService
 	Audits    *AuditService
 	Actions   *ActionService
+	Evidence  *EvidenceService
 	Ops       *OpsService
 }
 
@@ -36,11 +37,17 @@ func NewWithConfigDependencies(cfg config.Config, store Repository, discord Disc
 	services.Settings = NewGuildSettingsService(store)
 	services.Templates = NewTemplateService(store)
 	services.Cases = NewCaseService(store, scheduler)
+	if evidenceClient, ok := actions.(DiscordEvidenceClient); ok {
+		services.Evidence = NewEvidenceService(evidenceClient, store)
+		services.Cases.WithEvidenceCapture(services.Evidence)
+	} else {
+		services.Evidence = NewEvidenceService(nil, store)
+	}
 	if discord != nil {
 		services.Cases.authorizer = services.Guilds
 	}
 	services.Audits = NewAuditService(store)
-	services.Actions = NewActionService(store, actions)
+	services.Actions = NewActionService(store, actions).WithRecoveryControls(services.Guilds, scheduler)
 	services.Ops = NewOpsService(store, scheduler)
 	return services
 }

@@ -2,11 +2,17 @@ package actionmods
 
 import "context"
 
-// KickUser returns the explicit unsupported executor for kicks. Persisting that failure makes the configured action observable while the implementation remains intentionally unavailable.
-func KickUser() Executor {
+// KickUser executes the immutable case target and official reason through the Discord adapter.
+func KickUser(client DiscordClient) Executor {
 	return Func(func(ctx context.Context, action Context) Result {
-		_ = ctx
-		_ = action
-		return PermanentError("action_not_implemented", "kick_user action module is not implemented")
+		enforcement, ok := client.(EnforcementClient)
+		if !ok {
+			return PermanentError("discord_unavailable", "Discord enforcement is not configured")
+		}
+		response, err := enforcement.KickMember(ctx, action.DiscordGuildID, action.Case.TargetDiscordUserID, AuditReason(action))
+		if err != nil {
+			return ResultFromError(err)
+		}
+		return Result{Response: response}
 	})
 }

@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/internal/quack"
@@ -268,12 +270,233 @@ func (b *Bot) SendDM(ctx context.Context, userID, message string) (map[string]an
 	return result, nil
 }
 
+// PrepareDM opens the target's direct-message channel before an irreversible membership action.
+func (b *Bot) PrepareDM(ctx context.Context, userID string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if b == nil || b.Session == nil {
+		return "", actionmods.DiscordError{Code: "discord_session_unavailable", Message: "Discord is unavailable", Retryable: true}
+	}
+	channel, err := b.Session.UserChannelCreate(userID)
+	if err != nil {
+		return "", classifyDiscordOperation("dm_prepare", err, false)
+	}
+	return channel.ID, nil
+}
+
+// SendPreparedDM sends one final structured case notification through a pre-opened channel.
+func (b *Bot) SendPreparedDM(ctx context.Context, channelID, message string) (map[string]any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	sent, err := b.Session.ChannelMessageSend(channelID, message)
+	if err != nil {
+		return nil, classifyDiscordOperation("dm_send", err, true)
+	}
+	result := map[string]any{"channel_id": channelID}
+	if sent != nil {
+		result["message_id"] = sent.ID
+	}
+	return result, nil
+}
+
+// TimeoutMember applies the exact template-defined timeout duration.
+func (b *Bot) TimeoutMember(ctx context.Context, guildID, userID string, durationSeconds int, auditReason string) (map[string]any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	until := time.Now().UTC().Add(time.Duration(durationSeconds) * time.Second)
+	if err := b.Session.GuildMemberTimeout(guildID, userID, &until, discordgo.WithAuditLogReason(auditReason)); err != nil {
+		return nil, classifyDiscordOperation("timeout", err, false)
+	}
+	return map[string]any{"timeout_until": until.Format(time.RFC3339)}, nil
+}
+
+// KickMember removes the immutable case target using a bounded audit reason.
+func (b *Bot) KickMember(ctx context.Context, guildID, userID, auditReason string) (map[string]any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := b.Session.GuildMemberDeleteWithReason(guildID, userID, auditReason); err != nil {
+		return nil, classifyDiscordOperation("kick", err, true)
+	}
+	return map[string]any{"result": "kicked"}, nil
+}
+
+// BanMember uses Discord's seconds-based deletion setting without rounding.
+func (b *Bot) BanMember(ctx context.Context, guildID, userID string, deleteMessageSeconds int, auditReason string) (map[string]any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	endpoint := discordgo.EndpointGuildBan(guildID, userID)
+	_, err := b.Session.RequestWithBucketID(http.MethodPut, endpoint, map[string]any{"delete_message_seconds": deleteMessageSeconds}, discordgo.EndpointGuildBan(guildID, ""), discordgo.WithAuditLogReason(auditReason))
+	if err != nil {
+		return nil, classifyDiscordOperation("ban", err, true)
+	}
+	return map[string]any{"result": "banned", "delete_message_seconds": deleteMessageSeconds}, nil
+}
+
+// RemoveMemberTimeout executes an explicit staff-confirmed timeout reversal.
+func (b *Bot) RemoveMemberTimeout(ctx context.Context, guildID, userID, auditReason string) (map[string]any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := b.Session.GuildMemberTimeout(guildID, userID, nil, discordgo.WithAuditLogReason(auditReason)); err != nil {
+		return nil, classifyDiscordOperation("remove_timeout", err, true)
+	}
+	return map[string]any{"result": "timeout_removed"}, nil
+}
+
+// UnbanMember executes an explicit staff-confirmed ban reversal.
+func (b *Bot) UnbanMember(ctx context.Context, guildID, userID, auditReason string) (map[string]any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := b.Session.GuildBanDelete(guildID, userID, discordgo.WithAuditLogReason(auditReason)); err != nil {
+		return nil, classifyDiscordOperation("unban", err, true)
+	}
+	return map[string]any{"result": "unbanned"}, nil
+}
+
+// FetchMessageEvidence fetches a live message and maps it into the bounded core capture contract.
+func (b *Bot) FetchMessageEvidence(ctx context.Context, ref quack.DiscordMessageReference) (*quack.DiscordMessageSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	message, err := b.Session.ChannelMessage(ref.ChannelID, ref.MessageID)
+	if err != nil {
+		var restErr *discordgo.RESTError
+		if errors.As(err, &restErr) && restErr.Response != nil {
+			if restErr.Response.StatusCode == http.StatusNotFound {
+				return nil, &quack.EvidenceUnavailableError{Outcome: "deleted", Message: "linked message was deleted or does not exist"}
+			}
+			if restErr.Response.StatusCode == http.StatusForbidden {
+				return nil, &quack.EvidenceUnavailableError{Outcome: "inaccessible", Message: "Quack cannot access the linked message"}
+			}
+		}
+		return nil, classifyDiscordOperation("evidence_fetch", err, false)
+	}
+	if message == nil || message.Author == nil {
+		return nil, &quack.EvidenceUnavailableError{Outcome: "unavailable", Message: "linked message is unavailable"}
+	}
+	if message.GuildID == "" {
+		channel, channelErr := b.Session.Channel(ref.ChannelID)
+		if channelErr != nil {
+			return nil, classifyDiscordOperation("evidence_channel", channelErr, false)
+		}
+		message.GuildID = channel.GuildID
+	}
+	embeds := make([]map[string]any, 0, len(message.Embeds))
+	for _, embed := range message.Embeds {
+		body, _ := json.Marshal(embed)
+		var value map[string]any
+		_ = json.Unmarshal(body, &value)
+		embeds = append(embeds, value)
+	}
+	attachments := make([]quack.DiscordAttachmentSnapshot, 0, len(message.Attachments))
+	for _, item := range message.Attachments {
+		attachments = append(attachments, quack.DiscordAttachmentSnapshot{ID: item.ID, Filename: item.Filename, ContentType: item.ContentType, SizeBytes: int64(item.Size), URL: item.URL})
+	}
+	return &quack.DiscordMessageSnapshot{GuildID: message.GuildID, ChannelID: message.ChannelID, MessageID: message.ID, AuthorDiscordUserID: message.Author.ID, URL: ref.URL, Content: message.Content, CreatedAt: message.Timestamp, EditedAt: message.EditedTimestamp, Embeds: embeds, Attachments: attachments}, nil
+}
+
+// PreserveEvidenceAttachment copies supported bytes into the guild's managed staff-only evidence channel.
+func (b *Bot) PreserveEvidenceAttachment(ctx context.Context, guildID, channelID string, item quack.DiscordAttachmentSnapshot) (*quack.PreservedDiscordAttachment, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, item.URL, nil)
+	if err != nil {
+		return nil, err
+	}
+	client := b.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, classifyDiscordOperation("evidence_download", err, false)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, actionmods.DiscordError{Code: "evidence_download_failed", Message: "attachment download failed", Retryable: response.StatusCode >= 500}
+	}
+	sent, err := b.Session.ChannelFileSend(channelID, item.Filename, io.LimitReader(response.Body, item.SizeBytes+1))
+	if err != nil {
+		return nil, classifyDiscordOperation("evidence_upload", err, false)
+	}
+	preserved := &quack.PreservedDiscordAttachment{}
+	if sent != nil {
+		preserved.MessageID = sent.ID
+		if len(sent.Attachments) > 0 {
+			preserved.AttachmentID = sent.Attachments[0].ID
+			preserved.URL = sent.Attachments[0].URL
+		}
+	}
+	return preserved, nil
+}
+
+// EnsureEvidenceChannel creates or repairs a staff-only evidence channel owned by Quack.
+func (b *Bot) EnsureEvidenceChannel(ctx context.Context, guildID, currentChannelID string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	botID := ""
+	if b.Session.State != nil && b.Session.State.User != nil {
+		botID = b.Session.State.User.ID
+	}
+	if botID == "" {
+		user, err := b.Session.User("@me")
+		if err != nil || user == nil {
+			return "", errors.New("Discord bot identity is unavailable")
+		}
+		botID = user.ID
+	}
+	overwrites := []*discordgo.PermissionOverwrite{{ID: guildID, Type: discordgo.PermissionOverwriteTypeRole, Deny: discordgo.PermissionViewChannel}, {ID: botID, Type: discordgo.PermissionOverwriteTypeMember, Allow: discordgo.PermissionViewChannel | discordgo.PermissionSendMessages | discordgo.PermissionAttachFiles | discordgo.PermissionReadMessageHistory}}
+	if currentChannelID != "" {
+		channel, err := b.Session.Channel(currentChannelID)
+		if err == nil && channel != nil && channel.GuildID == guildID {
+			_, editErr := b.Session.ChannelEditComplex(channel.ID, &discordgo.ChannelEdit{Name: "quack-evidence", Topic: "Quack-managed immutable moderation evidence", PermissionOverwrites: overwrites})
+			if editErr != nil {
+				return "", classifyDiscordOperation("evidence_channel_repair", editErr, false)
+			}
+			return channel.ID, nil
+		}
+	}
+	created, err := b.Session.GuildChannelCreateComplex(guildID, discordgo.GuildChannelCreateData{Name: "quack-evidence", Type: discordgo.ChannelTypeGuildText, Topic: "Quack-managed immutable moderation evidence", PermissionOverwrites: overwrites})
+	if err != nil {
+		return "", classifyDiscordOperation("evidence_channel_create", err, false)
+	}
+	return created.ID, nil
+}
+
 // classifyDiscordError encapsulates the classify discord error rule so callers share one consistent package implementation.
 func classifyDiscordError(code string, err error) error {
+	return classifyDiscordOperation(code, err, false)
+}
+
+// classifyDiscordOperation produces redacted retry and ambiguity semantics for persisted attempts.
+func classifyDiscordOperation(operation string, err error, irreversible bool) error {
 	var restError *discordgo.RESTError
 	if errors.As(err, &restError) && restError.Response != nil {
 		status := restError.Response.StatusCode
-		return actionmods.DiscordError{Code: fmt.Sprintf("%s_%d", code, status), Message: err.Error(), Retryable: status == http.StatusTooManyRequests || status >= 500}
+		code := "discord_failure"
+		retryable := false
+		uncertain := false
+		switch {
+		case status == http.StatusBadRequest:
+			code = "validation_failed"
+		case status == http.StatusUnauthorized || status == http.StatusForbidden:
+			code = "permission_or_hierarchy_denied"
+		case status == http.StatusNotFound:
+			code = "unknown_member_or_resource"
+		case status == http.StatusTooManyRequests:
+			code = "rate_limited"
+			retryable = true
+		case status >= 500:
+			code = "discord_server_error"
+			retryable = !irreversible
+			uncertain = irreversible
+		}
+		return actionmods.DiscordError{Code: operation + "_" + code, Message: "Discord rejected the moderation request", Retryable: retryable, OutcomeUncertain: uncertain}
 	}
-	return actionmods.DiscordError{Code: code, Message: err.Error(), Retryable: true}
+	return actionmods.DiscordError{Code: operation + "_network_error", Message: "Discord request failed", Retryable: !irreversible, OutcomeUncertain: irreversible}
 }

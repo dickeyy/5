@@ -103,6 +103,9 @@ func Register(session *discordgo.Session, services *quack.Services) error {
 	if err := registry.Register(CaseCommandSpec()); err != nil {
 		return err
 	}
+	if err := registry.Register(MessageCaseCommandSpec()); err != nil {
+		return err
+	}
 	dispatcher := interactions.NewDispatcher(services, registry)
 	session.AddHandler(dispatcher.Handle)
 

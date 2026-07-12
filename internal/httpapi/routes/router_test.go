@@ -113,11 +113,18 @@ func TestOpsStatusRouteRequiresKey(t *testing.T) {
 	if err := json.Unmarshal(allowedResponse.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode ops body: %v", err)
 	}
-	if body.Scope != "global" || len(body.Actions.Capabilities) != 4 {
+	if body.Scope != "global" || len(body.Actions.Capabilities) != 5 {
 		t.Fatalf("unexpected ops body: %+v", body)
 	}
-	if body.Actions.Capabilities[1].Executable || body.Actions.Capabilities[1].Status != "not_implemented" {
-		t.Fatalf("expected punitive actions to be visible as unsupported, got %+v", body.Actions.Capabilities)
+	for _, capability := range body.Actions.Capabilities[:3] {
+		if !capability.Executable || capability.Status != "implemented" {
+			t.Fatalf("expected punitive actions to be executable, got %+v", body.Actions.Capabilities)
+		}
+	}
+	for _, capability := range body.Actions.Capabilities[3:] {
+		if !capability.Executable || capability.Status != "staff_confirmed_reversal" {
+			t.Fatalf("expected reversals to require staff confirmation, got %+v", body.Actions.Capabilities)
+		}
 	}
 }
 

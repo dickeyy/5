@@ -95,6 +95,41 @@ func archiveTemplate(c *gin.Context, services *quack.Services) {
 	c.JSON(http.StatusOK, gin.H{"template": template})
 }
 
+// restoreTemplate reverses archive without creating a new template identity.
+func restoreTemplate(c *gin.Context, services *quack.Services) {
+	template, err := services.Templates.Restore(c.Request.Context(), middleware.GetGuildContext(c), c.Param("templateID"))
+	if err != nil {
+		writeTemplateError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"template": template})
+}
+
+// exportTemplate returns guild-neutral moderation policy only.
+func exportTemplate(c *gin.Context, services *quack.Services) {
+	policy, err := services.Templates.Export(c.Request.Context(), middleware.GetGuildContext(c), c.Param("templateID"))
+	if err != nil {
+		writeTemplateError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"policy": policy})
+}
+
+// importTemplate requires explicit confirmation before activating a new guild-owned identity.
+func importTemplate(c *gin.Context, services *quack.Services) {
+	var input quack.TemplateImportInput
+	if err := decodeStrictJSON(c, &input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid import payload"})
+		return
+	}
+	template, err := services.Templates.Import(c.Request.Context(), middleware.GetGuildContext(c), input)
+	if err != nil {
+		writeTemplateError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"template": template})
+}
+
 // writeTemplateError maps template error into the preserved HTTP error response contract.
 func writeTemplateError(c *gin.Context, err error) {
 	switch {

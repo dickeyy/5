@@ -22,6 +22,11 @@ var migration0003Source string
 //go:embed migration_0004_guild_settings.go
 var migration0004Source string
 
+// migration0005Source binds migration 0005's core moderation runtime schema to its ledger checksum.
+//
+//go:embed migration_0005_core_moderation.go
+var migration0005Source string
+
 // registeredMigrations returns the immutable ordered production migration registry.
 func registeredMigrations() []migration {
 	return []migration{
@@ -29,5 +34,6 @@ func registeredMigrations() []migration {
 		migration0002SimplifyTemplateModel(),
 		migration0003CaseValidity(),
 		migration0004GuildSettings(),
+		migration0005CoreModeration(),
 	}
 }
