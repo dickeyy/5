@@ -1101,8 +1101,30 @@ by the macro-package ledger.
 | QP-F | ACCEPTED | `package/qp-f-honeypot-isolation` at `fc6d82c` | [#10](https://github.com/dickeyy/5/pull/10) | 1 complete; one P2 fixed | passed evidence gate |
 | QI-2 | ACCEPTED | `integration/qi-2-p2` at `6b999c1` | [#13](https://github.com/dickeyy/5/pull/13) | 1 complete; P1 fixed | focused/MySQL/race/full/vet/build green |
 | QP-G | ACCEPTED | `package/qp-g-v4-storage` at `17f938b` | [#14](https://github.com/dickeyy/5/pull/14) | 1 complete; P2 fixed, P1 transferred | focused/race/MySQL/Redis/full/vet/build green |
-| QP-H | ACCEPTED | `package/qp-h-ops-security` at `e3e01b6` | [#15](https://github.com/dickeyy/5/pull/15) | 1 complete; two P2s fixed | focused/race/full/vet/build green; infra untouched |
-| QP-I | IN_PROGRESS | `final/qp-i-readiness` checkpoint `54df860` | pending | 0 | integrating accepted QP-G/QP-H; final gates pending |
+| QP-H | ACCEPTED | `package/qp-h-ops-security` at `44f18c9` | [#15](https://github.com/dickeyy/5/pull/15) | 1 complete; two P2s fixed | fairness follow-up focused/race/MySQL green; infra untouched |
+| QP-I | IN_PROGRESS | `final/qp-i-readiness` integration `73236be` | pending | 0 | strict final harness green; evidence finalization/review pending |
+
+QP-I combined accepted QP-G/QP-H heads, registered physical migrations 0010/
+0011 as logical 0400 then 0410, and passed combined focused plus final real-MySQL
+store gates. The harness correctly exposed and isolated two pre-0410 legacy
+fixtures before final constraints. At 2026-07-12 04:32 MDT, the shared
+escalation quota began rejecting the remaining loopback MySQL/Redis gates and
+GitHub publication until 08:13 MDT. Static reconciliation and non-loopback gates
+continue; rejected privileged commands will be retried once after quota reset.
+
+Final TODO audit discovery: bounded executable-case polling orders by global
+minimum position and can let one busy guild fill every batch; no deterministic
+no-starvation test existed. This is an actionable QP-H workqueue/ops gap. It was
+returned to the same QP-H owner for a guild-fair query and regression evidence,
+without a second Codex request; QP-I keeps the item open until reintegration.
+
+Resolved 2026-07-12 after quota reset: QP-H head `44f18c9` rotates bounded
+selection fairly across guilds and passes deterministic focused, race, and real
+MySQL fairness tests. QP-I integrated it at `73236be`. The strict `--final`
+harness then passed focused, race, repository-wide test/vet/build, MySQL-enabled
+full-suite, project-native Redis persistence, and diff gates. The native probe
+replaced an unnecessary host `redis-cli` dependency after all Go gates had
+already passed. QP-I is finalizing its checklist/verdict before publication.
 
 ## Decisions
 
