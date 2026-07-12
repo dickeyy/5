@@ -268,7 +268,11 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 
 #### V5-001C - Simplify case validity, sources, reason, and event model
 
-- Status: PLANNED
+- Status: IN_PROGRESS
+- Assignment: implementation subagent using `v5-implementation-slice`
+- Branch: `slice/v5-001c-case-validity`
+- Worktree: `/tmp/quack-v5-worktrees/v5-001c`
+- Base/PR target: `slice/v5-001-template-model` at accepted head `6e5f206`
 - Requirements: `v5.md` Cases, Correcting a Case, Member Access, Firm Boundaries.
 - Acceptance criteria:
   - Live case contracts/storage behavior contain no severity, weight, moderator
