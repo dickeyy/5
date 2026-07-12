@@ -181,6 +181,11 @@ files. QI-1 combines accepted P1 heads, wires registrars, resolves contracts,
 and runs full repository/MySQL/build gates. If QI-1 changes behavior, it uses a
 fresh integration owner and one PR/review lifecycle.
 
+QI-1 began early after QP-B/QP-C acceptance: their heads merged cleanly into
+`integration/qi-1-p1` from `511d066`. Fresh owner `/root/qi_1_integration` is
+wiring platform/modules while QP-A remains active; QP-A will be merged into the
+same worktree before the integration PR and wave gates.
+
 ### Parallel wave P2 - product completion from QI-1
 
 | Package | Absorbed requirements | Exclusive implementation surface | Migration range |
@@ -990,7 +995,7 @@ by the macro-package ledger.
 | QP-A | IN_PROGRESS | `package/qp-a-core-moderation` | pending | 0 | absorbs V5-004–012 core/staff scope |
 | QP-B | ACCEPTED | `package/qp-b-http-auth` at `b2f3e0a` | [#7](https://github.com/dickeyy/5/pull/7) | 1 complete; P1/P2 fixed | passed evidence gate |
 | QP-C | ACCEPTED | `package/qp-c-tickets-logging` at `4579d14` | [#6](https://github.com/dickeyy/5/pull/6) | 1 complete; four P2s fixed | passed evidence gate |
-| QI-1 | PLANNED | pending | conditional | conditional | P1 integration anchor |
+| QI-1 | IN_PROGRESS | `integration/qi-1-p1` with QP-B/QP-C merged | pending | 0 | fresh integration owner wiring; awaiting QP-A |
 | QP-D | PLANNED | pending | pending | 0 | absorbs member V5-007, V5-013/014/017C |
 | QP-E | PLANNED | pending | pending | 0 | absorbs V5-015/016 |
 | QP-F | PLANNED | pending | pending | 0 | absorbs V5-021/022 |
