@@ -250,31 +250,31 @@ Items are grouped by concern, not by implementation order or priority. Completed
 
 - [x] Remove the free-form reason option from `/case add`.
 - [x] Add structured template-context prompts to `/case add`.
-- [ ] Use Discord modals or components for context that cannot fit slash-command options.
+- [x] Use Discord modals or components for context that cannot fit slash-command options.
 - [x] Keep template selection autocomplete limited to active templates.
 - [x] Show required-context validation errors privately.
 - [x] Keep successful case summaries public in the invoking staff channel.
 - [x] Keep public case summaries limited to case number, target, template, level, and action status.
-- [ ] Update the public case summary after asynchronous action and notification outcomes are known.
+- [x] Update the public case summary after asynchronous action and notification outcomes are known.
 - [x] Add `/case view` for authorized staff case detail.
 - [x] Add `/case list` for authorized staff case browsing.
 - [x] Add `/case user` for authorized member history.
-- [ ] Add stable case pagination buttons.
-- [ ] Add case detail embeds that separate validity, action result, appeal state, context, and evidence links.
-- [ ] Add member-history embeds without exposing other guilds or hidden technical details.
+- [x] Add stable case pagination buttons.
+- [x] Add case detail embeds that separate validity, action result, appeal state, context, and evidence links.
+- [x] Add member-history embeds without exposing other guilds or hidden technical details.
 - [x] Add a Discord failed-action review view.
-- [ ] Register real retry, dismiss, and void button handlers.
-- [ ] Require a void reason through a modal before voiding from Discord.
+- [x] Register real retry, dismiss, and void button handlers.
+- [x] Require a void reason through a modal before voiding from Discord.
 - [x] Register the Discord message context command for evidence-backed case creation.
 - [ ] Add an appeal entry button or secure dashboard link to eligible case notifications.
 - [ ] Add Discord views for staff to inspect appeal status and case-linked review history.
-- [ ] Add Discord audit-mirror rendering for important moderation events.
-- [ ] Keep Discord audit-mirror messages separate from general logging output.
-- [ ] Remove legacy direct moderation commands after migration.
-- [ ] Prevent v4 and v5 command-name collisions during coexistence.
-- [ ] Remove placeholder component and modal handlers as real workflows are registered.
+- [x] Add Discord audit-mirror rendering for important moderation events.
+- [x] Keep Discord audit-mirror messages separate from general logging output.
+- [x] Remove legacy direct moderation commands after migration.
+- [x] Prevent v4 and v5 command-name collisions during coexistence.
+- [x] Remove placeholder component and modal handlers as real workflows are registered.
 - [x] Add interaction deduplication using Discord interaction IDs.
-- [ ] Add tests for command definitions, permissions, autocomplete, context modals, message commands, pagination, buttons, deferred edits, and failure recovery.
+- [x] Add tests for command definitions, permissions, autocomplete, context modals, message commands, pagination, buttons, deferred edits, and failure recovery.
 
 ## Authentication and Backend API
 
@@ -335,29 +335,29 @@ Items are grouped by concern, not by implementation order or priority. Completed
 
 ## Audit Log and Staff Statistics
 
-- [ ] Define the complete set of audit action names and metadata contracts.
-- [ ] Record the correct source for dashboard, Discord, system, import, and honeypot activity.
+- [x] Define the complete set of audit action names and metadata contracts.
+- [x] Record the correct source for dashboard, Discord, system, import, and honeypot activity.
 - [ ] Audit every meaningful successful write.
 - [ ] Audit every failed or denied sensitive write.
 - [ ] Audit permission-sensitive case, history, appeal, template, settings, and module reads.
-- [ ] Audit action attempts, retries, dismissals, reversals, and terminal outcomes.
-- [ ] Audit template archive, restore, import, and export.
+- [x] Audit action attempts, retries, dismissals, reversals, and terminal outcomes.
+- [x] Audit template archive, restore, import, and export.
 - [ ] Audit member appeal activity and staff decisions.
 - [ ] Audit optional-module configuration and automated honeypot cases.
-- [ ] Enforce append-only audit behavior in application and storage interfaces.
-- [ ] Prevent normal repository methods from updating or deleting audit rows.
-- [ ] Redact secrets, tokens, private transport payloads, and unnecessary personal data from audit metadata.
-- [ ] Allow every moderator to read the complete guild audit log.
-- [ ] Add audit filters for actor, source, action, resource, result, case, member, and date.
-- [ ] Add stable audit pagination and ordering.
-- [ ] Add audit-mirror delivery to a configured staff-only Discord channel.
-- [ ] Keep audit-mirror delivery failures visible without blocking the original moderation operation.
-- [ ] Add repair behavior when the audit-mirror channel is removed or becomes inaccessible.
-- [ ] Derive staff case, action, appeal, and outcome statistics from existing records.
-- [ ] Add time-range, template, action, and result breakdowns without creating leaderboards.
-- [ ] Add backend statistics responses for authorized staff use.
-- [ ] Keep statistics guild-scoped and prevent cross-guild aggregation of member history.
-- [ ] Add tests for audit immutability, redaction, permissions, filtering, mirroring, and statistics calculations.
+- [x] Enforce append-only audit behavior in application and storage interfaces.
+- [x] Prevent normal repository methods from updating or deleting audit rows.
+- [x] Redact secrets, tokens, private transport payloads, and unnecessary personal data from audit metadata.
+- [x] Allow every moderator to read the complete guild audit log.
+- [x] Add audit filters for actor, source, action, resource, result, case, member, and date.
+- [x] Add stable audit pagination and ordering.
+- [x] Add audit-mirror delivery to a configured staff-only Discord channel.
+- [x] Keep audit-mirror delivery failures visible without blocking the original moderation operation.
+- [x] Add repair behavior when the audit-mirror channel is removed or becomes inaccessible.
+- [x] Derive staff case, action, appeal, and outcome statistics from existing records.
+- [x] Add time-range, template, action, and result breakdowns without creating leaderboards.
+- [x] Add backend statistics responses for authorized staff use.
+- [x] Keep statistics guild-scoped and prevent cross-guild aggregation of member history.
+- [x] Add tests for audit immutability, redaction, permissions, filtering, mirroring, and statistics calculations.
 
 ## Optional Ticket Module
 

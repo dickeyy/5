@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/quackdiscord/bot/internal/quack/model"
@@ -319,9 +320,18 @@ func (s *Store) ListAuditLogEntriesFiltered(ctx context.Context, params ListAudi
 		return nil, fmt.Errorf("count audit log entries: %w", err)
 	}
 
+	query := filteredAuditQuery(s.db.WithContext(ctx).Model(&model.AuditLogEntry{}), params)
+	if params.BeforeID != "" {
+		var cursor model.AuditLogEntry
+		result := s.db.WithContext(ctx).Where("guild_id = ? AND id = ?", params.GuildID, params.BeforeID).First(&cursor)
+		if result.Error != nil {
+			return nil, fmt.Errorf("resolve audit cursor: %w", result.Error)
+		}
+		query = query.Where("created_at < ? OR (created_at = ? AND id < ?)", cursor.CreatedAt, cursor.CreatedAt, cursor.ID)
+	}
 	var entries []model.AuditLogEntry
-	if err := filteredAuditQuery(s.db.WithContext(ctx).Model(&model.AuditLogEntry{}), params).
-		Order("created_at DESC").
+	if err := query.
+		Order("created_at DESC, id DESC").
 		Limit(limit).
 		Offset(offset).
 		Find(&entries).Error; err != nil {
@@ -337,6 +347,9 @@ func filteredAuditQuery(query *gorm.DB, params ListAuditLogEntriesParams) *gorm.
 	if params.ActorDiscordUserID != "" {
 		query = query.Where("actor_discord_user_id = ?", params.ActorDiscordUserID)
 	}
+	if params.Source != "" {
+		query = query.Where("source = ?", params.Source)
+	}
 	if params.Action != "" {
 		query = query.Where("action = ?", params.Action)
 	}
@@ -348,6 +361,25 @@ func filteredAuditQuery(query *gorm.DB, params ListAuditLogEntriesParams) *gorm.
 	}
 	if params.Result != "" {
 		query = query.Where("result = ?", params.Result)
+	}
+	if params.CaseID != "" {
+		pattern := `%"case_id":"` + params.CaseID + `"%`
+		query = query.Where("(resource_type = ? AND resource_id = ?) OR metadata_json LIKE ?", "case", params.CaseID, pattern)
+	}
+	if params.MemberDiscordUserID != "" {
+		pattern := `%"member_discord_user_id":"` + params.MemberDiscordUserID + `"%`
+		targetPattern := `%"target_discord_user_id":"` + params.MemberDiscordUserID + `"%`
+		query = query.Where("actor_discord_user_id = ? OR metadata_json LIKE ? OR metadata_json LIKE ?", params.MemberDiscordUserID, pattern, targetPattern)
+	}
+	if params.CreatedAfter != "" {
+		if value, err := time.Parse(time.RFC3339Nano, params.CreatedAfter); err == nil {
+			query = query.Where("created_at >= ?", value.UTC())
+		}
+	}
+	if params.CreatedBefore != "" {
+		if value, err := time.Parse(time.RFC3339Nano, params.CreatedBefore); err == nil {
+			query = query.Where("created_at < ?", value.UTC())
+		}
 	}
 	return query
 }
@@ -559,6 +591,8 @@ func createAuditLogEntry(db *gorm.DB, entry *model.AuditLogEntry, now time.Time)
 	if entry.MetadataJSON == "" {
 		entry.MetadataJSON = "{}"
 	}
+	entry.MetadataJSON = model.RedactAuditMetadata(entry.MetadataJSON)
+	entry.FailureReason = redactAuditFailureReason(entry.FailureReason)
 	if err := prepareULIDModel(&entry.ULIDModel, now); err != nil {
 		return fmt.Errorf("prepare audit log entry model: %w", err)
 	}
@@ -567,4 +601,23 @@ func createAuditLogEntry(db *gorm.DB, entry *model.AuditLogEntry, now time.Time)
 	}
 
 	return nil
+}
+
+// redactAuditFailureReason keeps bounded classifications while stripping credentials accidentally embedded in an error.
+func redactAuditFailureReason(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	lower := strings.ToLower(value)
+	for _, fragment := range []string{"token=", "authorization:", "bearer ", "password=", "secret=", "cookie="} {
+		if strings.Contains(lower, fragment) {
+			return "sensitive failure detail redacted"
+		}
+	}
+	runes := []rune(value)
+	if len(runes) > 240 {
+		return string(runes[:240])
+	}
+	return value
 }

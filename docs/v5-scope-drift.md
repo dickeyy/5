@@ -75,6 +75,11 @@ The intended v5 core still requires product behavior that is not complete today:
 - V4 historical-case import that does not affect escalation.
 - Removal of legacy direct moderation commands after migration.
 
+QP-E now provides the audit/statistics services, mirror worker, HTTP registrar,
+and Discord case-component registrar. These entries remain in the drift audit
+until QI-2 installs those registrars and the separately owned appeal/honeypot
+contracts on the combined runtime anchor.
+
 ## Optional Modules Must Stay Separate
 
 Some v4 features remain part of Quack v5 as optional guild modules, not as extensions of the case model. Tickets and general logging now implement this boundary through the isolated module registry, lifecycle, Discord adapter, route, migration, and privacy contracts documented in `docs/modules/optional-tickets-and-logging.md`.
