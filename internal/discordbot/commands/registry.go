@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/internal/discordbot/interactions"
 	"github.com/quackdiscord/bot/internal/discordbot/ui"
 	"github.com/quackdiscord/bot/internal/quack"
+	"github.com/redis/go-redis/v9"
 )
 
 // CommandSpec binds one Discord command definition to the handler that implements it.
@@ -111,6 +113,9 @@ func Register(session *discordgo.Session, services *quack.Services, componentReg
 		return err
 	}
 	dispatcher := interactions.NewDispatcher(services, registry)
+	if provider, ok := services.Store.(interface{ Redis() *redis.Client }); ok {
+		dispatcher.Deduper = interactions.NewRedisInteractionDeduper(provider.Redis(), 15*time.Minute)
+	}
 	for _, register := range componentRegistrars {
 		if register == nil {
 			continue

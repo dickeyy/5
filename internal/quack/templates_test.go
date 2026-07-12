@@ -201,6 +201,11 @@ func TestTemplateServiceGuildBoundary(t *testing.T) {
 func TestTemplateServiceGetReturnsExplicitCompatibilityReviewError(t *testing.T) {
 	ctx := context.Background()
 	repositories := newMigratedStore(t)
+	// Recreate a pre-0410 quarantined fixture. The final live schema rejects
+	// multiple actions before they can enter normal service behavior.
+	if err := repositories.DB().Exec("DROP INDEX uq_v5_level_enforcement_action").Error; err != nil {
+		t.Fatalf("drop final action constraint for compatibility fixture: %v", err)
+	}
 	guildContext := templateGuildContext(t, repositories, "guild-1", "user-1", uint64(discordgo.PermissionManageGuild))
 	service := quack.NewTemplateService(repositories)
 

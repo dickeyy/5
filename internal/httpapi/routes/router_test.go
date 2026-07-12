@@ -597,6 +597,14 @@ func TestGuildSettingsRoutesReadWriteAcknowledgeAndAuditDenied(t *testing.T) {
 
 func TestTemplateRouteRejectsQuarantinedLegacyPolicyExplicitly(t *testing.T) {
 	router, sessionID, repositories := newTemplateRouteHarnessWithStore(t, uint64(discordgo.PermissionAdministrator))
+	// Recreate a pre-0410 quarantined fixture. The final live schema rejects
+	// these shapes at the database boundary, while upgraded installations may
+	// still need the compatibility response before operator adjudication.
+	for _, index := range []string{"uq_v5_template_default_level", "uq_v5_level_enforcement_action"} {
+		if err := repositories.DB().Exec("DROP INDEX " + index).Error; err != nil {
+			t.Fatalf("drop final constraint %s for compatibility fixture: %v", index, err)
+		}
+	}
 	guild, err := repositories.UpsertGuild(context.Background(), storage.UpsertGuildParams{
 		DiscordGuildID:     "guild-1",
 		Name:               "Guild",

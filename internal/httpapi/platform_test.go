@@ -106,6 +106,15 @@ func TestPlatformSecurityErrorAndCSRFContract(t *testing.T) {
 		t.Fatalf("missing successful security contract: status=%d headers=%v", response.Code, response.Header())
 	}
 
+	request = httptest.NewRequest(http.MethodOptions, "/write", nil)
+	request.Header.Set("Origin", "https://dashboard.example.com")
+	request.Header.Set("Access-Control-Request-Method", http.MethodPut)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || !strings.Contains(response.Header().Get("Access-Control-Allow-Methods"), http.MethodPut) {
+		t.Fatalf("PUT preflight was not permitted: status=%d headers=%v", response.Code, response.Header())
+	}
+
 	request = httptest.NewRequest(http.MethodPost, "/write", nil)
 	request.Header.Set("Origin", "https://dashboard.example.com")
 	request.AddCookie(&http.Cookie{Name: cfg.Auth.SessionCookieName, Value: "session-secret"})

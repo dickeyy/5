@@ -58,6 +58,8 @@ type Runtime struct {
 	mirrorWG   sync.WaitGroup
 	appealWG   sync.WaitGroup
 	closed     bool
+	closeOnce  sync.Once
+	closeDone  chan struct{}
 }
 
 // bulkDeleteEvent carries one bounded cache-aware bulk deletion job.
@@ -126,6 +128,7 @@ func New(ctx context.Context, repositories *store.Store, session *discordgo.Sess
 		services:         services,
 		cancel:           cancel,
 		bulk:             make(chan bulkDeleteEvent, loggingQueueCapacity),
+		closeDone:        make(chan struct{}),
 	}
 	for range loggingQueueWorkers {
 		runtime.bulkWG.Add(1)
@@ -153,28 +156,53 @@ func New(ctx context.Context, repositories *store.Store, session *discordgo.Sess
 
 // Close cancels periodic work and drains already accepted logging deliveries.
 func (r *Runtime) Close() {
+	_ = r.CloseContext(context.Background())
+}
+
+// CloseContext cancels module work, stops accepting deliveries, and waits only
+// through the caller's graceful-shutdown deadline.
+func (r *Runtime) CloseContext(ctx context.Context) error {
 	if r == nil {
-		return
+		return nil
 	}
 	r.bulkMu.Lock()
-	if !r.closed {
-		r.closed = true
-		close(r.bulk)
+	if r.closeDone == nil {
+		r.closeDone = make(chan struct{})
 	}
 	r.bulkMu.Unlock()
-	r.bulkWG.Wait()
-	if r.HoneypotRuntime != nil {
-		r.HoneypotRuntime.Close()
+	r.closeOnce.Do(func() {
+		go func() {
+			r.bulkMu.Lock()
+			r.closed = true
+			if r.bulk != nil {
+				close(r.bulk)
+			}
+			r.bulkMu.Unlock()
+			r.bulkWG.Wait()
+			if r.HoneypotRuntime != nil {
+				r.HoneypotRuntime.Close()
+			}
+			if r.LoggingQueue != nil {
+				r.LoggingQueue.Close()
+			}
+			if r.cancel != nil {
+				r.cancel()
+			}
+			r.sweepWG.Wait()
+			r.mirrorWG.Wait()
+			r.appealWG.Wait()
+			close(r.closeDone)
+		}()
+	})
+	select {
+	case <-r.closeDone:
+		return nil
+	case <-ctx.Done():
+		if r.cancel != nil {
+			r.cancel()
+		}
+		return ctx.Err()
 	}
-	if r.LoggingQueue != nil {
-		r.LoggingQueue.Close()
-	}
-	if r.cancel != nil {
-		r.cancel()
-	}
-	r.sweepWG.Wait()
-	r.mirrorWG.Wait()
-	r.appealWG.Wait()
 }
 
 // runAppealNotifications drains the durable appeal outbox in bounded batches

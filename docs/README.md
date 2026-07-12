@@ -13,8 +13,15 @@ the high-level mismatch without making the technical docs inaccurate.
 - `configuration.md`: environment variables and runtime dependencies.
 - `development.md`: local workflow, Docker usage, commands, and where to make common changes.
 - `http-api-platform.md`: OAuth/session lifecycle, browser security, stable errors, rate limits, and HTTP idempotency contracts.
+- `dashboard-api-policy-v5.md`: final dashboard/internal endpoint policy matrix.
 - `migrations.md`: production migration ledger, forward, rerun, failure recovery, and rollback procedures.
-- `release-readiness.md`: current ops status, tracing, coexistence, and release checklist.
+- `operations-security-v5.md`: final health, metrics, configuration, outage, recovery, and shutdown runbook.
+- `storage-recovery-v5.md`: MySQL backup/restore manifest and Redis recovery rehearsal.
+- `v4-historical-import.md`: final v4 import format, dry-run, repeat, rollback, coexistence, and cutover.
+- `v5-rehearsal.md`: local, external-storage, coexistence, restore, and real-guild evidence protocol.
+- `v5-readiness.md`: requirement matrix, validation evidence, exceptions, and current READY/NOT READY verdict.
+- `release-readiness.md`: compatibility overview linking the final operations and readiness evidence.
+- `release-infrastructure-proposal-v5.md`: exact unauthorized CI/container/Compose changes for an infrastructure owner.
 - `v5-scope-drift.md`: high-level differences between the current backend and the intended v5 product.
 - `modules/README.md`: focused notes for core runtime modules and pipelines.
 - `testing.md`: current test harness and scope limits.
@@ -24,9 +31,14 @@ the high-level mismatch without making the technical docs inaccurate.
 The live backend currently has four main runtime surfaces:
 
 - Discord bot startup, slash-command registration, and interaction dispatch in `cmd/quack/main.go`, `internal/discordbot/commands/`, and `internal/discordbot/interactions/`.
-- HTTP API routes for status, ops status, auth, guild context/settings, templates, case reads and creation, and guild audit reads in `internal/httpapi/server.go` and `internal/httpapi/routes/`.
+- HTTP API routes for liveness/readiness/metrics, ops status, auth, guild settings,
+  templates, cases/recovery, audit/statistics, appeals/member access, and optional
+  modules in `internal/httpapi/server.go` and `internal/httpapi/routes/`.
 - Case-action queue processing in `internal/workqueue/queue.go` and `internal/workqueue/queue.go`.
-- Local container packaging for MySQL, Redis, and the app profile in `compose.yaml` and `Dockerfile`.
+- Operator-only v4 import, migration, and storage verification commands in
+  `cmd/quack-v4-import`, `cmd/quack-migrate`, and `cmd/quack-storage-verify`.
+- Existing local container packaging in `compose.yaml` and `Dockerfile`;
+  proposed release-infrastructure changes remain explicitly unauthorized.
 
 Relevant files:
 

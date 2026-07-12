@@ -70,6 +70,25 @@ import identities, ticket transcripts, or ticket lifecycle state, 0006 and 0007
 are explicitly forward-only. Core migration 0005 retains its reviewed inverse
 when it is the newest applied migration before the forward-only module suffix.
 
+Migration 0008 places logical honeypot migration 0300 in the contiguous ledger.
+It creates isolated trigger/deduplication history without granting that module
+direct case/action storage access. Migration 0009 places logical appeal
+migration 0200 after the already-reviewed module prefix. It upgrades preserved
+appeal rows into one case-linked, versioned timeline with guild settings and a
+durable notification outbox. Both are checksum-bound, additive, resumable, and
+forward-only because their module/appeal histories must not be deleted by a
+binary rollback.
+
+Migration 0010 places logical v4 import migration 0400 in the ledger. It adds
+only privacy-safe batch and source identity ledgers; imported cases use normal
+historical projections and never create action or notification work. Migration
+0011 places logical final-storage migration 0410 last. It converts residual
+legacy template deletion state to archive state, installs one-default and
+one-action uniqueness plus final query/claim indexes, and inventories unsafe
+expired running actions for manual review without changing their history. Both
+are forward-only. Recovery, backup, restore, and coexistence are documented in
+`storage-recovery-v5.md` and `v4-historical-import.md`.
+
 ## Forward procedure
 
 1. Back up MySQL and verify the backup before deploying schema-changing code.

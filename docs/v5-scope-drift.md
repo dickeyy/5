@@ -54,10 +54,17 @@ The current backend already supports important parts of the intended v5 directio
 - QI-2 installs the QP-D member/staff routes, appeal migration and outbox,
   reversal components, QP-E audit/statistics routes and mirror lifecycle, and
   QP-F honeypot runtime on the live process boundary.
+- QP-G installs a privacy-safe, idempotent v4 historical-case import contract,
+  non-escalating projections, command cutover validation, restore manifests,
+  archive-only live template storage, and final storage constraints without
+  coupling unfinished module history into core import.
+- QP-H installs the complete dashboard/internal endpoint policy, durable Redis
+  Discord dedupe, separate liveness/readiness, aggregate metrics, strict startup
+  validation, redacted operational logging, and bounded shutdown contracts.
 
 ## Behavior That Must Change
 
-No P2 integration-owned product mismatch remains in this section.
+No storage or integration-owned product mismatch remains in this section.
 
 ## Rejected Concepts to Remove
 
@@ -69,12 +76,16 @@ These concepts appear in current models, documentation, or backlog history but d
 
 Historical database compatibility may require a later migration rather than immediate column removal. Keeping old data temporarily does not make the rejected concept part of the product.
 
+The accepted QP-G storage head retires live GORM soft-delete semantics while
+preserving the frozen compatibility column, converts residual legacy delete
+state to archive state in logical migration 0410, and provides command-scope
+checks plus the documented cutover that removes direct punishment commands.
+
 ## Missing Core Behavior
 
-The intended v5 core still requires product behavior that is not complete today:
-
-- V4 historical-case import that does not affect escalation.
-- Removal of legacy direct moderation commands after migration.
+The accepted QP-G package supplies the final privacy-safe, idempotent v4
+historical-case importer, batch/source ledgers, dry-run and rollback controls,
+non-escalating history projection, and direct-command cutover validation.
 
 QP-E's audit/statistics contracts and the separately owned appeal/honeypot
 contracts are installed on the combined QI-2 runtime anchor.

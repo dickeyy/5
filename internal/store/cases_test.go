@@ -553,6 +553,84 @@ func TestCaseActionRetryScheduling(t *testing.T) {
 	}
 }
 
+func TestListExecutableCaseIDsRotatesBoundedBatchesAcrossGuilds(t *testing.T) {
+	ctx := context.Background()
+	store, guildOneID := templateTestStore(t)
+	guildTwo, err := store.UpsertGuild(ctx, storage.UpsertGuildParams{DiscordGuildID: "fair-guild-2", Name: "Fair Two", OwnerDiscordUserID: "owner-2"})
+	if err != nil {
+		t.Fatalf("upsert second guild: %v", err)
+	}
+	guildThree, err := store.UpsertGuild(ctx, storage.UpsertGuildParams{DiscordGuildID: "fair-guild-3", Name: "Fair Three", OwnerDiscordUserID: "owner-3"})
+	if err != nil {
+		t.Fatalf("upsert third guild: %v", err)
+	}
+
+	caseGuilds := map[string]string{}
+	base := time.Now().UTC().Add(-time.Hour)
+	for index := range 5 {
+		caseID := createExecutableFairnessCase(t, store, guildOneID, 1, base.Add(time.Duration(index)*time.Minute))
+		caseGuilds[caseID] = guildOneID
+	}
+	caseGuilds[createExecutableFairnessCase(t, store, guildTwo.ID, 1, base.Add(10*time.Minute))] = guildTwo.ID
+	caseGuilds[createExecutableFairnessCase(t, store, guildThree.ID, 1, base.Add(20*time.Minute))] = guildThree.ID
+
+	seenGuilds := map[string]bool{}
+	for poll := range 2 {
+		caseIDs, listErr := store.ListExecutableCaseIDs(ctx, 2)
+		if listErr != nil {
+			t.Fatalf("poll %d: %v", poll, listErr)
+		}
+		if len(caseIDs) != 2 {
+			t.Fatalf("poll %d expected bounded pair, got %+v", poll, caseIDs)
+		}
+		firstGuild := caseGuilds[caseIDs[0]]
+		secondGuild := caseGuilds[caseIDs[1]]
+		if firstGuild == "" || secondGuild == "" || firstGuild == secondGuild {
+			t.Fatalf("poll %d was not guild-fair: ids=%+v guilds=%q,%q", poll, caseIDs, firstGuild, secondGuild)
+		}
+		seenGuilds[firstGuild] = true
+		seenGuilds[secondGuild] = true
+	}
+	for _, guildID := range []string{guildOneID, guildTwo.ID, guildThree.ID} {
+		if !seenGuilds[guildID] {
+			t.Fatalf("bounded rotating polls starved guild %s: seen=%+v", guildID, seenGuilds)
+		}
+	}
+}
+
+func TestListExecutableCaseIDsPreservesPriorityWithinGuild(t *testing.T) {
+	ctx := context.Background()
+	store, guildID := templateTestStore(t)
+	lowPriority := createExecutableFairnessCase(t, store, guildID, 2, time.Now().UTC().Add(-time.Hour))
+	highPriority := createExecutableFairnessCase(t, store, guildID, 1, time.Now().UTC())
+
+	caseIDs, err := store.ListExecutableCaseIDs(ctx, 2)
+	if err != nil {
+		t.Fatalf("list executable cases: %v", err)
+	}
+	if len(caseIDs) != 2 || caseIDs[0] != highPriority || caseIDs[1] != lowPriority {
+		t.Fatalf("expected position priority within guild, got %+v", caseIDs)
+	}
+}
+
+func createExecutableFairnessCase(t *testing.T, store *storage.Store, guildID string, position int, readyAt time.Time) string {
+	t.Helper()
+	created, err := store.CreateCase(context.Background(), storage.CreateCaseParams{
+		Case:  caseModel(guildID, nil),
+		Event: caseEvent(),
+		ActionExecutions: []model.CaseActionExecution{{
+			Position: position, ActionType: model.ActionTimeoutUser, ConfigSnapshotJSON: `{}`,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create executable fairness case: %v", err)
+	}
+	if err := store.DB().Model(&model.CaseActionExecution{}).Where("case_id = ?", created.Case.ID).Update("created_at", readyAt).Error; err != nil {
+		t.Fatalf("set executable fairness priority: %v", err)
+	}
+	return created.Case.ID
+}
+
 func createCaseStorageTemplate(t *testing.T, store *storage.Store, guildID string) *storage.ExpandedCaseTemplate {
 	t.Helper()
 

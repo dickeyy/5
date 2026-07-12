@@ -154,7 +154,8 @@ func TestMigration0002QuarantinedPolicyCannotCrossLiveReadBoundary(t *testing.T)
 		t.Fatalf("create preserved second action: %v", err)
 	}
 
-	if err := runMigrations(db, registeredMigrations()); err != nil {
+	migrations := registeredMigrations()
+	if err := runMigrations(db, migrations[:len(migrations)-1]); err != nil {
 		t.Fatalf("apply template compatibility migration: %v", err)
 	}
 
@@ -517,8 +518,8 @@ func assertTemplateDeletedState(t *testing.T, db *gorm.DB, templateID string, de
 	if err := db.Unscoped().Where("id = ?", templateID).First(&record).Error; err != nil {
 		t.Fatalf("load template %s: %v", templateID, err)
 	}
-	if record.DeletedAt.Valid != deleted {
-		t.Fatalf("template %s deleted=%v, want %v", templateID, record.DeletedAt.Valid, deleted)
+	if (record.DeletedAt != nil) != deleted {
+		t.Fatalf("template %s deleted=%v, want %v", templateID, record.DeletedAt != nil, deleted)
 	}
 }
 
