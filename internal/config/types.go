@@ -2,13 +2,14 @@ package config
 
 // Config is the complete immutable process configuration passed into runtime assembly.
 type Config struct {
-	Environment string
-	API         APIConfig
-	Discord     DiscordConfig
-	Auth        AuthConfig
-	RateLimits  RateLimitConfig
-	Storage     StorageConfig
-	EventQueue  EventQueueConfig
+	Environment   string
+	API           APIConfig
+	Discord       DiscordConfig
+	Auth          AuthConfig
+	RateLimits    RateLimitConfig
+	Storage       StorageConfig
+	EventQueue    EventQueueConfig
+	Observability ObservabilityConfig
 }
 
 // RateLimitConfig defines documented fail-closed limits for dashboard and Discord adapter classes.
@@ -39,6 +40,7 @@ type APIConfig struct {
 	ReadTimeoutSeconds       int
 	WriteTimeoutSeconds      int
 	IdleTimeoutSeconds       int
+	ShutdownTimeoutSeconds   int
 }
 
 // DiscordConfig contains Discord credentials, OAuth settings, and command synchronization policy.
@@ -72,4 +74,10 @@ type StorageConfig struct {
 type EventQueueConfig struct {
 	Size    int
 	Workers int
+}
+
+// ObservabilityConfig controls the bounded metrics endpoint and service identity.
+type ObservabilityConfig struct {
+	MetricsToken string
+	ServiceName  string
 }

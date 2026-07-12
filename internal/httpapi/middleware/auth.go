@@ -27,7 +27,7 @@ func RequireAuth(s quack.Repository, auth config.AuthConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sessionID := ExtractSessionID(c, auth.SessionCookieName)
 		if sessionID == "" {
-			log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Msg("authentication required")
+			log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Str("correlation_id", quack.CorrelationIDFromContext(c.Request.Context())).Msg("authentication required")
 			apierror.Write(c, http.StatusUnauthorized, apierror.CodeAuthentication, "authentication required")
 			return
 		}
@@ -37,13 +37,13 @@ func RequireAuth(s quack.Repository, auth config.AuthConfig) gin.HandlerFunc {
 
 		session, err := s.GetSession(ctx, sessionID)
 		if err != nil {
-			log.Error().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Msg("auth session dependency unavailable")
+			log.Error().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Str("correlation_id", quack.CorrelationIDFromContext(c.Request.Context())).Msg("auth session dependency unavailable")
 			apierror.Write(c, http.StatusServiceUnavailable, apierror.CodeDependency, "authentication service unavailable")
 			return
 		}
 
 		if session == nil || session.DiscordUserID == "" {
-			log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Msg("invalid authentication session")
+			log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Str("correlation_id", quack.CorrelationIDFromContext(c.Request.Context())).Msg("invalid authentication session")
 			expireAuthCookies(c, auth)
 			apierror.Write(c, http.StatusUnauthorized, apierror.CodeAuthentication, "authentication required")
 			return
@@ -51,14 +51,14 @@ func RequireAuth(s quack.Repository, auth config.AuthConfig) gin.HandlerFunc {
 
 		now := time.Now().UTC()
 		if !session.SessionExpiresAt.IsZero() && !now.Before(session.SessionExpiresAt) {
-			log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Str("actor_discord_user_id", session.DiscordUserID).Msg("authentication session expired")
+			log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Str("correlation_id", quack.CorrelationIDFromContext(c.Request.Context())).Str("actor_discord_user_id", session.DiscordUserID).Msg("authentication session expired")
 			_ = s.DeleteSession(ctx, sessionID)
 			expireAuthCookies(c, auth)
 			apierror.Write(c, http.StatusUnauthorized, apierror.CodeReauthenticate, "sign in again to continue")
 			return
 		}
 		if !session.TokenExpiresAt.IsZero() && !now.Before(session.TokenExpiresAt) {
-			log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Str("actor_discord_user_id", session.DiscordUserID).Msg("Discord authorization expired")
+			log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Str("correlation_id", quack.CorrelationIDFromContext(c.Request.Context())).Str("actor_discord_user_id", session.DiscordUserID).Msg("Discord authorization expired")
 			_ = s.DeleteSession(ctx, sessionID)
 			expireAuthCookies(c, auth)
 			apierror.Write(c, http.StatusUnauthorized, apierror.CodeReauthenticate, "Discord authorization expired; sign in again")
@@ -77,7 +77,7 @@ func RequireAuth(s quack.Repository, auth config.AuthConfig) gin.HandlerFunc {
 		ttl := time.Duration(auth.SessionTTLHours) * time.Hour
 		session.SessionExpiresAt = now.Add(ttl)
 		if err := s.SaveSession(ctx, session, ttl); err != nil {
-			log.Error().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Msg("auth session refresh dependency unavailable")
+			log.Error().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Str("correlation_id", quack.CorrelationIDFromContext(c.Request.Context())).Msg("auth session refresh dependency unavailable")
 			apierror.Write(c, http.StatusServiceUnavailable, apierror.CodeDependency, "authentication service unavailable")
 			return
 		}

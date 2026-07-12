@@ -2,7 +2,9 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/quackdiscord/bot/internal/config"
 	"github.com/quackdiscord/bot/internal/discordbot"
@@ -15,8 +17,14 @@ import (
 )
 
 // Run assembles every adapter around the application core, starts the process, and shuts dependencies down in reverse order.
-func Run(ctx context.Context) error {
+func Run(ctx context.Context) (runErr error) {
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("validate startup configuration: %w", err)
+	}
+	if _, err := httpapi.NewPlatformRegistrar(cfg); err != nil {
+		return fmt.Errorf("validate HTTP security configuration: %w", err)
+	}
 	db, err := store.OpenMySQL(cfg.Storage.DBDSN)
 	if err != nil {
 		return err
@@ -43,12 +51,26 @@ func Run(ctx context.Context) error {
 		return fmt.Errorf("create Discord bot: %w", err)
 	}
 	queue := workqueue.New(cfg.EventQueue.Size, cfg.EventQueue.Workers)
+	var moduleRuntime *moduleintegration.Runtime
+	queueStarted := false
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.API.ShutdownTimeoutSeconds)*time.Second)
+		defer cancel()
+		var shutdownErrors []error
+		if queueStarted {
+			shutdownErrors = append(shutdownErrors, queue.StopContext(shutdownCtx))
+		}
+		if moduleRuntime != nil {
+			shutdownErrors = append(shutdownErrors, moduleRuntime.CloseContext(shutdownCtx))
+		}
+		shutdownErrors = append(shutdownErrors, closeDiscord(shutdownCtx, bot))
+		runErr = errors.Join(runErr, errors.Join(shutdownErrors...))
+	}()
 	services := quack.NewWithConfigDependencies(cfg, repositories, bot, bot, queue)
-	moduleRuntime, err := moduleintegration.New(ctx, repositories, bot.Session, services, bot)
+	moduleRuntime, err = moduleintegration.New(ctx, repositories, bot.Session, services, bot)
 	if err != nil {
 		return fmt.Errorf("compose optional modules: %w", err)
 	}
-	defer moduleRuntime.Close()
 	intents, err := moduleRuntime.RequiredGatewayIntents(ctx)
 	if err != nil {
 		return fmt.Errorf("derive optional module gateway intents: %w", err)
@@ -66,10 +88,21 @@ func Run(ctx context.Context) error {
 	if err := bot.Open(); err != nil {
 		return fmt.Errorf("connect Discord bot: %w", err)
 	}
-	defer bot.Close()
 
 	queue.Start(ctx, services.Actions.ProcessCaseActions, repositories)
-	defer queue.Stop()
+	queueStarted = true
 
 	return httpapi.Run(ctx, cfg, services, moduleRuntime, bot)
+}
+
+// closeDiscord bounds adapter close even if an upstream websocket library stalls.
+func closeDiscord(ctx context.Context, bot *discordbot.Bot) error {
+	done := make(chan error, 1)
+	go func() { done <- bot.Close() }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

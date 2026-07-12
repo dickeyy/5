@@ -7,8 +7,64 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/internal/quack/model"
 )
+
+// GuildOperationalHealth reports guild-local Discord and managed-channel
+// degradation without changing process readiness for healthy guilds.
+type GuildOperationalHealth struct {
+	Degraded        bool            `json:"degraded"`
+	Reasons         []string        `json:"reasons"`
+	BotPermissions  map[string]bool `json:"bot_permissions"`
+	ManagedChannels map[string]bool `json:"managed_channels"`
+}
+
+// OperationalGuildHealth refreshes the bot's current guild permissions and
+// combines them with managed-channel configuration. Deleted channel gateway
+// reconciliation clears stale references, so missing required references are
+// reported immediately and isolated to this guild.
+func (s *GuildService) OperationalGuildHealth(ctx context.Context, discordGuildID string) (GuildOperationalHealth, error) {
+	status := GuildOperationalHealth{Reasons: []string{}, BotPermissions: map[string]bool{}, ManagedChannels: map[string]bool{}}
+	if s == nil || s.store == nil || s.discord == nil {
+		return status, ErrAuthorizationUnavailable
+	}
+	guild, err := s.store.GetGuildByDiscordID(ctx, strings.TrimSpace(discordGuildID))
+	if err != nil || guild == nil {
+		return status, ErrBotNotInGuild
+	}
+	live, err := s.discord.GuildAuthorization(ctx, guild.DiscordGuildID, "", "")
+	if err != nil || live == nil || !live.Bot.Present {
+		status.Degraded = true
+		status.Reasons = append(status.Reasons, "discord_bot_unavailable")
+		return status, nil
+	}
+	permissions := map[string]int64{
+		"moderate_members": discordgo.PermissionModerateMembers,
+		"kick_members":     discordgo.PermissionKickMembers,
+		"ban_members":      discordgo.PermissionBanMembers,
+		"manage_channels":  discordgo.PermissionManageChannels,
+	}
+	for name, permission := range permissions {
+		available := hasDiscordPermission(live.Bot.PermissionBits, uint64(permission))
+		status.BotPermissions[name] = available
+		if !available {
+			status.Degraded = true
+			status.Reasons = append(status.Reasons, "missing_bot_permission:"+name)
+		}
+	}
+	settings, err := s.store.GetGuildSettings(ctx, guild.ID)
+	if err != nil || settings == nil {
+		return status, err
+	}
+	status.ManagedChannels["evidence"] = strings.TrimSpace(settings.ManagedEvidenceChannelDiscordID) != ""
+	status.ManagedChannels["audit_mirror"] = strings.TrimSpace(settings.AuditMirrorChannelDiscordID) != ""
+	if !status.ManagedChannels["evidence"] {
+		status.Degraded = true
+		status.Reasons = append(status.Reasons, "managed_evidence_channel_unavailable")
+	}
+	return status, nil
+}
 
 var (
 	ErrBotNotInGuild = errors.New("bot is not in guild")

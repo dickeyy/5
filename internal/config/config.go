@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -12,11 +14,13 @@ import (
 
 // Load reads environment configuration once and validates values needed to construct the process.
 func Load() Config {
-	if err := godotenv.Load(".env"); err != nil {
-		log.Warn().Msg("Error loading .env file")
-	}
-
 	env := getEnvWithDefault("ENVIRONMENT", "dev")
+	if env == "dev" {
+		if err := godotenv.Load(".env"); err != nil {
+			log.Debug().Msg("Development .env file was not loaded")
+		}
+		env = getEnvWithDefault("ENVIRONMENT", "dev")
+	}
 	corsAllowedOrigins := getEnvCSV("API_CORS_ALLOWED_ORIGINS")
 	if env == "dev" && len(corsAllowedOrigins) == 0 {
 		corsAllowedOrigins = []string{"http://localhost:3000", "http://127.0.0.1:3000"}
@@ -33,6 +37,7 @@ func Load() Config {
 			ReadTimeoutSeconds:       getEnvWithDefaultInt("API_READ_TIMEOUT_SECONDS", 15),
 			WriteTimeoutSeconds:      getEnvWithDefaultInt("API_WRITE_TIMEOUT_SECONDS", 30),
 			IdleTimeoutSeconds:       getEnvWithDefaultInt("API_IDLE_TIMEOUT_SECONDS", 60),
+			ShutdownTimeoutSeconds:   getEnvWithDefaultInt("SHUTDOWN_TIMEOUT_SECONDS", 20),
 		},
 		Discord: DiscordConfig{
 			Token:            getEnvWithEnvironmentOverride("DISCORD_TOKEN", env, true),
@@ -68,6 +73,10 @@ func Load() Config {
 			Size:    getEnvWithDefaultInt("EVENT_QUEUE_SIZE", 1000),
 			Workers: getEnvWithDefaultInt("EVENT_QUEUE_WORKERS", 3),
 		},
+		Observability: ObservabilityConfig{
+			MetricsToken: getEnvWithDefault("METRICS_TOKEN", ""),
+			ServiceName:  getEnvWithDefault("SERVICE_NAME", "quack"),
+		},
 	}
 }
 
@@ -83,6 +92,7 @@ func Default() Config {
 			ReadTimeoutSeconds:       15,
 			WriteTimeoutSeconds:      30,
 			IdleTimeoutSeconds:       60,
+			ShutdownTimeoutSeconds:   20,
 		},
 		Auth: AuthConfig{
 			SessionCookieName: "quack_session",
@@ -91,9 +101,87 @@ func Default() Config {
 			StateTTLMinutes:   10,
 			PostLoginRedirect: "/",
 		},
-		RateLimits: defaultRateLimits(),
-		EventQueue: EventQueueConfig{Size: 1000, Workers: 3},
+		Discord:       DiscordConfig{OAuthScopes: "identify guilds"},
+		RateLimits:    defaultRateLimits(),
+		EventQueue:    EventQueueConfig{Size: 1000, Workers: 3},
+		Observability: ObservabilityConfig{ServiceName: "quack"},
 	}
+}
+
+// Validate rejects incomplete or unsafe startup configuration before any
+// database, Redis, Discord, worker, or listener side effect occurs.
+func (c Config) Validate() error {
+	if err := validateRawEnvironment(); err != nil {
+		return err
+	}
+	if c.Environment != "dev" && c.Environment != "test" && c.Environment != "staging" && c.Environment != "production" {
+		return fmt.Errorf("ENVIRONMENT must be one of dev, test, staging, or production")
+	}
+	if strings.TrimSpace(c.API.Port) == "" {
+		return fmt.Errorf("API_PORT is required")
+	}
+	if c.API.ShutdownTimeoutSeconds <= 0 {
+		return fmt.Errorf("SHUTDOWN_TIMEOUT_SECONDS must be positive")
+	}
+	if c.EventQueue.Size <= 0 || c.EventQueue.Workers <= 0 {
+		return fmt.Errorf("EVENT_QUEUE_SIZE and EVENT_QUEUE_WORKERS must be positive")
+	}
+	if strings.TrimSpace(c.Observability.ServiceName) == "" {
+		return fmt.Errorf("SERVICE_NAME is required")
+	}
+	if strings.TrimSpace(c.Storage.DBDSN) == "" || strings.TrimSpace(c.Storage.RedisURL) == "" {
+		return fmt.Errorf("DATABASE_DSN and REDIS_URL are required")
+	}
+	if strings.TrimSpace(c.Discord.Token) == "" || strings.TrimSpace(c.Discord.AppID) == "" {
+		return fmt.Errorf("DISCORD_TOKEN and DISCORD_APP_ID are required")
+	}
+	if c.Environment == "staging" || c.Environment == "production" {
+		if strings.TrimSpace(c.Discord.ClientSecret) == "" || strings.TrimSpace(c.Discord.OAuthRedirectURI) == "" {
+			return fmt.Errorf("DISCORD_CLIENT_SECRET and DISCORD_OAUTH_REDIRECT_URI are required outside development")
+		}
+		if strings.TrimSpace(c.API.OpsStatusToken) == "" || strings.TrimSpace(c.Observability.MetricsToken) == "" {
+			return fmt.Errorf("OPS_STATUS_TOKEN and METRICS_TOKEN are required outside development")
+		}
+		redirect, err := url.Parse(c.Discord.OAuthRedirectURI)
+		if err != nil || redirect.Scheme != "https" || redirect.Host == "" || redirect.User != nil || redirect.RawQuery != "" || redirect.Fragment != "" {
+			return fmt.Errorf("DISCORD_OAUTH_REDIRECT_URI must be an exact HTTPS URL outside development")
+		}
+		if !slices.Contains(strings.Fields(c.Discord.OAuthScopes), "identify") || !slices.Contains(strings.Fields(c.Discord.OAuthScopes), "guilds") {
+			return fmt.Errorf("DISCORD_OAUTH_SCOPES must include identify and guilds")
+		}
+	}
+	return nil
+}
+
+// validateRawEnvironment prevents malformed values from silently falling back
+// to defaults during production startup.
+func validateRawEnvironment() error {
+	integers := []string{
+		"API_MAX_BODY_BYTES", "API_READ_HEADER_TIMEOUT_SECONDS", "API_READ_TIMEOUT_SECONDS",
+		"API_WRITE_TIMEOUT_SECONDS", "API_IDLE_TIMEOUT_SECONDS", "SHUTDOWN_TIMEOUT_SECONDS",
+		"AUTH_SESSION_TTL_HOURS", "AUTH_STATE_TTL_MINUTES", "EVENT_QUEUE_SIZE", "EVENT_QUEUE_WORKERS",
+		"RATE_LIMIT_OAUTH_MAXIMUM", "RATE_LIMIT_OAUTH_WINDOW_SECONDS", "RATE_LIMIT_MEMBER_READ_MAXIMUM",
+		"RATE_LIMIT_MEMBER_READ_WINDOW_SECONDS", "RATE_LIMIT_TEMPLATE_WRITE_MAXIMUM", "RATE_LIMIT_TEMPLATE_WRITE_WINDOW_SECONDS",
+		"RATE_LIMIT_CASE_CREATE_MAXIMUM", "RATE_LIMIT_CASE_CREATE_WINDOW_SECONDS", "RATE_LIMIT_RETRY_MAXIMUM",
+		"RATE_LIMIT_RETRY_WINDOW_SECONDS", "RATE_LIMIT_EVIDENCE_MAXIMUM", "RATE_LIMIT_EVIDENCE_WINDOW_SECONDS",
+		"HTTP_IDEMPOTENCY_TTL_HOURS",
+	}
+	for _, key := range integers {
+		if raw, ok := os.LookupEnv(key); ok {
+			value, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+			if err != nil || value <= 0 {
+				return fmt.Errorf("%s must be a positive integer", key)
+			}
+		}
+	}
+	for _, key := range []string{"AUTH_COOKIE_SECURE", "DISCORD_COMMAND_PRUNE"} {
+		if raw, ok := os.LookupEnv(key); ok {
+			if _, err := strconv.ParseBool(strings.TrimSpace(raw)); err != nil {
+				return fmt.Errorf("%s must be true or false", key)
+			}
+		}
+	}
+	return nil
 }
 
 // defaultRateLimits returns the product-wide adapter policy defaults used in tests and development.
@@ -200,12 +288,11 @@ func getEnvWithEnvironmentOverride(key, env string, critical bool) string {
 	return ""
 }
 
-// getCriticalEnv returns the value of an env variable,
-// if it does not exist, the program will panic
+// getCriticalEnv returns a required value for later aggregate validation. It
+// deliberately does not terminate the process from a parsing helper.
 func getCriticalEnv(key string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value
 	}
-	log.Fatal().Str("key", key).Msg("Critical environment variable not set")
 	return ""
 }

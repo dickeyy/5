@@ -221,7 +221,7 @@ func redactAuditValue(value any) {
 
 func sensitiveAuditMetadataKey(key string) bool {
 	normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(key), "-", "_"))
-	for _, fragment := range []string{"token", "secret", "password", "cookie", "authorization", "webhook", "session", "access_key", "private_key", "request_payload", "response_payload", "message_content", "member_content", "transcript"} {
+	for _, fragment := range []string{"token", "secret", "password", "cookie", "authorization", "webhook", "session", "access_key", "private_key", "payload", "message_content", "member_content", "transcript"} {
 		if strings.Contains(normalized, fragment) {
 			return true
 		}

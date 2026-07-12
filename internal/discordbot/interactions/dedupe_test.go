@@ -1,12 +1,15 @@
 package interactions_test
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/quackdiscord/bot/internal/discordbot/interactions"
+	"github.com/redis/go-redis/v9"
 )
 
 func TestInteractionDeduperClaimsOneConcurrentDelivery(t *testing.T) {
@@ -25,5 +28,27 @@ func TestInteractionDeduperClaimsOneConcurrentDelivery(t *testing.T) {
 	wait.Wait()
 	if claimed.Load() != 1 {
 		t.Fatalf("expected exactly one claim, got %d", claimed.Load())
+	}
+}
+
+func TestRedisInteractionDeduperSurvivesRestartAndFailsClosed(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+
+	first := interactions.NewRedisInteractionDeduper(client, time.Minute)
+	if !first.Claim("interaction-1") {
+		t.Fatal("expected first process to claim interaction")
+	}
+	second := interactions.NewRedisInteractionDeduper(client, time.Minute)
+	if second.Claim("interaction-1") {
+		t.Fatal("expected restarted process to observe durable claim")
+	}
+	server.Close()
+	if second.Claim("interaction-2") {
+		t.Fatal("expected unavailable Redis to fail closed")
+	}
+	if err := client.Ping(context.Background()).Err(); err == nil {
+		t.Fatal("expected Redis fixture to be unavailable")
 	}
 }
