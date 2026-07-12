@@ -203,14 +203,14 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 
 #### V5-001 - Simplify the template, level, and action product model
 
-- Status: FIXING
+- Status: ACCEPTED
 - Assignment: implementation subagent using `v5-implementation-slice`
 - Branch: `slice/v5-001-template-model`
 - Worktree: `/tmp/quack-v5-worktrees/v5-001`
 - Base/PR target: `slice/v5-001m-versioned-migrations`
-- Commit: `bf9f204` (mechanically staged/committed/pushed by orchestrator after
-  the implementation owner hit an approval quota; implementation remained
-  entirely subagent-owned and unchanged).
+- Commits: `bf9f204`, `6e5f206` (`bf9f204` was mechanically staged, committed,
+  and pushed by the orchestrator after the implementation owner hit an approval
+  quota; implementation remained entirely subagent-owned and unchanged).
 - Pre-review validation after final soft-delete refinement:
   - focused store/quack/Discord/HTTP tests: PASS;
   - both real-MySQL migration tests: PASS;
@@ -225,6 +225,26 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
   multi-action or invalid-default policy through the v5 response. Returned for
   explicit compatibility-review projection and regression coverage; fixes do
   not receive another Codex request under the single-review policy.
+- Orchestrator validation round 2: ACCEPTED 2026-07-11 at remote head
+  `6e5f206f6cb6ada44ded9151570659a8df9b6a32`.
+  - The compatibility migration now inventories invalid templates even when
+    already archived, preserves their source rows, and blocks live projection
+    with a typed compatibility-review-required error before levels/actions load.
+  - HTTP detail reads return `409 Conflict` with template ID and migration
+    reason, without a template or levels payload; valid archived templates
+    remain readable.
+  - Exactly one `@codex review` request exists on PR #2; it reviewed `bf9f204`
+    with no findings. No second request was made after the orchestrator fix.
+  - Focused store/quack/Discord/HTTP tests: PASS.
+  - Real MySQL `TestMySQLMigrat*` tests: PASS for forward/rerun/preservation and
+    partial-DDL rollback recovery.
+  - `go test ./...`: PASS with loopback permission.
+  - `go vet -buildvcs=false ./...`: PASS.
+  - `go build -buildvcs=false` for `cmd/quack` and `cmd/quack-migrate`: PASS.
+  - Final fix diff and branch `git diff --check`: PASS; worktree clean and
+    synchronized with origin.
+  - All Codex and orchestrator findings are resolved; no actionable P0/P1/P2
+    finding remains.
 - Requirements: `v5.md` Templates, Escalation Levels, Actions, Member
   Notifications, Firm Boundaries; matching scope drift rejected concepts.
 - Acceptance criteria:
