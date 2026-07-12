@@ -70,7 +70,7 @@ PR base for first slice: `orchestrator/v5-readiness`
 
 | `v5.md` area | Planned slices | Final evidence |
 | --- | --- | --- |
-| Main ideas, principles, and firm boundaries | V5-001, V5-004, V5-006, V5-012 | Contract, schema, and boundary tests |
+| Main ideas, principles, and firm boundaries | V5-001, V5-001C, V5-004, V5-006, V5-012 | Contract, schema, and boundary tests |
 | People and permissions | V5-003, V5-011, V5-014, V5-017 | Permission matrix and hierarchy tests |
 | Dashboard, Discord, and backend parity | V5-007, V5-016, V5-017 | HTTP/Discord contract and adapter tests |
 | Templates, escalation, starter policy | V5-001, V5-002, V5-004, V5-005 | Template, migration, and bootstrap tests |
@@ -86,7 +86,7 @@ PR base for first slice: `orchestrator/v5-readiness`
 
 | `TODO.md` concern | Owning slices |
 | --- | --- |
-| Product Model Alignment | V5-001, V5-004, V5-006 |
+| Product Model Alignment | V5-001, V5-001C, V5-004, V5-006 |
 | Guild Setup and Settings | V5-002, V5-009, V5-018P |
 | Discord Identity and Permissions | V5-003, V5-007, V5-011 |
 | Templates and Escalation | V5-004, V5-005 |
@@ -201,25 +201,52 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 - Validation: focused store migration tests; MySQL migration/rerun/rollback tests
   when `QUACK_TEST_MYSQL_DSN` is available; repository-wide gates.
 
-#### V5-001 - Simplify the v5 product model and preserve stored data
+#### V5-001 - Simplify the template, level, and action product model
+
+- Status: IN_PROGRESS
+- Assignment: implementation subagent using `v5-implementation-slice`
+- Branch: `slice/v5-001-template-model`
+- Worktree: `/tmp/quack-v5-worktrees/v5-001`
+- Base/PR target: `slice/v5-001m-versioned-migrations`
+- Requirements: `v5.md` Templates, Escalation Levels, Actions, Member
+  Notifications, Firm Boundaries; matching scope drift rejected concepts.
+- Acceptance criteria:
+  - Live template/level/action contracts and snapshots contain no severity,
+    escalation window, enabled state, action-level notification, multi-action
+    sequencing, `continue_on_error`, or admin-facing backoff/timeout/idempotency
+    controls rejected by `v5.md`; only safe retry count remains configurable.
+  - A level has exactly zero or one timeout/kick/ban action and exactly one
+    default level exists per template; thresholds are positive and unique.
+  - Archive is the only template availability signal in live behavior. Existing
+    disabled/invalid legacy-v5 configurations are preserved and made safely
+    unavailable by an explicit migration rather than silently discarded.
+  - Existing v5 rows and historical snapshots remain readable through a new,
+    checksum-bound compatibility migration; frozen migration 0001 is untouched.
+- Dependencies: V5-001M.
+- Expected write set: template/level/action domain and store models/services,
+  template HTTP contracts, template-derived case snapshot/action plumbing only
+  as needed, migration 0002, focused tests and technical docs.
+- Validation: focused template/store/route/case snapshot tests; SQLite and real
+  MySQL migration compatibility; `go test ./...`; `go vet ./...`; builds.
+
+#### V5-001C - Simplify case validity, sources, reason, and event model
 
 - Status: PLANNED
-- Requirements: `v5.md` Templates, Escalation Levels, Cases, Actions, Firm
-  Boundaries; scope drift Behavior That Must Change and Rejected Concepts.
+- Requirements: `v5.md` Cases, Correcting a Case, Member Access, Firm Boundaries.
 - Acceptance criteria:
-  - Product contracts contain no severity, weight, escalation window, enabled
-    state, reason override, note lifecycle, multi-action sequencing, or
-    admin-facing technical action controls rejected by `v5.md`.
-  - A level has exactly zero or one timeout/kick/ban action and exactly one
-    default level exists per template.
-  - Case validity is valid/voided; action and appeal progress remain separate.
-  - Existing v5 data is preserved through an explicit, tested compatibility
-    migration path.
-- Dependencies: V5-001M.
-- Expected write set: `internal/quack/model`, template/case contracts,
-  `internal/store` records/mappers/migrations, affected tests and technical docs.
-- Validation: focused model/store/template/case tests; migration compatibility
-  tests; `go test ./...`; `go vet ./...`; `go build ./cmd/quack`.
+  - Live case contracts/storage behavior contain no severity, weight, moderator
+    reason override, note lifecycle, or mixed action/appeal lifecycle statuses.
+  - Case validity is only valid/voided; action and appeal progress remain
+    separate. Normal sources are dashboard, Discord, honeypot, and v4 import.
+  - Official reason always comes from the immutable template snapshot; adapters
+    cannot override it. Free-form note events and note-oriented fields are absent.
+  - Existing v5 rows and snapshots are preserved/mapped through a new migration,
+    with focused compatibility and API/Discord contract tests.
+- Dependencies: V5-001.
+- Expected write set: case/event/source domain/store/service/contracts, HTTP and
+  Discord case inputs, migrations, affected tests/docs.
+- Validation: case/store/route/Discord contract tests; SQLite and real MySQL
+  migration compatibility; repository-wide gates.
 
 #### V5-002 - Guild settings, lifecycle bootstrap, and starter policy
 
@@ -232,7 +259,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
     starter template and thresholds/actions defined by `v5.md`.
   - Guild create/update/leave/rejoin preserves history and repairs stale channel
     references without hard deletion.
-- Dependencies: V5-001.
+- Dependencies: V5-001, V5-001C.
 - Expected write set: guild models/repository/service, Discord guild events,
   settings HTTP routes, config/docs/tests.
 - Validation: guild/store/route/Discord event tests; exact starter-policy test;
@@ -252,7 +279,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
   - Normal case creation rejects self, bots, Quack, owner, departed members, and
     targets at or above actor/bot hierarchy before any case is committed.
   - Denials use consistent errors and immutable trace-linked audit entries.
-- Dependencies: V5-001.
+- Dependencies: V5-001, V5-001C.
 - Expected write set: Discord ports/adapter, guild authorization service, case
   preflight, permission models, tests.
 - Validation: exhaustive permission matrix and hierarchy tests; case atomicity
@@ -270,7 +297,7 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
     non-voided v5 cases and counts the new case; imported v4 history is excluded.
   - Template updates keep identity, increment versions, and immutable case
     snapshots include context definitions and the selected zero-or-one action.
-- Dependencies: V5-001.
+- Dependencies: V5-001, V5-001C.
 - Expected write set: template models/service/store/contracts/snapshots/tests.
 - Validation: template/context table tests; cross-version escalation and
   concurrency tests; repository-wide gates.
@@ -735,7 +762,8 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 | --- | --- | --- | --- | --- | --- |
 | V5-000 | ACCEPTED | orchestration worktree | n/a | n/a | passed |
 | V5-001M | ACCEPTED | `slice/v5-001m-versioned-migrations` | [#1](https://github.com/dickeyy/5/pull/1) | 1 default + 1 large-rework exception; extra request ignored | passed round 2 |
-| V5-001 | PLANNED | pending | pending | 0 | pending |
+| V5-001 | IN_PROGRESS | `slice/v5-001-template-model` | pending | 0 | pending |
+| V5-001C | PLANNED | pending | pending | 0 | pending |
 | V5-002 | PLANNED | pending | pending | 0 | pending |
 | V5-003 | PLANNED | pending | pending | 0 | pending |
 | V5-004 | PLANNED | pending | pending | 0 | pending |
