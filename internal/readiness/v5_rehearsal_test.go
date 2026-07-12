@@ -59,6 +59,9 @@ func TestCleanInstallComposesEveryAcceptedV5Surface(t *testing.T) {
 		t.Fatalf("compose HTTP routes: %v", err)
 	}
 	assertRoutes(t, engine, []string{
+		"GET /livez",
+		"GET /readyz",
+		"GET /metrics",
 		"GET /status",
 		"GET /guilds/:discordGuildID/templates",
 		"POST /guilds/:discordGuildID/cases",
@@ -79,17 +82,25 @@ func TestCleanInstallComposesEveryAcceptedV5Surface(t *testing.T) {
 // ordered prefix with no duplicate or skipped physical migration versions.
 func assertContiguousMigrationLedger(t *testing.T, db *gorm.DB) {
 	t.Helper()
-	var versions []uint64
-	if err := db.Raw("SELECT version FROM quack_schema_migrations ORDER BY version").Scan(&versions).Error; err != nil {
+	var ledger []struct {
+		Version uint64
+		Name    string
+	}
+	if err := db.Raw("SELECT version, name FROM quack_schema_migrations ORDER BY version").Scan(&ledger).Error; err != nil {
 		t.Fatalf("read migration ledger: %v", err)
 	}
-	if len(versions) < 9 {
-		t.Fatalf("migration ledger omitted accepted QI-2 migrations: %v", versions)
+	if len(ledger) != 11 {
+		t.Fatalf("migration ledger omitted final v5 migrations: %+v", ledger)
 	}
-	for index, version := range versions {
+	for index, entry := range ledger {
 		want := uint64(index + 1)
-		if version != want {
-			t.Fatalf("migration ledger is not contiguous at index %d: got %d want %d", index, version, want)
+		if entry.Version != want {
+			t.Fatalf("migration ledger is not contiguous at index %d: got %d want %d", index, entry.Version, want)
+		}
+	}
+	for version, name := range map[int]string{9: "appeals_and_member_access_0200", 10: "v4_historical_import_0400", 11: "final_storage_constraints_0410"} {
+		if ledger[version-1].Name != name {
+			t.Fatalf("migration %d has name %q, want %q", version, ledger[version-1].Name, name)
 		}
 	}
 }

@@ -54,6 +54,13 @@ The current backend already supports important parts of the intended v5 directio
 - QI-2 installs the QP-D member/staff routes, appeal migration and outbox,
   reversal components, QP-E audit/statistics routes and mirror lifecycle, and
   QP-F honeypot runtime on the live process boundary.
+- QP-G installs a privacy-safe, idempotent v4 historical-case import contract,
+  non-escalating projections, command cutover validation, restore manifests,
+  archive-only live template storage, and final storage constraints without
+  coupling unfinished module history into core import.
+- QP-H installs the complete dashboard/internal endpoint policy, durable Redis
+  Discord dedupe, separate liveness/readiness, aggregate metrics, strict startup
+  validation, redacted operational logging, and bounded shutdown contracts.
 
 ## Behavior That Must Change
 

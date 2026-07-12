@@ -18,18 +18,23 @@ go test ./...
 go vet ./...
 go build -o /tmp/quack-v5-readiness-quack ./cmd/quack
 go build -o /tmp/quack-v5-readiness-migrate ./cmd/quack-migrate
+go build -o /tmp/quack-v5-readiness-v4-import ./cmd/quack-v4-import
+go build -o /tmp/quack-v5-readiness-storage-verify ./cmd/quack-storage-verify
 
 if [[ "$mode" == "--final" ]]; then
   if [[ -z "${QUACK_TEST_MYSQL_DSN:-}" ]]; then
     echo "final readiness requires QUACK_TEST_MYSQL_DSN; MySQL evidence was NOT EXECUTED" >&2
     exit 1
   fi
-  QUACK_TEST_MYSQL_DSN="$QUACK_TEST_MYSQL_DSN" go test ./internal/store ./internal/modules/... ./internal/readiness
-
   if [[ -z "${QUACK_TEST_REDIS_URL:-}" ]]; then
     echo "final readiness requires QUACK_TEST_REDIS_URL; real Redis evidence was NOT EXECUTED" >&2
     exit 1
   fi
+
+  QUACK_TEST_MYSQL_DSN="$QUACK_TEST_MYSQL_DSN" \
+    QUACK_TEST_REDIS_URL="$QUACK_TEST_REDIS_URL" \
+    go test ./...
+
   if ! command -v redis-cli >/dev/null 2>&1; then
     echo "final readiness requires redis-cli for the external Redis probe" >&2
     exit 1

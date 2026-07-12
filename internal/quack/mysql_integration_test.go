@@ -95,6 +95,72 @@ func TestMySQLConcurrentCaseCreationSelectsDistinctEscalation(t *testing.T) {
 	}
 }
 
+func TestMySQLConcurrentCaseCreationAndVoidPreserveNumberingAndValidity(t *testing.T) {
+	db := openIsolatedMySQLDB(t)
+	repositories := store.New(db, nil)
+	if err := repositories.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	suffix := fmt.Sprint(time.Now().UTC().UnixNano())
+	guild, err := repositories.UpsertGuild(ctx, model.UpsertGuildParams{DiscordGuildID: "create-void-" + suffix, Name: "Create Void", OwnerDiscordUserID: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guildContext := &quack.GuildStaffContext{
+		Guild: guild, Staff: &model.StaffMember{GuildID: guild.ID, DiscordUserID: "moderator"}, IsAdmin: true, IsModerator: true,
+		Permissions: map[model.PermissionAction]bool{model.PermissionActionCaseTemplateWrite: true, model.PermissionActionCaseCreate: true, model.PermissionActionCaseVoid: true},
+	}
+	services := quack.NewWithConfigDependencies(config.Default(), repositories, nil, nil, nil)
+	template, err := services.Templates.Create(ctx, guildContext, quack.TemplateInput{
+		Slug: "create-void-" + suffix, Name: "Create Void", ReasonTemplate: "Reason",
+		Levels: []quack.TemplateLevelInput{{Name: "Default", Position: 1, IsDefault: true}, {Name: "Second", Position: 2, TriggerCaseCount: 2}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := services.Cases.Create(ctx, guildContext, quack.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	errors := make(chan error, 2)
+	created := make(chan *quack.CaseResponse, 1)
+	start := make(chan struct{})
+	go func() {
+		<-start
+		item, createErr := services.Cases.Create(ctx, guildContext, quack.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target"})
+		if createErr == nil {
+			created <- item
+		}
+		errors <- createErr
+	}()
+	go func() {
+		<-start
+		_, voidErr := services.Cases.Void(ctx, guildContext, first.ID, "concurrent correction", nil)
+		errors <- voidErr
+	}()
+	close(start)
+	for range 2 {
+		if operationErr := <-errors; operationErr != nil {
+			t.Fatalf("concurrent create/void: %v", operationErr)
+		}
+	}
+	second := <-created
+	if second.CaseNumber != first.CaseNumber+1 {
+		t.Fatalf("case numbering changed across create/void: first=%d second=%d", first.CaseNumber, second.CaseNumber)
+	}
+	persistedFirst, err := repositories.GetCaseByID(ctx, first.ID)
+	if err != nil || persistedFirst.Validity != model.CaseValidityVoided {
+		t.Fatalf("first case was not durably voided: %+v err=%v", persistedFirst, err)
+	}
+	persistedSecond, err := repositories.GetCaseByID(ctx, second.ID)
+	if err != nil || persistedSecond.Validity != model.CaseValidityValid {
+		t.Fatalf("concurrent case was not durably valid: %+v err=%v", persistedSecond, err)
+	}
+}
+
 func TestMySQLUnavailableEvidenceSnapshotUsesPersistableTimestamp(t *testing.T) {
 	db := openIsolatedMySQLDB(t)
 	repositories := store.New(db, nil)

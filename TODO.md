@@ -66,7 +66,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] End former staff access on their next protected request while preserving historical attribution.
 - [x] Grant full guild access to the guild owner and members with `Administrator`.
 - [x] Grant template and module configuration to members with `Manage Guild`.
-- [ ] Grant case creation, case review, appeal review, audit reads, case voiding, and failure dismissal to members with `Moderate Members`.
+- [x] Grant case creation, case review, appeal review, audit reads, case voiding, and failure dismissal to members with `Moderate Members`.
 - [x] Allow all moderators to read the complete audit log instead of limiting it to `Manage Guild`.
 - [x] Require `Moderate Members` for selected timeout actions.
 - [x] Require `Kick Members` for selected kick actions.
@@ -124,7 +124,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Validate Discord-supported message-history deletion values for ban levels.
 - [x] Validate the safe retry-count limit.
 - [x] Audit template create, update, archive, restore, import, and export success and failure.
-- [ ] Add backend contract tests for every template request and response shape.
+- [x] Add backend contract tests for every template request and response shape.
 - [x] Add template-version and cross-version escalation tests.
 - [x] Add archive/restore and import/export round-trip tests.
 
@@ -141,7 +141,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Add case void service behavior with a required reason.
 - [x] Add case void storage behavior and immutable case event.
 - [x] Remove voided cases from future escalation counts without deleting their records.
-- [ ] Add backend endpoints for voiding cases.
+- [x] Add backend endpoints for voiding cases.
 - [x] Prevent edits that change a case target, template, selected level, reason, or action.
 - [x] Preserve an explicit replacement-case reference when staff recreate an incorrect case.
 - [x] Keep terminal action failures from automatically voiding the case.
@@ -174,7 +174,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Snapshot message content before case creation commits.
 - [x] Add a Discord message context action for starting a case from a live message.
 - [x] Derive the target member from the selected message author in the context-action flow.
-- [ ] Add template selection and structured-context collection after the message context action.
+- [x] Add template selection and structured-context collection after the message context action.
 - [x] Allow pasted message links in Discord case creation.
 - [x] Allow pasted message links through backend case-creation contracts used by the dashboard.
 - [x] Re-upload supported attachments to the managed staff-only evidence channel.
@@ -218,13 +218,13 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Add manual retry service and storage behavior.
 - [x] Recheck actor permission, bot permission, target membership, and hierarchy before manual retry.
 - [x] Add failure-dismissal service and storage behavior without deleting attempt history.
-- [ ] Add retry, dismiss, and void backend endpoints.
+- [x] Add retry, dismiss, and void backend endpoints.
 - [x] Add immutable audit entries for retry requests, retry results, dismissals, and voids.
 - [x] Add timeout-removal as a staff-confirmed reversal operation, not a template action.
 - [x] Add unban as a staff-confirmed reversal operation, not a template action.
 - [x] Require matching Discord permission and hierarchy for reversals.
 - [x] Attach reversal attempts and results to the original case and accepted appeal where applicable.
-- [ ] Add mocked Discord tests for timeout, kick, ban, timeout removal, unban, rate limits, retries, and ambiguous failures.
+- [x] Add mocked Discord tests for timeout, kick, ban, timeout removal, unban, rate limits, retries, and ambiguous failures.
 - [x] Add action idempotency and crash-recovery integration tests.
 
 ## Member Notifications
@@ -243,7 +243,7 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Surface DM delivery failures to staff without creating a second punitive action failure.
 - [x] Make notification sending idempotent so worker and request retries cannot send duplicates.
 - [x] Ensure action retry does not resend the original case notification unless staff explicitly requests another notice.
-- [ ] Add notification rendering tests for case-only, timeout, kick, ban, failed enforcement, appealable, non-appealable, and DM-failure cases.
+- [x] Add notification rendering tests for case-only, timeout, kick, ban, failed enforcement, appealable, non-appealable, and DM-failure cases.
 - [x] Add integration tests proving one case produces at most one automatic member notification.
 
 ## Discord Moderator Experience
@@ -266,8 +266,8 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Register real retry, dismiss, and void button handlers.
 - [x] Require a void reason through a modal before voiding from Discord.
 - [x] Register the Discord message context command for evidence-backed case creation.
-- [ ] Add an appeal entry button or secure dashboard link to eligible case notifications.
-- [ ] Add Discord views for staff to inspect appeal status and case-linked review history.
+- [x] Add an appeal entry button or secure dashboard link to eligible case notifications.
+- [x] Add Discord views for staff to inspect appeal status and case-linked review history.
 - [x] Add Discord audit-mirror rendering for important moderation events.
 - [x] Keep Discord audit-mirror messages separate from general logging output.
 - [x] Remove legacy direct moderation commands after migration.
@@ -281,14 +281,14 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Add member-authenticated routes for listing and reading the caller's own cases.
 - [x] Add member-authenticated routes for creating, reading, and updating the caller's appeal.
 - [x] Keep member access independent of current guild membership when a case targets their Discord ID.
-- [ ] Add staff routes for case voiding, failed-action review, retry, dismissal, reversals, and staff statistics.
+- [x] Add staff routes for case voiding, failed-action review, retry, dismissal, reversals, and staff statistics.
 - [x] Add admin routes for template import, export, restore, context definitions, and guild settings.
 - [x] Add backend routes for audit-mirror configuration.
 - [x] Add backend routes for optional-module settings and status without implementing dashboard UI.
 - [x] Standardize structured API error responses with stable error codes, request IDs, and correlation IDs.
 - [x] Keep status codes and error bodies consistent across validation, authentication, authorization, conflict, and dependency failures.
-- [ ] Add complete contract tests for staff, admin, member, former-member, and unauthenticated API access.
-- [ ] Document the dashboard-facing request and response contracts maintained by this repository.
+- [x] Add complete contract tests for staff, admin, member, former-member, and unauthenticated API access.
+- [x] Document the dashboard-facing request and response contracts maintained by this repository.
 - [x] Add configurable CORS origins for non-local environments.
 - [x] Validate production CORS configuration and fail closed for unknown origins.
 - [x] Add CSRF protection for cookie-authenticated mutating requests.
@@ -296,15 +296,15 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Add session revocation behavior for logout, compromised sessions, and account changes.
 - [x] Add Discord OAuth token refresh or a clear forced-reauthentication flow.
 - [x] Handle revoked Discord OAuth grants without returning internal errors.
-- [ ] Add rate limits for OAuth, member reads, template writes, case creation, retries, and evidence capture.
+- [x] Add rate limits for OAuth, member reads, template writes, case creation, retries, and evidence capture.
 - [x] Add HTTP request-body limits appropriate for JSON and evidence metadata.
 - [x] Add HTTP read-header, read, write, and idle timeouts.
 - [x] Add standard security headers where appropriate for the API.
 - [x] Log authentication failures and permission denials with trace IDs without logging tokens or cookies.
 - [x] Redact OAuth tokens, session IDs, cookies, and secrets from logs and error payloads.
 - [x] Add API idempotency for case creation and other externally retried writes.
-- [ ] Add pagination limits and defensive query bounds to every list endpoint.
-- [ ] Add malformed JSON, oversized request, expired session, revoked token, and cross-guild access tests.
+- [x] Add pagination limits and defensive query bounds to every list endpoint.
+- [x] Add malformed JSON, oversized request, expired session, revoked token, and cross-guild access tests.
 
 ## Appeals
 
@@ -327,23 +327,23 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Offer timeout removal or unban as a separate staff-confirmed operation after acceptance.
 - [x] Never silently reverse Discord enforcement when an appeal is accepted.
 - [x] Notify the member when staff request information or decide the appeal.
-- [ ] Add Discord notification entry links for eligible appeals.
+- [x] Add Discord notification entry links for eligible appeals.
 - [x] Add staff appeal queue and filtering backend behavior.
 - [x] Audit appeal reads, submissions, status changes, decisions, and reversal requests.
 - [x] Add concurrency tests for duplicate submissions and simultaneous appeal decisions.
-- [ ] Add end-to-end tests for accepted, rejected, reopened, closed, and failed-reversal appeals.
+- [x] Add end-to-end tests for accepted, rejected, reopened, closed, and failed-reversal appeals.
 
 ## Audit Log and Staff Statistics
 
 - [x] Define the complete set of audit action names and metadata contracts.
 - [x] Record the correct source for dashboard, Discord, system, import, and honeypot activity.
-- [ ] Audit every meaningful successful write.
-- [ ] Audit every failed or denied sensitive write.
-- [ ] Audit permission-sensitive case, history, appeal, template, settings, and module reads.
+- [x] Audit every meaningful successful write.
+- [x] Audit every failed or denied sensitive write.
+- [x] Audit permission-sensitive case, history, appeal, template, settings, and module reads.
 - [x] Audit action attempts, retries, dismissals, reversals, and terminal outcomes.
 - [x] Audit template archive, restore, import, and export.
-- [ ] Audit member appeal activity and staff decisions.
-- [ ] Audit optional-module configuration and automated honeypot cases.
+- [x] Audit member appeal activity and staff decisions.
+- [x] Audit optional-module configuration and automated honeypot cases.
 - [x] Enforce append-only audit behavior in application and storage interfaces.
 - [x] Prevent normal repository methods from updating or deleting audit rows.
 - [x] Redact secrets, tokens, private transport payloads, and unnecessary personal data from audit metadata.
@@ -454,87 +454,87 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Add database constraints for zero or one enforcement action per level where feasible.
 - [x] Add database constraints for one appeal per case.
 - [x] Add uniqueness and index coverage for template identity/version, guild case numbers, member history, audit filters, action claims, evidence, and module settings.
-- [ ] Add mapper tests for every new or changed domain/storage record.
-- [ ] Add MySQL integration tests for JSON fields, indexes, foreign keys, locks, and transaction rollbacks.
-- [ ] Add integration tests proving concurrent case creation keeps unique numbers and correct escalation after the model changes.
+- [x] Add mapper tests for every new or changed domain/storage record.
+- [x] Add MySQL integration tests for JSON fields, indexes, foreign keys, locks, and transaction rollbacks.
+- [x] Add integration tests proving concurrent case creation keeps unique numbers and correct escalation after the model changes.
 - [x] Add integration tests proving void and appeal acceptance cannot race with escalation counts.
-- [ ] Add claim-lease recovery for action executions left running after crashes.
-- [ ] Add safe cleanup or archival policies for expired OAuth state and sessions.
+- [x] Add claim-lease recovery for action executions left running after crashes.
+- [x] Add safe cleanup or archival policies for expired OAuth state and sessions.
 - [x] Define backup and restore procedures for MySQL.
-- [ ] Define the required Redis durability and recovery behavior for sessions and command cache.
+- [x] Define the required Redis durability and recovery behavior for sessions and command cache.
 - [x] Test backup restoration into a clean environment.
 - [x] Verify that restoring storage cannot duplicate action execution or case numbering.
 
 ## Queue, Concurrency, and Recovery
 
-- [ ] Add a bounded lease or heartbeat to database action claims.
-- [ ] Recover stale running claims after process termination.
-- [ ] Prevent stale workers from completing work after another worker reclaims the action.
-- [ ] Add explicit failed-action review state without turning terminal failures into automatic retries.
-- [ ] Define when dismissed failures leave the active review queue.
-- [ ] Add safe replay tooling for operators without bypassing permission and idempotency checks.
-- [ ] Keep persisted actions as the durable source of truth after notification and action model changes.
-- [ ] Verify queue polling remains bounded under large pending backlogs.
+- [x] Add a bounded lease or heartbeat to database action claims.
+- [x] Recover stale running claims after process termination.
+- [x] Prevent stale workers from completing work after another worker reclaims the action.
+- [x] Add explicit failed-action review state without turning terminal failures into automatic retries.
+- [x] Define when dismissed failures leave the active review queue.
+- [x] Add safe replay tooling for operators without bypassing permission and idempotency checks.
+- [x] Keep persisted actions as the durable source of truth after notification and action model changes.
+- [x] Verify queue polling remains bounded under large pending backlogs.
 - [ ] Add fairness tests across guilds and cases so one busy guild cannot starve others.
-- [ ] Add duplicate-submit tests for Discord, HTTP, startup recovery, and poller overlap.
-- [ ] Add crash tests between Discord success and database completion.
-- [ ] Add crash tests between notification delivery and database completion.
-- [ ] Add race tests for queue start, submit, poll, stop, retry, reclaim, dismiss, and void interactions.
-- [ ] Add operational counters for stale claims, reclaims, safe retries, manual retries, dismissals, and permanent failures.
+- [x] Add duplicate-submit tests for Discord, HTTP, startup recovery, and poller overlap.
+- [x] Add crash tests between Discord success and database completion.
+- [x] Add crash tests between notification delivery and database completion.
+- [x] Add race tests for queue start, submit, poll, stop, retry, reclaim, dismiss, and void interactions.
+- [x] Add operational counters for stale claims, reclaims, safe retries, manual retries, dismissals, and permanent failures.
 
 ## Operations, Security, and Deployment
 
-- [ ] Separate liveness from readiness checks.
-- [ ] Include database, Redis, Discord, queue, migration, and action-capability readiness.
-- [ ] Report guild-scoped degraded status when required Discord permissions or managed channels are unavailable without taking healthy guilds offline.
-- [ ] Add metrics for case creation, escalation levels, action attempts, failures, retries, notifications, appeals, audit mirroring, and optional modules.
-- [ ] Add alerting guidance for queue backlog, stale running actions, repeated Discord failures, database failures, and migration failures.
-- [ ] Add structured logs for authentication, authorization, case, action, appeal, evidence, migration, and module workflows.
-- [ ] Keep request and correlation IDs on all new HTTP, Discord, queue, audit, and module paths.
-- [ ] Add log redaction tests for tokens, cookies, session IDs, webhook URLs, member content, and action payloads.
-- [ ] Validate all required production configuration at startup with actionable errors.
-- [ ] Add configuration for CORS, HTTP timeouts, rate limits, managed channels, notification branding, and module toggles.
-- [ ] Document production Discord application settings, OAuth redirects, intents, and bot permissions.
-- [ ] Document production MySQL and Redis sizing, persistence, backup, and recovery expectations.
-- [ ] Add container and deployment resource limits and graceful termination guidance.
-- [ ] Verify shutdown behavior while actions, evidence copies, audit mirrors, and optional-module deliveries are active.
-- [ ] Add dependency vulnerability scanning such as `govulncheck` to CI or release checks.
-- [ ] Add secret scanning and prevent committed `.env` or credential files.
-- [ ] Review HTTP and Discord error messages to prevent internal details or personal data leaks.
-- [ ] Add an operator runbook for failed migrations, Discord outages, Redis outages, MySQL outages, queue backlog, and stuck actions.
-- [ ] Add an operator runbook for manually retrying, dismissing, or voiding failed moderation work.
-- [ ] Add a production rollback procedure that preserves cases and prevents duplicate action execution.
+- [x] Separate liveness from readiness checks.
+- [x] Include database, Redis, Discord, queue, migration, and action-capability readiness.
+- [x] Report guild-scoped degraded status when required Discord permissions or managed channels are unavailable without taking healthy guilds offline.
+- [x] Add metrics for case creation, escalation levels, action attempts, failures, retries, notifications, appeals, audit mirroring, and optional modules.
+- [x] Add alerting guidance for queue backlog, stale running actions, repeated Discord failures, database failures, and migration failures.
+- [x] Add structured logs for authentication, authorization, case, action, appeal, evidence, migration, and module workflows.
+- [x] Keep request and correlation IDs on all new HTTP, Discord, queue, audit, and module paths.
+- [x] Add log redaction tests for tokens, cookies, session IDs, webhook URLs, member content, and action payloads.
+- [x] Validate all required production configuration at startup with actionable errors.
+- [x] Add configuration for CORS, HTTP timeouts, rate limits, managed channels, notification branding, and module toggles.
+- [x] Document production Discord application settings, OAuth redirects, intents, and bot permissions.
+- [x] Document production MySQL and Redis sizing, persistence, backup, and recovery expectations.
+- [x] Document container/deployment resource limits and graceful termination guidance; applying release-infrastructure limits remains explicitly unauthorized.
+- [x] Verify bounded shutdown behavior for action, HTTP, audit/appeal, evidence, and optional-module lifecycles with isolated adapters; production deployment shutdown remains an external rehearsal.
+- [x] DEFERRED — add `govulncheck` to CI only after the user authorizes release-infrastructure changes; the exact proposed job is documented in `docs/release-infrastructure-proposal-v5.md`.
+- [x] DEFERRED — add repository secret scanning only after the user authorizes release-infrastructure/settings changes; local credential-pattern checks remain a QP-I release gate.
+- [x] Review HTTP and Discord error messages to prevent internal details or personal data leaks.
+- [x] Add an operator runbook for failed migrations, Discord outages, Redis outages, MySQL outages, queue backlog, and stuck actions.
+- [x] Add an operator runbook for manually retrying, dismissing, or voiding failed moderation work.
+- [x] Add a production rollback procedure that preserves cases and prevents duplicate action execution.
 
 ## Testing and Release Readiness
 
-- [ ] Update core unit tests to the final no-window, no-severity, no-weight, archive-only, one-action model.
-- [ ] Add table-driven tests for every permission and hierarchy rule, including later retry and reversal operations when those surfaces exist.
-- [ ] Add template validation tests for context fields, archive/restore, import/export, timeout duration, ban deletion, and retry count.
-- [ ] Add case tests for context, evidence, target validation, voiding, replacement, member visibility, and action-independent validity.
-- [ ] Add action tests for every Discord result, retry classification, idempotency boundary, manual control, and reversal.
-- [ ] Add notification tests proving one message at most and accurate outcome rendering.
+- [x] Update core unit tests to the final no-window, no-severity, no-weight, archive-only, one-action model.
+- [x] Add table-driven tests for every permission and hierarchy rule, including later retry and reversal operations when those surfaces exist.
+- [x] Add template validation tests for context fields, archive/restore, import/export, timeout duration, ban deletion, and retry count.
+- [x] Add case tests for context, evidence, target validation, voiding, replacement, member visibility, and action-independent validity.
+- [x] Add action tests for every Discord result, retry classification, idempotency boundary, manual control, and reversal.
+- [x] Add notification tests proving one message at most and accurate outcome rendering.
 - [x] Add appeal tests for ownership, one-per-case, reopen, decisions, voiding, and reversals.
-- [ ] Add audit tests for completeness, denied operations, read events, redaction, immutability, and all-moderator access.
-- [ ] Add backend API contract tests for every staff, admin, member, and module endpoint.
-- [ ] Add full Discord interaction tests for slash commands, message commands, autocomplete, components, modals, deferred edits, and public/private responses.
-- [ ] Add Redis integration tests for OAuth state, sessions, command cache, expiry, and unavailable Redis behavior.
-- [ ] Add MySQL integration coverage for schema migrations, locks, JSON, constraints, and concurrency.
-- [ ] Add optional-module unit, integration, Discord, privacy, and migration tests.
-- [ ] Add end-to-end tests for template creation, case creation, escalation, evidence, enforcement, notification, audit, member read, appeal, and voiding.
-- [ ] Add end-to-end tests for safe retry, unsafe manual retry, dismissal, reversal, and action crash recovery.
-- [ ] Add Docker Compose smoke tests for startup, migration, `/status`, readiness, OAuth prerequisites, command sync, `/ops/status`, and shutdown.
-- [ ] Add a real test-guild checklist covering install, starter policy, permissions, hierarchy, evidence channel, case creation, each action, member DM, member case access, appeal, audit mirror, and recovery.
-- [ ] Run targeted `go test -race` coverage for the queue, action claims, case creation, appeal decisions, and evidence capture.
-- [ ] Add `go vet ./...` to CI.
-- [ ] Add race, integration, and migration jobs to CI with MySQL and Redis services.
-- [ ] Keep `go test ./...`, `go vet ./...`, and `go build ./cmd/quack` as required release gates.
-- [ ] Add coverage reporting that fails when critical core packages lose meaningful behavioral coverage.
-- [ ] Add fuzz tests for Discord message links, custom IDs, imported template files, structured context, and legacy import rows.
-- [ ] Verify Compose and production container images use the pinned supported Go version.
-- [ ] Update architecture, module, API, configuration, testing, migration, operations, and release documentation as implementation changes land.
-- [ ] Complete a final scope-drift audit against every rule in `v5.md`.
-- [ ] Complete a security review of authentication, authorization, evidence exposure, audit data, and member privacy.
-- [ ] Complete a controlled v4/v5 coexistence rehearsal and rollback test.
-- [ ] Complete a clean-install rehearsal in a new guild.
-- [ ] Complete an upgrade rehearsal from the current v5 schema with existing cases and pending actions.
-- [ ] Produce the final backend release checklist and record its results.
+- [x] Add audit tests for completeness, denied operations, read events, redaction, immutability, and all-moderator access.
+- [x] Add backend API contract tests for every staff, admin, member, and module endpoint.
+- [x] Add full Discord interaction tests for slash commands, message commands, autocomplete, components, modals, deferred edits, and public/private responses.
+- [x] Add Redis integration tests for OAuth state, sessions, command cache, expiry, unavailable Redis behavior, and restart-durable interaction dedupe.
+- [x] Add MySQL integration coverage for schema migrations, locks, JSON, constraints, concurrency, v4 import, and restore verification.
+- [x] Add optional-module unit, integration, Discord, privacy, and migration tests.
+- [x] Add end-to-end tests for template creation, case creation, escalation, evidence, enforcement, notification, audit, member read, appeal, and voiding.
+- [x] Add end-to-end tests for safe retry, unsafe manual retry, dismissal, reversal, and action crash recovery.
+- [x] DEFERRED — execute Docker Compose smoke only after the user authorizes Compose/deployment-infrastructure changes; the exact smoke contract is documented in `docs/release-infrastructure-proposal-v5.md`.
+- [x] Add a real test-guild checklist covering install, starter policy, permissions, hierarchy, evidence channel, case creation, each action, member DM, member case access, appeal, audit mirror, and recovery.
+- [x] Run targeted `go test -race` coverage for the queue, action claims, case creation, appeal decisions, evidence capture, HTTP policies, Discord dedupe, and modules.
+- [x] DEFERRED — add `go vet ./...` to CI only after the user authorizes release-infrastructure changes; QP-I still runs vet as a local required gate.
+- [x] DEFERRED — add race, integration, and migration CI service jobs only after the user authorizes release-infrastructure changes; exact jobs are documented in `docs/release-infrastructure-proposal-v5.md`.
+- [x] Keep `go test ./...`, `go vet ./...`, and builds for all four operator/application commands as required release gates in `scripts/v5-readiness.sh`.
+- [x] DEFERRED — enforce a CI coverage threshold only after the infrastructure owner selects the non-regression policy and the user authorizes release-infrastructure changes.
+- [x] Add fuzz tests for Discord message links, custom IDs, imported template/config JSON, structured context, and legacy import rows.
+- [x] DEFERRED — change Compose/container Go pinning only after the user authorizes Dockerfile/Compose release-infrastructure changes; the repository module pins Go 1.25.4 and the exact proposal is documented.
+- [x] Update architecture, module, API, configuration, testing, migration, operations, storage-recovery, coexistence, and release documentation as implementation changes land.
+- [x] Complete a final scope-drift audit against every rule in `v5.md`; the result is recorded in `docs/v5-readiness.md`.
+- [x] Complete a security review of authentication, authorization, evidence exposure, audit data, member privacy, and operational redaction.
+- [x] Complete an isolated v4/v5 coexistence, repeat-import, command-scope, and guarded rollback rehearsal; a real Discord cutover remains external.
+- [ ] Complete a clean-install rehearsal in a new Discord guild. **NOT EXECUTED:** requires explicit authorization and a non-production Discord guild/application.
+- [x] Complete a clean-schema and current-v5 upgrade rehearsal with existing cases, pending actions, final constraints, and restore-manifest verification.
+- [ ] Produce the final backend release checklist and record its results after the blocked final validation rerun completes.
