@@ -273,6 +273,12 @@ Statuses: `PLANNED`, `IN_PROGRESS`, `REVIEW_WAIT`, `FIXING`, `SUBMITTED`,
 - Branch: `slice/v5-001c-case-validity`
 - Worktree: `/tmp/quack-v5-worktrees/v5-001c`
 - Base/PR target: `slice/v5-001-template-model` at accepted head `6e5f206`
+- Implementation decision 2026-07-11: migration 0003 preserves legacy private-note
+  and generic status-change event rows byte-for-byte and inventories them in
+  migration-owned compatibility bookkeeping, while the live v5 event query and
+  mapper exclude those retired event types. Their presence does not quarantine
+  an otherwise valid case. Reviewed rollback must restore each exact prior case
+  status/source value and remove only migration-owned bookkeeping.
 - Requirements: `v5.md` Cases, Correcting a Case, Member Access, Firm Boundaries.
 - Acceptance criteria:
   - Live case contracts/storage behavior contain no severity, weight, moderator
