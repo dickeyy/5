@@ -135,92 +135,12 @@ func (s *ActionService) processClaimedAction(ctx context.Context, workerID strin
 		return err
 	}
 
-	if executionStatus == model.ActionExecutionFailed && !continueOnError(claimed.Case, claimed.Execution.Position) {
-		return s.store.SkipCaseActions(ctx, model.SkipCaseActionsParams{
-			CaseID:        claimed.Case.ID,
-			AfterPosition: claimed.Execution.Position,
-			Reason:        fmt.Sprintf("previous action %s failed", claimed.Execution.ID),
-			CorrelationID: correlationID,
-			RequestID:     requestID,
-		})
-	}
 	return nil
 }
 
 // executeAction processes action according to persisted state and retry policy.
 func (s *ActionService) executeAction(ctx context.Context, handler actionmods.Executor, action actionmods.Context) actionmods.Result {
-	result := handler.Execute(ctx, action)
-	if result.Error == "" && action.Execution.NotifyUser {
-		response, err := s.sendActionNotification(ctx, action)
-		if err != nil {
-			return actionmods.ResultFromError(err)
-		}
-		if result.Response == nil {
-			result.Response = map[string]any{}
-		}
-		result.Response["notification"] = response
-	}
-	return result
-}
-
-// sendActionNotification sends action notification through the configured external gateway.
-func (s *ActionService) sendActionNotification(ctx context.Context, action actionmods.Context) (map[string]any, error) {
-	if s.discord == nil {
-		return nil, DiscordActionError{Code: "discord_unavailable", Message: "discord action client is not configured", Retryable: false}
-	}
-
-	message := notificationMessage(action)
-	response, err := s.discord.SendDM(ctx, action.Case.TargetDiscordUserID, message)
-	if err != nil {
-		return nil, err
-	}
-	if response == nil {
-		response = map[string]any{}
-	}
-	response["type"] = notificationType(action)
-	return response, nil
-}
-
-// notificationMessage converts notification message into its transport presentation without leaking transport types into the core.
-func notificationMessage(action actionmods.Context) string {
-	message := actionmods.ConfigString(action.Config, "notification_message")
-	if message == "" {
-		message = actionmods.ConfigString(action.Config, "message")
-	}
-	if message != "" {
-		return message
-	}
-
-	switch model.NotificationType(notificationType(action)) {
-	case model.NotificationWarning:
-		return fmt.Sprintf("You received a warning in this server: %s", action.Case.Reason)
-	case model.NotificationTimeout:
-		return fmt.Sprintf("You were timed out in this server: %s", action.Case.Reason)
-	case model.NotificationKick:
-		return fmt.Sprintf("You were kicked from this server: %s", action.Case.Reason)
-	case model.NotificationBan:
-		return fmt.Sprintf("You were banned from this server: %s", action.Case.Reason)
-	default:
-		return fmt.Sprintf("You received a moderation action in this server: %s", action.Case.Reason)
-	}
-}
-
-// notificationType encapsulates the notification type rule so callers share one consistent package implementation.
-func notificationType(action actionmods.Context) string {
-	if action.Execution.NotificationType != "" {
-		return action.Execution.NotificationType
-	}
-
-	switch action.Execution.ActionType {
-	case model.ActionTimeoutUser:
-		return string(model.NotificationTimeout)
-	case model.ActionKickUser:
-		return string(model.NotificationKick)
-	case model.ActionBanUser:
-		return string(model.NotificationBan)
-	default:
-		return "moderation"
-	}
+	return handler.Execute(ctx, action)
 }
 
 // shouldRetryAction encapsulates the should retry action rule so callers share one consistent package implementation.
@@ -238,25 +158,6 @@ func nextRetryTime(execution model.CaseActionExecution) time.Time {
 		backoff = 1000
 	}
 	return time.Now().UTC().Add(time.Duration(backoff) * time.Millisecond)
-}
-
-// continueOnError encapsulates the continue on error rule so callers share one consistent package implementation.
-func continueOnError(caseModel model.Case, position int) bool {
-	var snapshot struct {
-		Actions []struct {
-			Position        int  `json:"position"`
-			ContinueOnError bool `json:"continue_on_error"`
-		} `json:"actions"`
-	}
-	if err := json.Unmarshal([]byte(caseModel.TemplateSnapshotJSON), &snapshot); err != nil {
-		return false
-	}
-	for _, action := range snapshot.Actions {
-		if action.Position == position {
-			return action.ContinueOnError
-		}
-	}
-	return false
 }
 
 // parseConfigMap parses config map and rejects malformed input before it reaches core logic.

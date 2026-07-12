@@ -11,6 +11,15 @@ import (
 	"github.com/quackdiscord/bot/internal/quack/model"
 )
 
+const (
+	// MaxTemplateSafeRetries bounds the only execution control exposed to guild administrators.
+	MaxTemplateSafeRetries = 10
+	// MaxTimeoutDurationSeconds is Discord's maximum 28-day member timeout.
+	MaxTimeoutDurationSeconds = 28 * 24 * 60 * 60
+	// MaxBanDeleteMessageSeconds is Discord's maximum seven-day ban history deletion window.
+	MaxBanDeleteMessageSeconds = 7 * 24 * 60 * 60
+)
+
 var (
 	ErrTemplateValidation = errors.New("template validation failed")
 	ErrTemplateNotFound   = errors.New("case template not found")
@@ -30,7 +39,6 @@ type TemplateInput struct {
 	Description    string               `json:"description"`
 	ReasonTemplate string               `json:"reason_template"`
 	Appealable     bool                 `json:"appealable"`
-	Enabled        *bool                `json:"enabled"`
 	Levels         []TemplateLevelInput `json:"levels"`
 }
 
@@ -40,25 +48,16 @@ type TemplateLevelInput struct {
 	Position         int                   `json:"position"`
 	IsDefault        bool                  `json:"is_default"`
 	TriggerCaseCount int                   `json:"trigger_case_count"`
-	WindowMinutes    int                   `json:"window_minutes"`
 	NotifyUser       bool                  `json:"notify_user"`
-	NotificationType string                `json:"notification_type"`
-	Enabled          *bool                 `json:"enabled"`
 	Actions          []TemplateActionInput `json:"actions"`
 }
 
 // TemplateActionInput groups the validated inputs needed for template action input.
 type TemplateActionInput struct {
-	ActionType       model.ActionType `json:"action_type"`
-	Config           json.RawMessage  `json:"config"`
-	NotifyUser       bool             `json:"notify_user"`
-	NotificationType string           `json:"notification_type"`
-	ContinueOnError  bool             `json:"continue_on_error"`
-	MaxRetries       int              `json:"max_retries"`
-	RetryBackoffMS   int              `json:"retry_backoff_ms"`
-	TimeoutMS        int              `json:"timeout_ms"`
-	IdempotencyScope string           `json:"idempotency_scope"`
-	Enabled          *bool            `json:"enabled"`
+	ActionType             model.ActionType `json:"action_type"`
+	TimeoutDurationSeconds int              `json:"timeout_duration_seconds,omitempty"`
+	DeleteMessageSeconds   int              `json:"delete_message_seconds,omitempty"`
+	MaxRetries             int              `json:"max_retries"`
 }
 
 // TemplateResponse is the transport-neutral representation returned for template response.
@@ -70,7 +69,6 @@ type TemplateResponse struct {
 	Description            string                  `json:"description"`
 	ReasonTemplate         string                  `json:"reason_template"`
 	Appealable             bool                    `json:"appealable"`
-	Enabled                bool                    `json:"enabled"`
 	Version                uint                    `json:"version"`
 	CreatedByDiscordUserID string                  `json:"created_by_discord_user_id"`
 	UpdatedByDiscordUserID string                  `json:"updated_by_discord_user_id"`
@@ -85,32 +83,22 @@ type TemplateLevelDetails struct {
 	Position         int    `json:"position"`
 	IsDefault        bool   `json:"is_default"`
 	TriggerCaseCount int    `json:"trigger_case_count"`
-	WindowMinutes    int    `json:"window_minutes"`
 	NotifyUser       bool   `json:"notify_user"`
-	NotificationType string `json:"notification_type,omitempty"`
 }
 
 // TemplateLevelResponse is the transport-neutral representation returned for template level response.
 type TemplateLevelResponse struct {
 	TemplateLevelDetails
-	Enabled bool                     `json:"enabled"`
 	Actions []TemplateActionResponse `json:"actions"`
 }
 
 // TemplateActionResponse is the transport-neutral representation returned for template action response.
 type TemplateActionResponse struct {
-	ID               string           `json:"id"`
-	Position         int              `json:"position"`
-	ActionType       model.ActionType `json:"action_type"`
-	Config           any              `json:"config"`
-	NotifyUser       bool             `json:"notify_user"`
-	NotificationType string           `json:"notification_type,omitempty"`
-	ContinueOnError  bool             `json:"continue_on_error"`
-	MaxRetries       uint8            `json:"max_retries"`
-	RetryBackoffMS   int              `json:"retry_backoff_ms"`
-	TimeoutMS        int              `json:"timeout_ms"`
-	IdempotencyScope string           `json:"idempotency_scope"`
-	Enabled          bool             `json:"enabled"`
+	ID                     string           `json:"id"`
+	ActionType             model.ActionType `json:"action_type"`
+	TimeoutDurationSeconds int              `json:"timeout_duration_seconds,omitempty"`
+	DeleteMessageSeconds   int              `json:"delete_message_seconds,omitempty"`
+	MaxRetries             uint8            `json:"max_retries"`
 }
 
 // NewTemplateService constructs template service with required dependencies explicit so callers control lifecycle and substitution.
@@ -261,20 +249,13 @@ func (s *TemplateService) validate(ctx context.Context, guildContext *GuildStaff
 		return nil, err
 	}
 
-	enabled := true
-	if input.Enabled != nil {
-		enabled = *input.Enabled
-	}
-
 	template := model.CaseTemplate{
 		GuildID:                guildContext.Guild.ID,
 		Slug:                   slug,
 		Name:                   name,
 		Description:            strings.TrimSpace(input.Description),
 		ReasonTemplate:         reasonTemplate,
-		DefaultSeverity:        model.CaseSeverityMedium,
 		Appealable:             input.Appealable,
-		Enabled:                enabled,
 		CreatedByDiscordUserID: guildContext.Staff.DiscordUserID,
 		UpdatedByDiscordUserID: guildContext.Staff.DiscordUserID,
 	}
@@ -290,34 +271,28 @@ func normalizeLevels(inputs []TemplateLevelInput) ([]model.ExpandedCaseTemplateL
 
 	levels := make([]model.ExpandedCaseTemplateLevel, 0, len(inputs))
 	defaultCount := 0
+	thresholds := make(map[int]struct{}, len(inputs))
 
 	for i, input := range inputs {
 		name := strings.TrimSpace(input.Name)
 		if name == "" {
 			return nil, validationError("level name is required")
 		}
-		if input.TriggerCaseCount < 0 || input.WindowMinutes < 0 {
-			return nil, validationError("level trigger values must be non-negative")
-		}
 		if !input.IsDefault && input.TriggerCaseCount <= 0 {
 			return nil, validationError("escalation level trigger_case_count must be positive")
 		}
 		if input.IsDefault {
 			defaultCount++
-			if input.TriggerCaseCount != 0 || input.WindowMinutes != 0 {
+			if input.TriggerCaseCount != 0 {
 				return nil, validationError("default level cannot have escalation triggers")
 			}
+		} else {
+			if _, duplicate := thresholds[input.TriggerCaseCount]; duplicate {
+				return nil, validationError("escalation level trigger_case_count values must be distinct")
+			}
+			thresholds[input.TriggerCaseCount] = struct{}{}
 		}
-		notificationType, err := normalizeLevelNotificationType(input.NotifyUser, input.NotificationType)
-		if err != nil {
-			return nil, err
-		}
-
-		enabled := true
-		if input.Enabled != nil {
-			enabled = *input.Enabled
-		}
-		actions, _, err := normalizeActions(input.Actions)
+		actions, err := normalizeActions(input.Actions)
 		if err != nil {
 			return nil, err
 		}
@@ -336,10 +311,7 @@ func normalizeLevels(inputs []TemplateLevelInput) ([]model.ExpandedCaseTemplateL
 				Name:             name,
 				IsDefault:        input.IsDefault,
 				TriggerCaseCount: input.TriggerCaseCount,
-				WindowMinutes:    input.WindowMinutes,
 				NotifyUser:       input.NotifyUser,
-				NotificationType: notificationType,
-				Enabled:          enabled,
 			},
 			Actions: actions,
 		})
@@ -356,70 +328,75 @@ func normalizeLevels(inputs []TemplateLevelInput) ([]model.ExpandedCaseTemplateL
 }
 
 // normalizeActions produces a stable actions representation for deterministic validation, comparison, or caching.
-func normalizeActions(inputs []TemplateActionInput) ([]model.CaseTemplateLevelAction, int, error) {
+func normalizeActions(inputs []TemplateActionInput) ([]model.CaseTemplateLevelAction, error) {
+	if len(inputs) > 1 {
+		return nil, validationError("a template level can contain at most one enforcement action")
+	}
 	actions := make([]model.CaseTemplateLevelAction, 0, len(inputs))
-	enabledCount := 0
-	for i, input := range inputs {
+	for _, input := range inputs {
 		if input.ActionType == "record_warning" {
-			return nil, 0, validationError("record_warning is not a template action; creating a case records the warning")
+			return nil, validationError("record_warning is not a template action; creating a case records the warning")
 		}
 		if input.ActionType == model.ActionSendDM {
-			return nil, 0, validationError("send_dm is not a template action; set notify_user on the level or moderation action")
+			return nil, validationError("send_dm is not a template action; set notify_user on the level")
 		}
 		if !validActionType(input.ActionType) {
-			return nil, 0, validationError("action_type is invalid")
+			return nil, validationError("action_type is invalid")
 		}
-		if input.MaxRetries < 0 || input.MaxRetries > 255 {
-			return nil, 0, validationError("max_retries must be between 0 and 255")
+		if input.MaxRetries < 0 || input.MaxRetries > MaxTemplateSafeRetries {
+			return nil, validationError(fmt.Sprintf("max_retries must be between 0 and %d", MaxTemplateSafeRetries))
 		}
-		if input.RetryBackoffMS < 0 {
-			return nil, 0, validationError("retry_backoff_ms must be non-negative")
-		}
-		if input.TimeoutMS < 0 {
-			return nil, 0, validationError("timeout_ms must be non-negative")
-		}
-
-		configJSON, err := normalizeJSONObject(input.Config)
+		configJSON, err := normalizeTemplateActionConfig(input)
 		if err != nil {
-			return nil, 0, validationError("config must be a JSON object")
-		}
-		notificationType, err := normalizeNotificationType(input.ActionType, input.NotifyUser, input.NotificationType)
-		if err != nil {
-			return nil, 0, err
-		}
-
-		idempotencyScope := strings.TrimSpace(input.IdempotencyScope)
-		if idempotencyScope == "" {
-			idempotencyScope = "case"
-		}
-		if len(idempotencyScope) > 32 {
-			return nil, 0, validationError("idempotency_scope must be 32 characters or fewer")
-		}
-
-		enabled := true
-		if input.Enabled != nil {
-			enabled = *input.Enabled
-		}
-		if enabled {
-			enabledCount++
+			return nil, err
 		}
 
 		actions = append(actions, model.CaseTemplateLevelAction{
-			Position:         i + 1,
-			ActionType:       input.ActionType,
-			ConfigJSON:       configJSON,
-			NotifyUser:       input.NotifyUser,
-			NotificationType: notificationType,
-			ContinueOnError:  input.ContinueOnError,
-			MaxRetries:       uint8(input.MaxRetries),
-			RetryBackoffMS:   input.RetryBackoffMS,
-			TimeoutMS:        input.TimeoutMS,
-			IdempotencyScope: idempotencyScope,
-			Enabled:          enabled,
+			ActionType: input.ActionType,
+			ConfigJSON: configJSON,
+			MaxRetries: uint8(input.MaxRetries),
 		})
 	}
 
-	return actions, enabledCount, nil
+	return actions, nil
+}
+
+// templateActionConfig is the internal canonical snapshot for product-owned action settings.
+type templateActionConfig struct {
+	DurationSeconds      int `json:"duration_seconds,omitempty"`
+	DeleteMessageSeconds int `json:"delete_message_seconds,omitempty"`
+}
+
+// normalizeTemplateActionConfig validates typed settings and stores only the setting owned by the selected action.
+func normalizeTemplateActionConfig(input TemplateActionInput) (string, error) {
+	config := templateActionConfig{}
+	switch input.ActionType {
+	case model.ActionTimeoutUser:
+		if input.TimeoutDurationSeconds <= 0 || input.TimeoutDurationSeconds > MaxTimeoutDurationSeconds {
+			return "", validationError(fmt.Sprintf("timeout_duration_seconds must be between 1 and %d", MaxTimeoutDurationSeconds))
+		}
+		if input.DeleteMessageSeconds != 0 {
+			return "", validationError("delete_message_seconds is only valid for ban actions")
+		}
+		config.DurationSeconds = input.TimeoutDurationSeconds
+	case model.ActionKickUser:
+		if input.TimeoutDurationSeconds != 0 || input.DeleteMessageSeconds != 0 {
+			return "", validationError("kick actions do not accept action settings")
+		}
+	case model.ActionBanUser:
+		if input.TimeoutDurationSeconds != 0 {
+			return "", validationError("timeout_duration_seconds is only valid for timeout actions")
+		}
+		if input.DeleteMessageSeconds < 0 || input.DeleteMessageSeconds > MaxBanDeleteMessageSeconds {
+			return "", validationError(fmt.Sprintf("delete_message_seconds must be between 0 and %d", MaxBanDeleteMessageSeconds))
+		}
+		config.DeleteMessageSeconds = input.DeleteMessageSeconds
+	}
+	body, err := json.Marshal(config)
+	if err != nil {
+		return "", fmt.Errorf("marshal template action config: %w", err)
+	}
+	return string(body), nil
 }
 
 // normalizeJSONObject produces a stable jsonobject representation for deterministic validation, comparison, or caching.
@@ -447,67 +424,6 @@ func normalizeJSONObject(raw json.RawMessage) (string, error) {
 func validActionType(actionType model.ActionType) bool {
 	switch actionType {
 	case model.ActionTimeoutUser, model.ActionKickUser, model.ActionBanUser:
-		return true
-	default:
-		return false
-	}
-}
-
-// normalizeLevelNotificationType produces a stable level notification type representation for deterministic validation, comparison, or caching.
-func normalizeLevelNotificationType(notifyUser bool, notificationType string) (string, error) {
-	if !notifyUser {
-		return "", nil
-	}
-	normalized := strings.ToLower(strings.TrimSpace(notificationType))
-	if normalized == "" {
-		normalized = string(model.NotificationWarning)
-	}
-	if len(normalized) > 64 {
-		return "", validationError("notification_type must be 64 characters or fewer")
-	}
-	if !validNotificationType(normalized) {
-		return "", validationError("notification_type is invalid")
-	}
-	return normalized, nil
-}
-
-// normalizeNotificationType produces a stable notification type representation for deterministic validation, comparison, or caching.
-func normalizeNotificationType(actionType model.ActionType, notifyUser bool, notificationType string) (string, error) {
-	if !notifyUser {
-		return "", nil
-	}
-
-	normalized := strings.ToLower(strings.TrimSpace(notificationType))
-	if normalized == "" {
-		normalized = defaultNotificationType(actionType)
-	}
-	if len(normalized) > 64 {
-		return "", validationError("notification_type must be 64 characters or fewer")
-	}
-	if !validNotificationType(normalized) {
-		return "", validationError("notification_type is invalid")
-	}
-	return normalized, nil
-}
-
-// defaultNotificationType encapsulates the default notification type rule so callers share one consistent package implementation.
-func defaultNotificationType(actionType model.ActionType) string {
-	switch actionType {
-	case model.ActionTimeoutUser:
-		return string(model.NotificationTimeout)
-	case model.ActionKickUser:
-		return string(model.NotificationKick)
-	case model.ActionBanUser:
-		return string(model.NotificationBan)
-	default:
-		return ""
-	}
-}
-
-// validNotificationType checks valid notification type before state is read or changed.
-func validNotificationType(notificationType string) bool {
-	switch model.NotificationType(notificationType) {
-	case model.NotificationWarning, model.NotificationTimeout, model.NotificationKick, model.NotificationBan:
 		return true
 	default:
 		return false
@@ -566,7 +482,6 @@ func templateResponse(expanded model.ExpandedCaseTemplate) TemplateResponse {
 		Description:            template.Description,
 		ReasonTemplate:         template.ReasonTemplate,
 		Appealable:             template.Appealable,
-		Enabled:                template.Enabled,
 		Version:                template.Version,
 		CreatedByDiscordUserID: template.CreatedByDiscordUserID,
 		UpdatedByDiscordUserID: template.UpdatedByDiscordUserID,
@@ -577,24 +492,10 @@ func templateResponse(expanded model.ExpandedCaseTemplate) TemplateResponse {
 	for _, level := range expanded.Levels {
 		levelResponse := TemplateLevelResponse{
 			TemplateLevelDetails: templateLevelDetails(level.Level),
-			Enabled:              level.Level.Enabled,
 			Actions:              make([]TemplateActionResponse, 0, len(level.Actions)),
 		}
 		for _, action := range level.Actions {
-			levelResponse.Actions = append(levelResponse.Actions, TemplateActionResponse{
-				ID:               action.ID,
-				Position:         action.Position,
-				ActionType:       action.ActionType,
-				Config:           parseJSON(action.ConfigJSON),
-				NotifyUser:       action.NotifyUser,
-				NotificationType: action.NotificationType,
-				ContinueOnError:  action.ContinueOnError,
-				MaxRetries:       action.MaxRetries,
-				RetryBackoffMS:   action.RetryBackoffMS,
-				TimeoutMS:        action.TimeoutMS,
-				IdempotencyScope: action.IdempotencyScope,
-				Enabled:          action.Enabled,
-			})
+			levelResponse.Actions = append(levelResponse.Actions, templateActionResponse(action))
 		}
 		response.Levels = append(response.Levels, levelResponse)
 	}
@@ -610,43 +511,49 @@ func templateLevelDetails(level model.CaseTemplateLevel) TemplateLevelDetails {
 		Position:         level.Position,
 		IsDefault:        level.IsDefault,
 		TriggerCaseCount: level.TriggerCaseCount,
-		WindowMinutes:    level.WindowMinutes,
 		NotifyUser:       level.NotifyUser,
-		NotificationType: level.NotificationType,
 	}
-}
-
-// enabledLevelActions encapsulates the enabled level actions rule so callers share one consistent package implementation.
-func enabledLevelActions(actions []model.CaseTemplateLevelAction) []model.CaseTemplateLevelAction {
-	enabled := make([]model.CaseTemplateLevelAction, 0, len(actions))
-	for _, action := range actions {
-		if action.Enabled {
-			enabled = append(enabled, action)
-		}
-	}
-	return enabled
 }
 
 // levelActionResponses converts level action responses into its transport presentation without leaking transport types into the core.
 func levelActionResponses(actions []model.CaseTemplateLevelAction) []TemplateActionResponse {
 	responses := make([]TemplateActionResponse, 0, len(actions))
 	for _, action := range actions {
-		responses = append(responses, TemplateActionResponse{
-			ID:               action.ID,
-			Position:         action.Position,
-			ActionType:       action.ActionType,
-			Config:           parseJSON(action.ConfigJSON),
-			NotifyUser:       action.NotifyUser,
-			NotificationType: action.NotificationType,
-			ContinueOnError:  action.ContinueOnError,
-			MaxRetries:       action.MaxRetries,
-			RetryBackoffMS:   action.RetryBackoffMS,
-			TimeoutMS:        action.TimeoutMS,
-			IdempotencyScope: action.IdempotencyScope,
-			Enabled:          action.Enabled,
-		})
+		responses = append(responses, templateActionResponse(action))
 	}
 	return responses
+}
+
+// templateActionResponse projects canonical or compatible stored settings into the typed product contract.
+func templateActionResponse(action model.CaseTemplateLevelAction) TemplateActionResponse {
+	config := decodeTemplateActionConfig(action.ConfigJSON)
+	return TemplateActionResponse{
+		ID:                     action.ID,
+		ActionType:             action.ActionType,
+		TimeoutDurationSeconds: config.DurationSeconds,
+		DeleteMessageSeconds:   config.DeleteMessageSeconds,
+		MaxRetries:             action.MaxRetries,
+	}
+}
+
+// decodeTemplateActionConfig reads canonical settings and the previous duration-minutes representation without exposing it.
+func decodeTemplateActionConfig(body string) templateActionConfig {
+	var stored struct {
+		DurationSeconds      int `json:"duration_seconds"`
+		DurationMinutes      int `json:"duration_minutes"`
+		DeleteMessageSeconds int `json:"delete_message_seconds"`
+	}
+	if err := json.Unmarshal([]byte(body), &stored); err != nil {
+		return templateActionConfig{}
+	}
+	durationSeconds := stored.DurationSeconds
+	if durationSeconds == 0 && stored.DurationMinutes > 0 {
+		durationSeconds = stored.DurationMinutes * 60
+	}
+	return templateActionConfig{
+		DurationSeconds:      durationSeconds,
+		DeleteMessageSeconds: stored.DeleteMessageSeconds,
+	}
 }
 
 // parseJSON parses json and rejects malformed input before it reaches core logic.

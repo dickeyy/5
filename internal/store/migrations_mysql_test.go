@@ -18,6 +18,12 @@ func TestMySQLMigrateForwardRerunPreservationAndRollbackBoundary(t *testing.T) {
 		t.Fatalf("create representative pre-ledger MySQL schema: %v", err)
 	}
 	want := insertRepresentativeHistory(t, db)
+	disabledTemplateID := insertMigration0002Template(t, db, "mysql-disabled", false, 0)
+	windowTemplateID := insertMigration0002Template(t, db, "mysql-window", true, 60)
+	deletedTemplateID := insertMigration0002Template(t, db, "mysql-deleted", true, 0)
+	if err := db.Model(&CaseTemplateRecord{}).Where("id = ?", deletedTemplateID).UpdateColumn("deleted_at", time.Now().UTC()).Error; err != nil {
+		t.Fatalf("soft delete MySQL compatibility fixture: %v", err)
+	}
 	repositories := New(db, nil)
 
 	if err := repositories.Migrate(); err != nil {
@@ -27,7 +33,18 @@ func TestMySQLMigrateForwardRerunPreservationAndRollbackBoundary(t *testing.T) {
 		t.Fatalf("rerun MySQL migrations: %v", err)
 	}
 	assertRepresentativeHistory(t, db, want)
+	assertTemplateArchiveState(t, db, disabledTemplateID, true)
+	assertTemplateArchiveState(t, db, windowTemplateID, true)
+	assertTemplateArchiveState(t, db, deletedTemplateID, true)
+	assertTemplateDeletedState(t, db, deletedTemplateID, false)
 
+	if err := repositories.RollbackLastMigration(); err != nil {
+		t.Fatalf("roll back template compatibility migration: %v", err)
+	}
+	assertTemplateArchiveState(t, db, disabledTemplateID, false)
+	assertTemplateArchiveState(t, db, windowTemplateID, false)
+	assertTemplateArchiveState(t, db, deletedTemplateID, false)
+	assertTemplateDeletedState(t, db, deletedTemplateID, true)
 	err := repositories.RollbackLastMigration()
 	if !errors.Is(err, ErrMigrationNotReversible) {
 		t.Fatalf("expected baseline rollback refusal, got %v", err)

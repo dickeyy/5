@@ -60,7 +60,6 @@ type CreatedCase struct {
 // CountTemplateCasesForTargetParams groups the validated inputs needed for count template cases for target params.
 type CountTemplateCasesForTargetParams struct {
 	GuildID, TemplateID, TargetDiscordUserID string
-	Since                                    *time.Time
 }
 
 // ListCasesParams groups the validated inputs needed for list cases params.

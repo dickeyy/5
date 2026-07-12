@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -427,6 +428,19 @@ func TestTemplateRoutesCreateUpdateDelete(t *testing.T) {
 	}
 }
 
+func TestTemplateRoutesRejectRetiredProductFields(t *testing.T) {
+	router, sessionID := newTemplateRouteHarness(t, uint64(discordgo.PermissionManageGuild))
+	payload := strings.Replace(templateRoutePayload("retired-field"), `"levels": [`, `"enabled": true, "levels": [`, 1)
+	request := httptest.NewRequest(http.MethodPost, "/guilds/guild-1/templates", bytes.NewBufferString(payload))
+	request.Header.Set("Authorization", "Bearer "+sessionID)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected retired field rejection status %d, got %d body=%s", http.StatusBadRequest, response.Code, response.Body.String())
+	}
+}
+
 func TestCaseRouteRequiresAuth(t *testing.T) {
 	testutil.SetTestConfig(t)
 	gin.SetMode(gin.TestMode)
@@ -755,14 +769,12 @@ func newCaseRouteHarness(t *testing.T, permissionBits uint64) (*gin.Engine, stri
 			Name:                   "Spam",
 			Description:            "Spam template",
 			ReasonTemplate:         "No spam",
-			DefaultSeverity:        model.CaseSeverityMedium,
-			Enabled:                true,
 			CreatedByDiscordUserID: "admin-1",
 			UpdatedByDiscordUserID: "admin-1",
 		},
 		Levels: []storage.ExpandedCaseTemplateLevel{
 			{
-				Level: model.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, Enabled: true},
+				Level: model.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true},
 			},
 		},
 	})
@@ -800,8 +812,7 @@ func templateRoutePayload(slug string) string {
 				"name": "Default",
 				"position": 1,
 				"is_default": true,
-				"enabled": true,
-				"actions": []
+					"actions": []
 			}
 		]
 	}`

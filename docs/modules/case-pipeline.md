@@ -30,7 +30,7 @@ cases first.
 1. Validate guild context, permission, template ID, target user, source, and
    metadata.
 2. Load the expanded template with `GetCaseTemplateExpanded`.
-3. Reject disabled or archived templates.
+3. Reject archived templates.
 4. Resolve the case reason from `reason_override` or the template
    `reason_template`.
 5. Choose the selected template level based on prior case count for the same
@@ -46,28 +46,22 @@ cases first.
 
 ## Level Selection Rules
 
-Level selection in `selectTemplateLevel` depends on:
-
-- `enabled`
-- `is_default`
-- `trigger_case_count`
-- `window_minutes`
+Level selection in `selectTemplateLevel` depends on `is_default` and the
+distinct positive `trigger_case_count` values of non-default levels.
 
 The service counts prior non-voided cases for the same guild, template, and
-target user. Matching uses the current stored case history, not transient queue
-state.
+target user across all time. Matching uses the current stored case history, not
+transient queue state.
 
 The default level acts as fallback when no escalation level matches. Validation
-in `internal/quack/templates.go` expects exactly one enabled default level.
+in `internal/quack/templates.go` expects exactly one default level.
 
 ## Snapshot Contract
 
 `TemplateSnapshotJSON` is not just audit data. Runtime behavior depends on it.
 
-Current consumers include:
-
-- `continueOnError` in `internal/quack/actions.go`
-- API and Discord responses that expose selected level and action details
+Current consumers include API and Discord responses that expose selected level
+and action details.
 
 Changing the snapshot shape needs migration discipline because old cases keep
 their stored JSON.
@@ -89,10 +83,8 @@ offset pagination plus filters for actor, action, resource, and result.
 For each selected template action, `CaseService.Create` snapshots:
 
 - action type
-- config JSON
-- notification settings
-- retry settings
-- whether the action is considered irreversible
+- typed timeout duration or ban history-deletion settings
+- safe automatic retry count
 
 Storage then fills in:
 
@@ -100,6 +92,7 @@ Storage then fills in:
 - `case_id`
 - default pending status
 - idempotency key in the form `case:<caseID>:action:<position>` when none is supplied
+- internal retry timing and irreversible-action classification
 
 `storage.CreateCase` also assigns the next per-guild case number inside the
 transaction.
@@ -122,8 +115,8 @@ Resolved timestamps are currently written automatically when the case reaches
   direct side effect of case creation.
 - The template snapshot is the durable policy source for a created case; live
   template edits do not rewrite old cases.
-- Action idempotency scope exists in template input and snapshots, but current
-  execution flow mainly relies on the stored per-row idempotency key.
+- Execution timeout, retry timing, and idempotency remain Quack-owned internals;
+  they are not template input or snapshot fields.
 
 Relevant files:
 

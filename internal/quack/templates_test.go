@@ -32,9 +32,13 @@ func TestTemplateServiceCreateNormalizesActionsAndAudits(t *testing.T) {
 	if len(created.Levels[0].Actions) != 0 {
 		t.Fatalf("expected actionless default warning level, got %+v", created.Levels[0].Actions)
 	}
-	if !created.Levels[0].NotifyUser || created.Levels[0].NotificationType != string(model.NotificationWarning) {
-		t.Fatalf("expected default level to notify as warning, got %+v", created.Levels[0])
+	if !created.Levels[0].NotifyUser {
+		t.Fatalf("expected default level to notify, got %+v", created.Levels[0])
 	}
+	if action := created.Levels[1].Actions[0]; action.TimeoutDurationSeconds != 3600 || action.DeleteMessageSeconds != 0 {
+		t.Fatalf("expected typed timeout settings, got %+v", action)
+	}
+	assertSimplifiedTemplateJSON(t, created)
 
 	audits, err := store.ListAuditLogEntries(ctx, guildContext.Guild.ID)
 	if err != nil {
@@ -42,6 +46,38 @@ func TestTemplateServiceCreateNormalizesActionsAndAudits(t *testing.T) {
 	}
 	if len(audits) != 1 || audits[0].Action != "case_template.create" || audits[0].Result != model.AuditResultSuccess {
 		t.Fatalf("expected successful create audit, got %+v", audits)
+	}
+}
+
+func assertSimplifiedTemplateJSON(t *testing.T, template *quack.TemplateResponse) {
+	t.Helper()
+	body, err := json.Marshal(template)
+	if err != nil {
+		t.Fatalf("marshal template response: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("decode template response: %v", err)
+	}
+	if _, exists := decoded["enabled"]; exists {
+		t.Fatalf("template response leaked enabled: %s", body)
+	}
+	levels := decoded["levels"].([]any)
+	for _, rawLevel := range levels {
+		level := rawLevel.(map[string]any)
+		for _, retired := range []string{"enabled", "window_minutes", "notification_type"} {
+			if _, exists := level[retired]; exists {
+				t.Fatalf("level response leaked %s: %s", retired, body)
+			}
+		}
+		for _, rawAction := range level["actions"].([]any) {
+			action := rawAction.(map[string]any)
+			for _, retired := range []string{"position", "config", "notify_user", "notification_type", "continue_on_error", "retry_backoff_ms", "timeout_ms", "idempotency_scope", "enabled"} {
+				if _, exists := action[retired]; exists {
+					t.Fatalf("action response leaked %s: %s", retired, body)
+				}
+			}
+		}
 	}
 }
 
@@ -60,19 +96,33 @@ func TestTemplateServiceValidationFailures(t *testing.T) {
 		{name: "invalid action", edit: func(input *quack.TemplateInput) { input.Levels[1].Actions[0].ActionType = "explode_user" }},
 		{name: "record warning action", edit: func(input *quack.TemplateInput) { input.Levels[1].Actions[0].ActionType = "record_warning" }},
 		{name: "send dm action", edit: func(input *quack.TemplateInput) { input.Levels[1].Actions[0].ActionType = model.ActionSendDM }},
-		{name: "invalid config", edit: func(input *quack.TemplateInput) { input.Levels[1].Actions[0].Config = json.RawMessage(`[]`) }},
-		{name: "invalid notification type", edit: func(input *quack.TemplateInput) {
-			input.Levels[1].Actions[0].NotifyUser = true
-			input.Levels[1].Actions[0].NotificationType = "notice"
-		}},
-		{name: "invalid level notification type", edit: func(input *quack.TemplateInput) { input.Levels[0].NotificationType = "notice" }},
 		{name: "negative retry", edit: func(input *quack.TemplateInput) { input.Levels[1].Actions[0].MaxRetries = -1 }},
-		{name: "negative backoff", edit: func(input *quack.TemplateInput) { input.Levels[1].Actions[0].RetryBackoffMS = -1 }},
-		{name: "negative timeout", edit: func(input *quack.TemplateInput) { input.Levels[1].Actions[0].TimeoutMS = -1 }},
+		{name: "excess retry", edit: func(input *quack.TemplateInput) {
+			input.Levels[1].Actions[0].MaxRetries = quack.MaxTemplateSafeRetries + 1
+		}},
+		{name: "missing timeout duration", edit: func(input *quack.TemplateInput) { input.Levels[1].Actions[0].TimeoutDurationSeconds = 0 }},
+		{name: "excess timeout duration", edit: func(input *quack.TemplateInput) {
+			input.Levels[1].Actions[0].TimeoutDurationSeconds = quack.MaxTimeoutDurationSeconds + 1
+		}},
+		{name: "timeout ban setting", edit: func(input *quack.TemplateInput) { input.Levels[1].Actions[0].DeleteMessageSeconds = 1 }},
+		{name: "excess ban history", edit: func(input *quack.TemplateInput) {
+			input.Levels[1].Actions[0].ActionType = model.ActionBanUser
+			input.Levels[1].Actions[0].TimeoutDurationSeconds = 0
+			input.Levels[1].Actions[0].DeleteMessageSeconds = quack.MaxBanDeleteMessageSeconds + 1
+		}},
+		{name: "kick setting", edit: func(input *quack.TemplateInput) {
+			input.Levels[1].Actions[0].ActionType = model.ActionKickUser
+		}},
+		{name: "multiple actions", edit: func(input *quack.TemplateInput) {
+			input.Levels[1].Actions = append(input.Levels[1].Actions, quack.TemplateActionInput{ActionType: model.ActionKickUser})
+		}},
 		{name: "no default level", edit: func(input *quack.TemplateInput) { input.Levels[0].IsDefault = false }},
 		{name: "two default levels", edit: func(input *quack.TemplateInput) { input.Levels[1].IsDefault = true }},
 		{name: "default level trigger", edit: func(input *quack.TemplateInput) { input.Levels[0].TriggerCaseCount = 1 }},
 		{name: "escalation without trigger", edit: func(input *quack.TemplateInput) { input.Levels[1].TriggerCaseCount = 0 }},
+		{name: "duplicate threshold", edit: func(input *quack.TemplateInput) {
+			input.Levels = append(input.Levels, quack.TemplateLevelInput{Name: "Duplicate", TriggerCaseCount: input.Levels[1].TriggerCaseCount})
+		}},
 	}
 
 	for _, tt := range tests {
@@ -116,8 +166,8 @@ func TestTemplateServiceUpdateAndArchiveAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("archive template: %v", err)
 	}
-	if archived.Enabled || archived.ArchivedAt == nil {
-		t.Fatalf("expected archived disabled template")
+	if archived.ArchivedAt == nil {
+		t.Fatalf("expected archived template")
 	}
 
 	audits, err := store.ListAuditLogEntries(ctx, guildContext.Guild.ID)
@@ -194,12 +244,10 @@ func validTemplateInput(slug string) quack.TemplateInput {
 				Name:             "Repeat spam",
 				Position:         2,
 				TriggerCaseCount: 3,
-				WindowMinutes:    1440,
 				Actions: []quack.TemplateActionInput{
 					{
-						ActionType:       model.ActionTimeoutUser,
-						Config:           json.RawMessage(`{"duration_minutes":60}`),
-						IdempotencyScope: "case",
+						ActionType:             model.ActionTimeoutUser,
+						TimeoutDurationSeconds: 60 * 60,
 					},
 				},
 			},

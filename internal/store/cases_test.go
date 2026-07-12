@@ -23,7 +23,7 @@ func TestCreateCasePersistsCaseEventActionsAndAudit(t *testing.T) {
 		},
 		ActionExecutions: []model.CaseActionExecution{
 			{TemplateActionID: &template.Levels[0].Actions[0].ID, Position: 1, ActionType: model.ActionTimeoutUser, ConfigSnapshotJSON: `{}`},
-			{TemplateActionID: &template.Levels[0].Actions[1].ID, Position: 2, ActionType: model.ActionKickUser, ConfigSnapshotJSON: `{}`},
+			{Position: 2, ActionType: model.ActionKickUser, ConfigSnapshotJSON: `{}`},
 		},
 		Audit: &model.AuditLogEntry{
 			GuildID:            guildID,
@@ -156,19 +156,6 @@ func TestCountTemplateCasesForTargetFiltersHistory(t *testing.T) {
 		t.Fatalf("expected two non-voided matching cases, got %d; first=%s", count, matching.Case.ID)
 	}
 
-	since := time.Now().UTC().Add(-time.Hour)
-	count, err = store.CountTemplateCasesForTarget(ctx, storage.CountTemplateCasesForTargetParams{
-		GuildID:             guildID,
-		TemplateID:          template.Template.ID,
-		TargetDiscordUserID: "target-1",
-		Since:               &since,
-	})
-	if err != nil {
-		t.Fatalf("count cases with since: %v", err)
-	}
-	if count != 1 {
-		t.Fatalf("expected one matching case inside window, got %d", count)
-	}
 }
 
 func TestListCasesFilteredAndGetCaseByReference(t *testing.T) {
@@ -573,11 +560,9 @@ func createCaseStorageTemplate(t *testing.T, store *storage.Store, guildID strin
 		Template: templateModel(guildID, "spam"),
 		Levels: []storage.ExpandedCaseTemplateLevel{
 			{
-				Level: model.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, Enabled: true},
+				Level: model.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true},
 				Actions: []model.CaseTemplateLevelAction{
-					{Position: 1, ActionType: model.ActionTimeoutUser, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
-					{Position: 2, ActionType: model.ActionKickUser, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
-					{Position: 3, ActionType: model.ActionKickUser, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: false},
+					{ActionType: model.ActionTimeoutUser, ConfigJSON: `{"duration_seconds":3600}`},
 				},
 			},
 		},

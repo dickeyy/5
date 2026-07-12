@@ -43,8 +43,186 @@ func TestMigrateSQLiteForwardAndRerun(t *testing.T) {
 	if err := db.Model(&schemaMigration{}).Count(&ledgerCount).Error; err != nil {
 		t.Fatalf("count migration ledger: %v", err)
 	}
-	if ledgerCount != 1 {
-		t.Fatalf("expected one migration ledger row after rerun, got %d", ledgerCount)
+	if ledgerCount != int64(len(registeredMigrations())) {
+		t.Fatalf("expected %d migration ledger rows after rerun, got %d", len(registeredMigrations()), ledgerCount)
+	}
+}
+
+func TestMigration0002PreservesAndQuarantinesIncompatibleTemplates(t *testing.T) {
+	db := openSQLiteMigrationDB(t)
+	if err := runMigrations(db, []migration{migration0001InitialV5Schema()}); err != nil {
+		t.Fatalf("apply frozen baseline: %v", err)
+	}
+	want := insertRepresentativeHistory(t, db)
+	validID := insertMigration0002Template(t, db, "valid-template", true, 0)
+	disabledID := insertMigration0002Template(t, db, "disabled-template", false, 0)
+	windowID := insertMigration0002Template(t, db, "window-template", true, 60)
+	softDeletedID := insertMigration0002Template(t, db, "deleted-template", true, 0)
+	deletedAt := time.Now().UTC().Add(-time.Hour)
+	if err := db.Model(&CaseTemplateRecord{}).Where("id = ?", softDeletedID).UpdateColumn("deleted_at", deletedAt).Error; err != nil {
+		t.Fatalf("soft delete compatibility fixture: %v", err)
+	}
+
+	if err := runMigrations(db, registeredMigrations()); err != nil {
+		t.Fatalf("apply template compatibility migration: %v", err)
+	}
+	assertTemplateArchiveState(t, db, validID, false)
+	assertTemplateArchiveState(t, db, disabledID, true)
+	assertTemplateArchiveState(t, db, windowID, true)
+	assertTemplateArchiveState(t, db, softDeletedID, true)
+	assertTemplateDeletedState(t, db, softDeletedID, false)
+	assertRepresentativeHistory(t, db, want)
+	var actionRecords []CaseTemplateLevelActionRecord
+	if err := db.Order("id ASC").Find(&actionRecords).Error; err != nil {
+		t.Fatalf("list preserved configured actions: %v", err)
+	}
+	if len(actionRecords) != 4 {
+		t.Fatalf("expected all four configured actions preserved, got %d", len(actionRecords))
+	}
+	for _, action := range actionRecords {
+		if action.ConfigJSON != `{"duration_minutes":60}` {
+			t.Fatalf("configured action %s was rewritten: %s", action.ID, action.ConfigJSON)
+		}
+	}
+
+	var compatibilityCount int64
+	if err := db.Model(&migration0002TemplateCompatibility{}).Count(&compatibilityCount).Error; err != nil {
+		t.Fatalf("count compatibility records: %v", err)
+	}
+	if compatibilityCount != 3 {
+		t.Fatalf("expected three quarantined templates, got %d", compatibilityCount)
+	}
+	if err := runMigrations(db, registeredMigrations()); err != nil {
+		t.Fatalf("rerun template compatibility migration: %v", err)
+	}
+	if err := db.Model(&migration0002TemplateCompatibility{}).Count(&compatibilityCount).Error; err != nil {
+		t.Fatalf("recount compatibility records: %v", err)
+	}
+	if compatibilityCount != 3 {
+		t.Fatalf("expected idempotent compatibility records, got %d", compatibilityCount)
+	}
+
+	if err := rollbackLastMigration(db, registeredMigrations()); err != nil {
+		t.Fatalf("roll back template compatibility migration: %v", err)
+	}
+	assertTemplateArchiveState(t, db, disabledID, false)
+	assertTemplateArchiveState(t, db, windowID, false)
+	assertTemplateArchiveState(t, db, softDeletedID, false)
+	assertTemplateDeletedState(t, db, softDeletedID, true)
+	assertRepresentativeHistory(t, db, want)
+	if err := runMigrations(db, registeredMigrations()); err != nil {
+		t.Fatalf("reapply template compatibility migration: %v", err)
+	}
+	assertTemplateArchiveState(t, db, disabledID, true)
+	assertTemplateArchiveState(t, db, windowID, true)
+	assertTemplateArchiveState(t, db, softDeletedID, true)
+	assertTemplateDeletedState(t, db, softDeletedID, false)
+}
+
+func TestMigration0002ActionCompatibility(t *testing.T) {
+	tests := []struct {
+		name   string
+		action migration0002Action
+		valid  bool
+	}{
+		{name: "legacy timeout", action: migration0002Action{ActionType: "timeout_user", ConfigJSON: `{"duration_minutes":60}`, Enabled: true, IdempotencyScope: "case"}, valid: true},
+		{name: "canonical timeout", action: migration0002Action{ActionType: "timeout_user", ConfigJSON: `{"duration_seconds":3600}`, Enabled: true, IdempotencyScope: "case"}, valid: true},
+		{name: "kick", action: migration0002Action{ActionType: "kick_user", ConfigJSON: `{}`, Enabled: true, IdempotencyScope: "case"}, valid: true},
+		{name: "maximum ban history", action: migration0002Action{ActionType: "ban_user", ConfigJSON: `{"delete_message_seconds":604800}`, Enabled: true, IdempotencyScope: "case"}, valid: true},
+		{name: "multiple config fields", action: migration0002Action{ActionType: "timeout_user", ConfigJSON: `{"duration_seconds":60,"extra":true}`, Enabled: true}, valid: false},
+		{name: "action notification", action: migration0002Action{ActionType: "kick_user", ConfigJSON: `{}`, Enabled: true, NotifyUser: true}, valid: false},
+		{name: "continuation", action: migration0002Action{ActionType: "kick_user", ConfigJSON: `{}`, Enabled: true, ContinueOnError: true}, valid: false},
+		{name: "public backoff", action: migration0002Action{ActionType: "kick_user", ConfigJSON: `{}`, Enabled: true, RetryBackoffMS: 1}, valid: false},
+		{name: "disabled", action: migration0002Action{ActionType: "kick_user", ConfigJSON: `{}`}, valid: false},
+		{name: "retry limit", action: migration0002Action{ActionType: "kick_user", ConfigJSON: `{}`, Enabled: true, MaxRetries: 11}, valid: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reasons := migration0002ActionReasons(tt.action)
+			if tt.valid && len(reasons) != 0 {
+				t.Fatalf("expected compatible action, got reasons %v", reasons)
+			}
+			if !tt.valid && len(reasons) == 0 {
+				t.Fatal("expected incompatible action reason")
+			}
+		})
+	}
+}
+
+func insertMigration0002Template(t *testing.T, db *gorm.DB, id string, enabled bool, windowMinutes int) string {
+	t.Helper()
+	now := time.Now().UTC()
+	templateID := id + strings.Repeat("0", 26-len(id))
+	levelPrefix := "level-" + id
+	levelID := levelPrefix + strings.Repeat("0", 26-len(levelPrefix))
+	template := CaseTemplateRecord{
+		ULIDModelRecord:        ULIDModelRecord{ID: templateID, CreatedAt: now, UpdatedAt: now},
+		GuildID:                "00000000000000000000000001",
+		Slug:                   id,
+		Name:                   id,
+		Description:            "compatibility fixture",
+		ReasonTemplate:         "fixture reason",
+		DefaultSeverity:        "medium",
+		Enabled:                enabled,
+		Version:                1,
+		CreatedByDiscordUserID: "moderator",
+		UpdatedByDiscordUserID: "moderator",
+	}
+	if err := db.Select("*").Create(&template).Error; err != nil {
+		t.Fatalf("create template fixture %s: %v", id, err)
+	}
+	if !enabled {
+		if err := db.Model(&CaseTemplateRecord{}).Where("id = ?", templateID).UpdateColumn("enabled", false).Error; err != nil {
+			t.Fatalf("disable template fixture %s: %v", id, err)
+		}
+	}
+	level := CaseTemplateLevelRecord{
+		ULIDModelRecord: ULIDModelRecord{ID: levelID, CreatedAt: now, UpdatedAt: now},
+		TemplateID:      templateID,
+		Position:        1,
+		Name:            "Default",
+		IsDefault:       true,
+		WindowMinutes:   windowMinutes,
+		Enabled:         true,
+	}
+	if err := db.Select("*").Create(&level).Error; err != nil {
+		t.Fatalf("create level fixture %s: %v", id, err)
+	}
+	actionPrefix := "action-" + id
+	action := CaseTemplateLevelActionRecord{
+		ULIDModelRecord:  ULIDModelRecord{ID: actionPrefix + strings.Repeat("0", 26-len(actionPrefix)), CreatedAt: now, UpdatedAt: now},
+		LevelID:          levelID,
+		Position:         1,
+		ActionType:       "timeout_user",
+		ConfigJSON:       `{"duration_minutes":60}`,
+		IdempotencyScope: "case",
+		Enabled:          true,
+	}
+	if err := db.Select("*").Create(&action).Error; err != nil {
+		t.Fatalf("create action fixture %s: %v", id, err)
+	}
+	return templateID
+}
+
+func assertTemplateArchiveState(t *testing.T, db *gorm.DB, templateID string, archived bool) {
+	t.Helper()
+	var record CaseTemplateRecord
+	if err := db.Unscoped().Where("id = ?", templateID).First(&record).Error; err != nil {
+		t.Fatalf("load template %s: %v", templateID, err)
+	}
+	if (record.ArchivedAt != nil) != archived {
+		t.Fatalf("template %s archived=%v, want %v", templateID, record.ArchivedAt != nil, archived)
+	}
+}
+
+func assertTemplateDeletedState(t *testing.T, db *gorm.DB, templateID string, deleted bool) {
+	t.Helper()
+	var record CaseTemplateRecord
+	if err := db.Unscoped().Where("id = ?", templateID).First(&record).Error; err != nil {
+		t.Fatalf("load template %s: %v", templateID, err)
+	}
+	if record.DeletedAt.Valid != deleted {
+		t.Fatalf("template %s deleted=%v, want %v", templateID, record.DeletedAt.Valid, deleted)
 	}
 }
 
@@ -220,6 +398,9 @@ func TestRollbackRefusesForwardOnlyBaselineWithoutChangingHistory(t *testing.T) 
 	}
 	want := insertRepresentativeHistory(t, db)
 
+	if err := repositories.RollbackLastMigration(); err != nil {
+		t.Fatalf("roll back reversible template compatibility migration: %v", err)
+	}
 	err := repositories.RollbackLastMigration()
 	if !errors.Is(err, ErrMigrationNotReversible) {
 		t.Fatalf("expected forward-only refusal, got %v", err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -81,11 +82,6 @@ func TestCaseServiceRejectsUnavailableTemplates(t *testing.T) {
 	templateService := quack.NewTemplateService(store)
 	caseService := quack.NewCaseService(store)
 
-	disabled := false
-	disabledInput := validTemplateInput("disabled")
-	disabledInput.Enabled = &disabled
-	disabledTemplate := createAppTemplate(t, ctx, store, adminContext, disabledInput)
-
 	archivedTemplate := createAppTemplate(t, ctx, store, adminContext, validTemplateInput("archived"))
 	if _, err := templateService.Archive(ctx, adminContext, archivedTemplate.ID); err != nil {
 		t.Fatalf("archive template: %v", err)
@@ -96,7 +92,6 @@ func TestCaseServiceRejectsUnavailableTemplates(t *testing.T) {
 		templateID string
 	}{
 		{name: "missing", templateID: "missing-template"},
-		{name: "disabled", templateID: disabledTemplate.ID},
 		{name: "archived", templateID: archivedTemplate.ID},
 	}
 
@@ -150,14 +145,12 @@ func TestCaseServiceRejectsEmptyFinalReason(t *testing.T) {
 			Slug:                   "empty-reason",
 			Name:                   "Empty Reason",
 			ReasonTemplate:         " ",
-			DefaultSeverity:        model.CaseSeverityMedium,
-			Enabled:                true,
 			CreatedByDiscordUserID: "admin-1",
 			UpdatedByDiscordUserID: "admin-1",
 		},
 		Levels: []storage.ExpandedCaseTemplateLevel{
 			{
-				Level: model.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, Enabled: true},
+				Level: model.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true},
 			},
 		},
 	})
@@ -272,6 +265,33 @@ func TestCaseServiceSelectsEscalationLevelFromSameTemplateHistory(t *testing.T) 
 	if snapshot.SelectedLevel.TriggerCaseCount != 3 || snapshot.SelectedLevel.MatchedCaseCount != 3 || len(snapshot.Actions) != 1 || snapshot.Actions[0].ActionType != model.ActionTimeoutUser {
 		t.Fatalf("unexpected escalation snapshot: %+v", snapshot)
 	}
+	assertSimplifiedCaseSnapshot(t, cases[2].TemplateSnapshotJSON)
+}
+
+func assertSimplifiedCaseSnapshot(t *testing.T, body string) {
+	t.Helper()
+	var snapshot map[string]any
+	if err := json.Unmarshal([]byte(body), &snapshot); err != nil {
+		t.Fatalf("decode simplified case snapshot: %v", err)
+	}
+	template := snapshot["template"].(map[string]any)
+	if _, exists := template["default_severity"]; exists {
+		t.Fatalf("case snapshot leaked template severity: %s", body)
+	}
+	level := snapshot["selected_level"].(map[string]any)
+	for _, retired := range []string{"window_minutes", "notification_type", "enabled"} {
+		if _, exists := level[retired]; exists {
+			t.Fatalf("case snapshot leaked level field %s: %s", retired, body)
+		}
+	}
+	for _, rawAction := range snapshot["actions"].([]any) {
+		action := rawAction.(map[string]any)
+		for _, retired := range []string{"position", "config", "notify_user", "notification_type", "continue_on_error", "retry_backoff_ms", "timeout_ms", "idempotency_scope", "enabled"} {
+			if _, exists := action[retired]; exists {
+				t.Fatalf("case snapshot leaked action field %s: %s", retired, body)
+			}
+		}
+	}
 }
 
 func TestCaseServiceHighestMatchingLevelWins(t *testing.T) {
@@ -303,40 +323,7 @@ func TestCaseServiceHighestMatchingLevelWins(t *testing.T) {
 	}
 }
 
-func TestCaseServiceLevelTieBreaksByHigherPosition(t *testing.T) {
-	ctx := context.Background()
-	store := newMigratedStore(t)
-	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
-	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
-	service := quack.NewCaseService(store)
-
-	input := validTemplateInput("spam")
-	input.Levels[1].Name = "Lower position"
-	input.Levels[1].Position = 2
-	input.Levels[1].TriggerCaseCount = 1
-	input.Levels = append(input.Levels, quack.TemplateLevelInput{
-		Name:             "Higher position",
-		Position:         3,
-		TriggerCaseCount: 1,
-		Actions: []quack.TemplateActionInput{
-			{ActionType: model.ActionKickUser, Config: json.RawMessage(`{"delete_message_seconds":0}`), IdempotencyScope: "case"},
-		},
-	})
-	template := createAppTemplate(t, ctx, store, adminContext, input)
-
-	created, err := service.Create(ctx, modContext, quack.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
-	if err != nil {
-		t.Fatalf("create case: %v", err)
-	}
-	if created.SelectedLevel == nil || created.SelectedLevel.Position != 3 {
-		t.Fatalf("expected higher position tie-breaker to win, got %+v", created.SelectedLevel)
-	}
-	if len(created.Actions) != 1 || created.Actions[0].ActionType != model.ActionKickUser {
-		t.Fatalf("expected higher position level action, got %+v", created.Actions)
-	}
-}
-
-func TestCaseServiceLevelWindowsAndFilters(t *testing.T) {
+func TestCaseServiceEscalationUsesAllTimeMatchingHistory(t *testing.T) {
 	ctx := context.Background()
 	store := newMigratedStore(t)
 	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
@@ -345,7 +332,6 @@ func TestCaseServiceLevelWindowsAndFilters(t *testing.T) {
 
 	input := validTemplateInput("spam")
 	input.Levels[1].TriggerCaseCount = 2
-	input.Levels[1].WindowMinutes = 60
 	template := createAppTemplate(t, ctx, store, adminContext, input)
 
 	old, err := service.Create(ctx, modContext, quack.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
@@ -369,8 +355,8 @@ func TestCaseServiceLevelWindowsAndFilters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create case: %v", err)
 	}
-	if created.SelectedLevel == nil || !created.SelectedLevel.IsDefault || created.SelectedLevel.MatchedCaseCount != 2 {
-		t.Fatalf("expected default because matching prior cases are outside filters/window, got %+v", created.SelectedLevel)
+	if created.SelectedLevel == nil || created.SelectedLevel.IsDefault || created.SelectedLevel.MatchedCaseCount != 2 {
+		t.Fatalf("expected old matching history to count without a time window, got %+v", created.SelectedLevel)
 	}
 }
 
@@ -402,28 +388,6 @@ func TestCaseServiceVoidedCasesDoNotCount(t *testing.T) {
 	}
 }
 
-func TestCaseServiceDisabledLevelsDoNotMatch(t *testing.T) {
-	ctx := context.Background()
-	store := newMigratedStore(t)
-	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
-	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
-	service := quack.NewCaseService(store)
-
-	input := validTemplateInput("spam")
-	input.Levels[1].TriggerCaseCount = 1
-	disabled := false
-	input.Levels[1].Enabled = &disabled
-	template := createAppTemplate(t, ctx, store, adminContext, input)
-
-	created, err := service.Create(ctx, modContext, quack.CaseInput{TemplateID: template.ID, TargetDiscordUserID: "target-1"})
-	if err != nil {
-		t.Fatalf("create case: %v", err)
-	}
-	if created.SelectedLevel == nil || !created.SelectedLevel.IsDefault || len(created.Actions) != 1 || created.Actions[0].ActionType != model.ActionSendDM {
-		t.Fatalf("expected disabled escalation to be ignored, got level=%+v actions=%+v", created.SelectedLevel, created.Actions)
-	}
-}
-
 func TestCaseServiceDashboardReads(t *testing.T) {
 	ctx := context.Background()
 	store := newMigratedStore(t)
@@ -451,6 +415,10 @@ func TestCaseServiceDashboardReads(t *testing.T) {
 	if list.Cases[0].SelectedLevel == nil {
 		t.Fatalf("expected selected level in case list response")
 	}
+	legacySnapshot := fmt.Sprintf(`{"template":{"id":%q,"slug":"spam","name":"Spam","version":1,"reason_template":"No spam","default_severity":"medium"},"selected_level":{"id":"level-1","name":"Default","position":1,"is_default":true,"trigger_case_count":0,"window_minutes":0,"notify_user":true,"notification_type":"warning","matched_case_count":1},"actions":[{"id":"action-1","position":1,"action_type":"timeout_user","config":{"duration_minutes":60},"notify_user":false,"continue_on_error":false,"max_retries":2,"retry_backoff_ms":1000,"timeout_ms":0,"idempotency_scope":"case"}]}`, template.ID)
+	if err := store.DB().Model(&model.Case{}).Where("id = ?", first.ID).Update("template_snapshot_json", legacySnapshot).Error; err != nil {
+		t.Fatalf("install legacy snapshot fixture: %v", err)
+	}
 
 	detail, err := service.Get(ctx, modContext, "1")
 	if err != nil {
@@ -461,6 +429,9 @@ func TestCaseServiceDashboardReads(t *testing.T) {
 	}
 	if detail.Actions[0].ActionType != model.ActionSendDM || len(detail.Actions[0].Attempts) != 0 {
 		t.Fatalf("unexpected detail actions: %+v", detail.Actions)
+	}
+	if len(detail.TemplateSnapshot.Actions) != 1 || detail.TemplateSnapshot.Actions[0].TimeoutDurationSeconds != 3600 || detail.TemplateSnapshot.Actions[0].MaxRetries != 2 {
+		t.Fatalf("expected legacy snapshot settings to remain readable, got %+v", detail.TemplateSnapshot.Actions)
 	}
 
 	profile, err := service.UserHistory(ctx, modContext, "target-1", quack.CaseListInput{Limit: "10"})
