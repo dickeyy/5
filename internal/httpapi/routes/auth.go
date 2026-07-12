@@ -2,8 +2,11 @@ package routes
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -11,7 +14,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/internal/config"
+	"github.com/quackdiscord/bot/internal/httpapi/apierror"
 	"github.com/quackdiscord/bot/internal/httpapi/middleware"
+	httpplatform "github.com/quackdiscord/bot/internal/httpapi/platform"
 	"github.com/quackdiscord/bot/internal/quack"
 	"github.com/quackdiscord/bot/internal/quack/idutil"
 	"github.com/quackdiscord/bot/internal/quack/model"
@@ -20,9 +25,20 @@ import (
 
 const (
 	discordAuthorizeURL = "https://discord.com/oauth2/authorize"
-	discordTokenURL     = "https://discord.com/api/v10/oauth2/token"
-	discordMeURL        = "https://discord.com/api/v10/users/@me"
+	maxDiscordBodyBytes = 1 << 20
 )
+
+var (
+	// discordTokenEndpoint and discordMeEndpoint remain replaceable only for bounded adapter contract tests.
+	discordTokenEndpoint = "https://discord.com/api/v10/oauth2/token"
+	discordMeEndpoint    = "https://discord.com/api/v10/users/@me"
+	discordHTTPClient    = &http.Client{Timeout: 10 * time.Second}
+)
+
+// userSessionRevoker is the optional auth-store contract used for compromise and account-change revocation.
+type userSessionRevoker interface {
+	RevokeUserSessions(context.Context, string) error
+}
 
 // discordTokenResponse is the transport-neutral representation returned for discord token response.
 type discordTokenResponse struct {
@@ -45,14 +61,20 @@ type discordUserResponse struct {
 // setupAuthRoutes explicitly wires setup auth routes so runtime behavior does not depend on init-time registration.
 func setupAuthRoutes(r *gin.Engine, services *quack.Services) {
 	auth := r.Group("/auth")
+	primitives := httpplatform.FromRepository(services.Store)
+	oauthLimit := httpplatform.RateLimit{
+		Maximum: services.Config.RateLimits.OAuth.Maximum,
+		Window:  time.Duration(services.Config.RateLimits.OAuth.WindowSeconds) * time.Second,
+	}
 	{
-		auth.GET("/discord/login", func(c *gin.Context) { discordLogin(c, services) })
-		auth.GET("/discord/callback", func(c *gin.Context) { discordCallback(c, services) })
+		auth.GET("/discord/login", primitives.RateLimits.Limit("oauth-login", oauthLimit, httpplatform.ClientIPSubject), func(c *gin.Context) { discordLogin(c, services) })
+		auth.GET("/discord/callback", primitives.RateLimits.Limit("oauth-callback", oauthLimit, httpplatform.ClientIPSubject), func(c *gin.Context) { discordCallback(c, services) })
 
 		protected := auth.Group("")
 		protected.Use(middleware.RequireAuth(services.Store, services.Config.Auth))
 		protected.GET("/me", authMe)
 		protected.POST("/logout", func(c *gin.Context) { authLogout(c, services) })
+		protected.POST("/logout-all", func(c *gin.Context) { authLogoutAll(c, services) })
 	}
 }
 
@@ -60,7 +82,7 @@ func setupAuthRoutes(r *gin.Engine, services *quack.Services) {
 // default is redirect but mode=json returns url payload
 func discordLogin(c *gin.Context, services *quack.Services) {
 	if err := validateDiscordOAuthConfig(services.Config); err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		apierror.Write(c, http.StatusServiceUnavailable, apierror.CodeDependency, "Discord sign-in is unavailable")
 		return
 	}
 
@@ -71,7 +93,7 @@ func discordLogin(c *gin.Context, services *quack.Services) {
 
 	stateID, err := idutil.NewULID()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate oauth state"})
+		apierror.Write(c, http.StatusInternalServerError, apierror.CodeInternal, "could not start Discord sign-in")
 		return
 	}
 
@@ -87,8 +109,8 @@ func discordLogin(c *gin.Context, services *quack.Services) {
 	defer cancel()
 
 	if err := services.Store.SaveOAuthState(ctx, stateID, statePayload, stateTTL); err != nil {
-		log.Error().Err(err).Msg("failed to save oauth state")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist oauth state"})
+		log.Error().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Msg("oauth state dependency unavailable")
+		apierror.Write(c, http.StatusServiceUnavailable, apierror.CodeDependency, "Discord sign-in is temporarily unavailable")
 		return
 	}
 
@@ -104,19 +126,19 @@ func discordLogin(c *gin.Context, services *quack.Services) {
 // handles oauth callback from discord
 func discordCallback(c *gin.Context, services *quack.Services) {
 	if err := validateDiscordOAuthConfig(services.Config); err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		apierror.Write(c, http.StatusServiceUnavailable, apierror.CodeDependency, "Discord sign-in is unavailable")
 		return
 	}
 
 	if oauthErr := c.Query("error"); oauthErr != "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "oauth denied", "details": oauthErr})
+		apierror.Write(c, http.StatusUnauthorized, apierror.CodeReauthenticate, "Discord authorization was not granted; sign in again")
 		return
 	}
 
 	code := strings.TrimSpace(c.Query("code"))
 	state := strings.TrimSpace(c.Query("state"))
 	if code == "" || state == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing oauth code or state"})
+		apierror.Write(c, http.StatusBadRequest, apierror.CodeValidation, "OAuth code and state are required")
 		return
 	}
 
@@ -125,32 +147,37 @@ func discordCallback(c *gin.Context, services *quack.Services) {
 
 	statePayload, err := services.Store.ConsumeOAuthState(ctx, state)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to consume oauth state")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to validate oauth state"})
+		log.Error().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Msg("oauth state dependency unavailable")
+		apierror.Write(c, http.StatusServiceUnavailable, apierror.CodeDependency, "Discord sign-in is temporarily unavailable")
 		return
 	}
 	if statePayload == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "oauth state is invalid or expired"})
+		apierror.Write(c, http.StatusUnauthorized, apierror.CodeReauthenticate, "Discord sign-in expired; sign in again")
 		return
 	}
 
 	tokenData, err := exchangeDiscordCode(ctx, services.Config, code)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to exchange oauth code")
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "failed to exchange oauth code"})
+		log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Msg("Discord OAuth grant rejected")
+		apierror.Write(c, http.StatusUnauthorized, apierror.CodeReauthenticate, "Discord authorization is invalid or revoked; sign in again")
 		return
 	}
 
 	user, err := fetchDiscordUser(ctx, tokenData.AccessToken)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to fetch discord user")
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "failed to fetch discord user"})
+		log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Msg("Discord OAuth identity request rejected")
+		apierror.Write(c, http.StatusUnauthorized, apierror.CodeReauthenticate, "Discord authorization is invalid or revoked; sign in again")
 		return
 	}
 
 	sessionID, err := idutil.NewULID()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create auth session"})
+		apierror.Write(c, http.StatusInternalServerError, apierror.CodeInternal, "could not create authentication session")
+		return
+	}
+	csrfToken, err := newSecretToken()
+	if err != nil {
+		apierror.Write(c, http.StatusInternalServerError, apierror.CodeInternal, "could not create authentication session")
 		return
 	}
 
@@ -164,6 +191,7 @@ func discordCallback(c *gin.Context, services *quack.Services) {
 		Avatar:           user.Avatar,
 		AccessToken:      tokenData.AccessToken,
 		RefreshToken:     tokenData.RefreshToken,
+		CSRFToken:        csrfToken,
 		TokenType:        tokenData.TokenType,
 		Scope:            tokenData.Scope,
 		TokenExpiresAt:   now.Add(time.Duration(tokenData.ExpiresIn) * time.Second),
@@ -173,16 +201,15 @@ func discordCallback(c *gin.Context, services *quack.Services) {
 	}
 
 	if err := services.Store.SaveSession(ctx, session, sessionTTL); err != nil {
-		log.Error().Err(err).Msg("failed to save auth session")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save auth session"})
+		log.Error().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Msg("auth session dependency unavailable")
+		apierror.Write(c, http.StatusServiceUnavailable, apierror.CodeDependency, "authentication service unavailable")
 		return
 	}
 
-	setAuthCookie(c, services.Config, sessionID, int(sessionTTL.Seconds()))
+	setAuthCookies(c, services.Config, sessionID, csrfToken, int(sessionTTL.Seconds()))
 
 	if statePayload.ResponseMode == "json" {
 		c.JSON(http.StatusOK, gin.H{
-			"session_id": session.ID,
 			"user": gin.H{
 				"id":          session.DiscordUserID,
 				"username":    session.Username,
@@ -202,7 +229,7 @@ func discordCallback(c *gin.Context, services *quack.Services) {
 func authMe(c *gin.Context) {
 	session := middleware.GetAuthSession(c)
 	if session == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth session"})
+		apierror.Write(c, http.StatusUnauthorized, apierror.CodeAuthentication, "authentication required")
 		return
 	}
 
@@ -215,7 +242,6 @@ func authMe(c *gin.Context) {
 			"avatar_url":  discordAvatarURL(session.DiscordUserID, session.Avatar),
 		},
 		"session": gin.H{
-			"id":         session.ID,
 			"expires_at": session.SessionExpiresAt,
 			"last_seen":  session.LastSeenAt,
 		},
@@ -229,13 +255,36 @@ func authLogout(c *gin.Context, services *quack.Services) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
 		if err := services.Store.DeleteSession(ctx, session.ID); err != nil {
-			log.Error().Err(err).Msg("failed to delete auth session")
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete auth session"})
+			log.Error().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Msg("auth logout dependency unavailable")
+			apierror.Write(c, http.StatusServiceUnavailable, apierror.CodeDependency, "authentication service unavailable")
 			return
 		}
 	}
 
-	clearAuthCookie(c, services.Config)
+	clearAuthCookies(c, services.Config)
+	c.Status(http.StatusNoContent)
+}
+
+// authLogoutAll revokes all indexed sessions for compromise response or account changes.
+func authLogoutAll(c *gin.Context, services *quack.Services) {
+	session := middleware.GetAuthSession(c)
+	if session == nil {
+		apierror.Write(c, http.StatusUnauthorized, apierror.CodeAuthentication, "authentication required")
+		return
+	}
+	revoker, ok := services.Store.(userSessionRevoker)
+	if !ok {
+		apierror.Write(c, http.StatusServiceUnavailable, apierror.CodeDependency, "session revocation unavailable")
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+	if err := revoker.RevokeUserSessions(ctx, session.DiscordUserID); err != nil {
+		log.Error().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Msg("auth compromise revocation dependency unavailable")
+		apierror.Write(c, http.StatusServiceUnavailable, apierror.CodeDependency, "session revocation unavailable")
+		return
+	}
+	clearAuthCookies(c, services.Config)
 	c.Status(http.StatusNoContent)
 }
 
@@ -260,28 +309,25 @@ func exchangeDiscordCode(ctx context.Context, cfg config.Config, code string) (*
 	body.Set("code", code)
 	body.Set("redirect_uri", cfg.Discord.OAuthRedirectURI)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, discordTokenURL, strings.NewReader(body.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, discordTokenEndpoint, strings.NewReader(body.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("create token request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := discordHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("token request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	var token discordTokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&token); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxDiscordBodyBytes)).Decode(&token); err != nil {
 		return nil, fmt.Errorf("decode token response: %w", err)
 	}
 
-	if resp.StatusCode >= 400 || token.AccessToken == "" {
-		if token.Error != "" {
-			return nil, fmt.Errorf("discord token error: %s", token.Error)
-		}
-		return nil, fmt.Errorf("discord token exchange failed with status %d", resp.StatusCode)
+	if resp.StatusCode >= 400 || token.AccessToken == "" || token.ExpiresIn <= 0 {
+		return nil, fmt.Errorf("discord token exchange rejected")
 	}
 
 	return &token, nil
@@ -289,32 +335,32 @@ func exchangeDiscordCode(ctx context.Context, cfg config.Config, code string) (*
 
 // fetches discord user information
 func fetchDiscordUser(ctx context.Context, accessToken string) (*discordUserResponse, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, discordMeURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, discordMeEndpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create user request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := discordHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("user request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	var user discordUserResponse
-	if err := json.NewDecoder(resp.Body).Decode(&user); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxDiscordBodyBytes)).Decode(&user); err != nil {
 		return nil, fmt.Errorf("decode user response: %w", err)
 	}
 
 	if resp.StatusCode >= 400 || user.ID == "" {
-		return nil, fmt.Errorf("discord user fetch failed with status %d", resp.StatusCode)
+		return nil, fmt.Errorf("discord user fetch rejected")
 	}
 
 	return &user, nil
 }
 
-// sets auth cookie
-func setAuthCookie(c *gin.Context, cfg config.Config, sessionID string, maxAge int) {
+// setAuthCookies sets explicit production-safe session and double-submit CSRF cookies.
+func setAuthCookies(c *gin.Context, cfg config.Config, sessionID, csrfToken string, maxAge int) {
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(
 		cfg.Auth.SessionCookieName,
@@ -325,10 +371,11 @@ func setAuthCookie(c *gin.Context, cfg config.Config, sessionID string, maxAge i
 		cfg.Auth.CookieSecure,
 		true,
 	)
+	c.SetCookie(cfg.Auth.CSRFCookieName, csrfToken, maxAge, "/", "", cfg.Auth.CookieSecure, false)
 }
 
-// clears auth cookie
-func clearAuthCookie(c *gin.Context, cfg config.Config) {
+// clearAuthCookies clears both browser authentication credentials.
+func clearAuthCookies(c *gin.Context, cfg config.Config) {
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(
 		cfg.Auth.SessionCookieName,
@@ -339,6 +386,16 @@ func clearAuthCookie(c *gin.Context, cfg config.Config) {
 		cfg.Auth.CookieSecure,
 		true,
 	)
+	c.SetCookie(cfg.Auth.CSRFCookieName, "", -1, "/", "", cfg.Auth.CookieSecure, false)
+}
+
+// newSecretToken creates an unguessable browser credential without returning raw entropy in errors.
+func newSecretToken() (string, error) {
+	var body [32]byte
+	if _, err := rand.Read(body[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(body[:]), nil
 }
 
 // builds discord avatar url

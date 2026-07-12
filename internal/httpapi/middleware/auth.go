@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/internal/config"
+	"github.com/quackdiscord/bot/internal/httpapi/apierror"
 	"github.com/quackdiscord/bot/internal/quack"
 	"github.com/quackdiscord/bot/internal/quack/model"
 	"github.com/rs/zerolog/log"
@@ -24,7 +25,8 @@ func RequireAuth(s quack.Repository, auth config.AuthConfig) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sessionID := ExtractSessionID(c, auth.SessionCookieName)
 		if sessionID == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing auth session"})
+			log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Msg("authentication required")
+			apierror.Write(c, http.StatusUnauthorized, apierror.CodeAuthentication, "authentication required")
 			return
 		}
 
@@ -33,20 +35,31 @@ func RequireAuth(s quack.Repository, auth config.AuthConfig) gin.HandlerFunc {
 
 		session, err := s.GetSession(ctx, sessionID)
 		if err != nil {
-			log.Error().Err(err).Msg("failed to load auth session")
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to load auth session"})
+			log.Error().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Msg("auth session dependency unavailable")
+			apierror.Write(c, http.StatusServiceUnavailable, apierror.CodeDependency, "authentication service unavailable")
 			return
 		}
 
 		if session == nil || session.DiscordUserID == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid auth session"})
+			log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Msg("invalid authentication session")
+			expireAuthCookies(c, auth)
+			apierror.Write(c, http.StatusUnauthorized, apierror.CodeAuthentication, "authentication required")
 			return
 		}
 
 		now := time.Now().UTC()
-		if !session.SessionExpiresAt.IsZero() && now.After(session.SessionExpiresAt) {
+		if !session.SessionExpiresAt.IsZero() && !now.Before(session.SessionExpiresAt) {
+			log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Str("actor_discord_user_id", session.DiscordUserID).Msg("authentication session expired")
 			_ = s.DeleteSession(ctx, sessionID)
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "auth session expired"})
+			expireAuthCookies(c, auth)
+			apierror.Write(c, http.StatusUnauthorized, apierror.CodeReauthenticate, "sign in again to continue")
+			return
+		}
+		if !session.TokenExpiresAt.IsZero() && !now.Before(session.TokenExpiresAt) {
+			log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Str("actor_discord_user_id", session.DiscordUserID).Msg("Discord authorization expired")
+			_ = s.DeleteSession(ctx, sessionID)
+			expireAuthCookies(c, auth)
+			apierror.Write(c, http.StatusUnauthorized, apierror.CodeReauthenticate, "Discord authorization expired; sign in again")
 			return
 		}
 
@@ -54,8 +67,8 @@ func RequireAuth(s quack.Repository, auth config.AuthConfig) gin.HandlerFunc {
 		ttl := time.Duration(auth.SessionTTLHours) * time.Hour
 		session.SessionExpiresAt = now.Add(ttl)
 		if err := s.SaveSession(ctx, session, ttl); err != nil {
-			log.Error().Err(err).Msg("failed to refresh auth session")
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to refresh auth session"})
+			log.Error().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Msg("auth session refresh dependency unavailable")
+			apierror.Write(c, http.StatusServiceUnavailable, apierror.CodeDependency, "authentication service unavailable")
 			return
 		}
 
@@ -63,6 +76,13 @@ func RequireAuth(s quack.Repository, auth config.AuthConfig) gin.HandlerFunc {
 		c.Set(ContextUserIDKey, session.DiscordUserID)
 		c.Next()
 	}
+}
+
+// expireAuthCookies invalidates both browser credentials without exposing their values.
+func expireAuthCookies(c *gin.Context, auth config.AuthConfig) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(auth.SessionCookieName, "", -1, "/", "", auth.CookieSecure, true)
+	c.SetCookie(auth.CSRFCookieName, "", -1, "/", "", auth.CookieSecure, false)
 }
 
 // GetAuthSession retrieves the auth session from Gin context

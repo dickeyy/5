@@ -1,0 +1,197 @@
+package httpapi
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/quackdiscord/bot/internal/config"
+	"github.com/quackdiscord/bot/internal/httpapi/apierror"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
+)
+
+func TestPlatformRegistrarRejectsUnsafeProductionConfig(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*config.Config)
+	}{
+		{name: "missing origins", mutate: func(cfg *config.Config) { cfg.API.CORSAllowedOrigins = nil }},
+		{name: "wildcard origin", mutate: func(cfg *config.Config) { cfg.API.CORSAllowedOrigins = []string{"https://*.example.com"} }},
+		{name: "insecure cookie", mutate: func(cfg *config.Config) { cfg.Auth.CookieSecure = false }},
+		{name: "unbounded body", mutate: func(cfg *config.Config) { cfg.API.MaxBodyBytes = 0 }},
+		{name: "unbounded timeout", mutate: func(cfg *config.Config) { cfg.API.ReadTimeoutSeconds = 0 }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Environment = "production"
+			cfg.Auth.CookieSecure = true
+			cfg.API.CORSAllowedOrigins = []string{"https://dashboard.example.com"}
+			test.mutate(&cfg)
+			if _, err := NewPlatformRegistrar(cfg); err == nil {
+				t.Fatal("expected unsafe production configuration to fail closed")
+			}
+		})
+	}
+}
+
+func TestHTTPServerPhasesUseConfiguredBounds(t *testing.T) {
+	cfg := config.Default()
+	cfg.API.Port = "9090"
+	cfg.API.ReadHeaderTimeoutSeconds = 2
+	cfg.API.ReadTimeoutSeconds = 3
+	cfg.API.WriteTimeoutSeconds = 4
+	cfg.API.IdleTimeoutSeconds = 5
+	server := newHTTPServer(cfg, http.NotFoundHandler())
+	if server.Addr != ":9090" || server.ReadHeaderTimeout != 2*time.Second || server.ReadTimeout != 3*time.Second || server.WriteTimeout != 4*time.Second || server.IdleTimeout != 5*time.Second {
+		t.Fatalf("unexpected server bounds: %+v", server)
+	}
+}
+
+func TestPlatformSecurityErrorAndCSRFContract(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := config.Default()
+	cfg.API.CORSAllowedOrigins = []string{"https://dashboard.example.com"}
+	cfg.API.MaxBodyBytes = 8
+	registrar, err := NewPlatformRegistrar(cfg)
+	if err != nil {
+		t.Fatalf("new registrar: %v", err)
+	}
+	router := gin.New()
+	registrar.Register(router)
+	router.GET("/ok", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
+	router.POST("/write", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
+	router.POST("/body", func(c *gin.Context) {
+		if _, err := io.ReadAll(c.Request.Body); err != nil {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": err.Error()})
+			return
+		}
+		c.Status(http.StatusNoContent)
+	})
+	for path, status := range map[string]int{
+		"/validation": http.StatusBadRequest,
+		"/auth":       http.StatusUnauthorized,
+		"/forbidden":  http.StatusForbidden,
+		"/conflict":   http.StatusConflict,
+		"/dependency": http.StatusServiceUnavailable,
+	} {
+		status := status
+		router.GET(path, func(c *gin.Context) { c.JSON(status, gin.H{"error": "raw secret token=never-return-this"}) })
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/ok", nil)
+	request.Header.Set("Origin", "https://evil.example.com")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	assertStructuredError(t, response, http.StatusForbidden, apierror.CodeOrigin)
+	if strings.Contains(response.Body.String(), "evil.example.com") {
+		t.Fatalf("origin was reflected in error body: %s", response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/ok", nil)
+	request.Header.Set("Origin", "https://dashboard.example.com")
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Header().Get("Access-Control-Allow-Origin") != "https://dashboard.example.com" || response.Header().Get("X-Content-Type-Options") != "nosniff" || response.Header().Get("Content-Security-Policy") == "" {
+		t.Fatalf("missing successful security contract: status=%d headers=%v", response.Code, response.Header())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/write", nil)
+	request.Header.Set("Origin", "https://dashboard.example.com")
+	request.AddCookie(&http.Cookie{Name: cfg.Auth.SessionCookieName, Value: "session-secret"})
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	assertStructuredError(t, response, http.StatusForbidden, apierror.CodeCSRF)
+
+	request = httptest.NewRequest(http.MethodPost, "/write", nil)
+	request.Header.Set("Origin", "https://dashboard.example.com")
+	request.Header.Set("X-CSRF-Token", "csrf-token")
+	request.AddCookie(&http.Cookie{Name: cfg.Auth.SessionCookieName, Value: "session-secret"})
+	request.AddCookie(&http.Cookie{Name: cfg.Auth.CSRFCookieName, Value: "csrf-token"})
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected valid CSRF request, got %d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/write", nil)
+	request.Header.Set("Authorization", "Bearer adapter-credential")
+	request.AddCookie(&http.Cookie{Name: cfg.Auth.SessionCookieName, Value: "session-secret"})
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected explicit bearer adapter to bypass browser CSRF, got %d", response.Code)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/body", bytes.NewBufferString("123456789"))
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	assertStructuredError(t, response, http.StatusRequestEntityTooLarge, apierror.CodeBodyTooLarge)
+
+	for path, expectedCode := range map[string]apierror.Code{
+		"/validation": apierror.CodeValidation,
+		"/auth":       apierror.CodeAuthentication,
+		"/forbidden":  apierror.CodeAuthorization,
+		"/conflict":   apierror.CodeConflict,
+		"/dependency": apierror.CodeDependency,
+	} {
+		request = httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("X-Request-ID", "request-test")
+		request.Header.Set("X-Correlation-ID", "correlation-test")
+		response = httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		assertStructuredError(t, response, response.Code, expectedCode)
+		if strings.Contains(response.Body.String(), "never-return-this") {
+			t.Fatalf("unsafe legacy error escaped for %s: %s", path, response.Body.String())
+		}
+	}
+}
+
+func TestLoggerRedactsQueryCredentialsAndHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := config.Default()
+	registrar, err := NewPlatformRegistrar(cfg)
+	if err != nil {
+		t.Fatalf("new registrar: %v", err)
+	}
+	var output bytes.Buffer
+	previous := log.Logger
+	log.Logger = zerolog.New(&output)
+	t.Cleanup(func() { log.Logger = previous })
+	router := gin.New()
+	registrar.Register(router)
+	router.GET("/callback", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	request := httptest.NewRequest(http.MethodGet, "/callback?code=oauth-secret&state=state-secret", nil)
+	request.Header.Set("Authorization", "Bearer session-secret")
+	request.Header.Set("Cookie", "quack_session=cookie-secret")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	logged := output.String()
+	for _, secret := range []string{"oauth-secret", "state-secret", "session-secret", "cookie-secret"} {
+		if strings.Contains(logged, secret) {
+			t.Fatalf("logger exposed %q in %s", secret, logged)
+		}
+	}
+}
+
+// assertStructuredError verifies the stable body and trace identifiers.
+func assertStructuredError(t *testing.T, response *httptest.ResponseRecorder, status int, code apierror.Code) {
+	t.Helper()
+	if response.Code != status {
+		t.Fatalf("expected status %d, got %d body=%s", status, response.Code, response.Body.String())
+	}
+	var body apierror.Response
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode structured error: %v body=%s", err, response.Body.String())
+	}
+	if body.Error.Code != code || body.Error.Message == "" || body.Error.RequestID == "" || body.Error.CorrelationID == "" {
+		t.Fatalf("unexpected structured error: %+v", body.Error)
+	}
+}
