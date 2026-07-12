@@ -978,8 +978,8 @@ by the macro-package ledger.
 | V5-002 | ACCEPTED | `slice/v5-002-guild-bootstrap` | [#4](https://github.com/dickeyy/5/pull/4) | 1 complete, two findings fixed | passed evidence gate |
 | V5-003 | ACCEPTED | `slice/v5-003-live-authorization` | [#5](https://github.com/dickeyy/5/pull/5) | 1 complete, one P2 fixed | passed evidence gate |
 | QP-A | IN_PROGRESS | `package/qp-a-core-moderation` | pending | 0 | absorbs V5-004–012 core/staff scope |
-| QP-B | IN_PROGRESS | `package/qp-b-http-auth` | pending | 0 | absorbs V5-017A/B and platform scope |
-| QP-C | IN_PROGRESS | `package/qp-c-tickets-logging` | pending | 0 | absorbs V5-018P–020 |
+| QP-B | REVIEW_WAIT | `package/qp-b-http-auth` at `201a5f4` | [#7](https://github.com/dickeyy/5/pull/7) | 1 requested | pre-review focused/race/full/vet/build green |
+| QP-C | REVIEW_WAIT | `package/qp-c-tickets-logging` at `d2925e6` | [#6](https://github.com/dickeyy/5/pull/6) | 1 requested | pre-review module/race/MySQL/full/vet/build green |
 | QI-1 | PLANNED | pending | conditional | conditional | P1 integration anchor |
 | QP-D | PLANNED | pending | pending | 0 | absorbs member V5-007, V5-013/014/017C |
 | QP-E | PLANNED | pending | pending | 0 | absorbs V5-015/016 |
