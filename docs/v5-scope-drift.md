@@ -74,11 +74,9 @@ The intended v5 core still requires product behavior that is not complete today:
 
 ## Optional Modules Must Stay Separate
 
-Some v4 features remain part of Quack v5 as optional guild modules, not as extensions of the case model:
+Some v4 features remain part of Quack v5 as optional guild modules, not as extensions of the case model. Tickets and general logging now implement this boundary through the isolated module registry, lifecycle, Discord adapter, route, migration, and privacy contracts documented in `docs/modules/optional-tickets-and-logging.md`.
 
-- Tickets remain private Discord support threads with their own lifecycle and transcripts.
-- General logging sends selected Discord events to staff log channels and remains separate from the audit log.
-- Honeypots may invoke a configured template automatically, but the resulting moderation still uses the normal case, action, notification, and audit flow.
+- Honeypots still need to invoke a configured template automatically while keeping the resulting moderation on the normal case, action, notification, and audit flow.
 
 Purge, lockdown, ping, server information, and similar utilities may be considered later. They should not add fields, permissions, or special cases to the core moderation system.
 
