@@ -37,6 +37,11 @@ var migration0006Source string
 //go:embed migration_0007_ticket_lifecycle.go
 var migration0007Source string
 
+// migration0008Source binds logical module migration 0300 to the central ledger checksum.
+//
+//go:embed migration_0008_honeypot_triggers.go
+var migration0008Source string
+
 // registeredMigrations returns the immutable ordered production migration registry.
 func registeredMigrations() []migration {
 	return []migration{
@@ -47,5 +52,6 @@ func registeredMigrations() []migration {
 		migration0005CoreModeration(),
 		migration0006OptionalModuleRegistry(),
 		migration0007TicketLifecycle(),
+		migration0008HoneypotTriggers(),
 	}
 }

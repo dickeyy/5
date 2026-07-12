@@ -412,6 +412,8 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] Mark honeypot cases with an explicit automated source.
 - [x] Use the normal escalation, action, notification, evidence, permission, and audit records.
 - [x] Define how actor permissions are represented for system-created honeypot cases without granting a fake staff identity.
+- [x] Wire the production honeypot case adapter through a system-only core boundary that cannot fabricate or reuse a staff identity.
+- [x] Register honeypot routes, migration, gateway projections, drift forwarding, conditional intents, and graceful runtime shutdown centrally.
 - [x] Handle selected-template archive and honeypot-channel deletion safely.
 - [x] Add honeypot trigger counts and outcomes to derived module statistics.
 - [x] Add backend APIs for honeypot settings and status.

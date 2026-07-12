@@ -2,6 +2,7 @@ package moduleintegration
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	httpplatform "github.com/quackdiscord/bot/internal/httpapi/platform"
 	"github.com/quackdiscord/bot/internal/modules"
 	"github.com/quackdiscord/bot/internal/modules/generallogging"
+	"github.com/quackdiscord/bot/internal/modules/honeypot"
 	"github.com/quackdiscord/bot/internal/modules/tickets"
 	"github.com/quackdiscord/bot/internal/quack"
 	"github.com/quackdiscord/bot/internal/quack/model"
@@ -25,6 +27,17 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+type systemCaseCreatorFake struct {
+	guildID string
+	input   quack.CaseInput
+	result  *quack.CaseResponse
+}
+
+func (f *systemCaseCreatorFake) CreateSystemHoneypot(_ context.Context, guildID string, input quack.CaseInput) (*quack.CaseResponse, error) {
+	f.guildID, f.input = guildID, input
+	return f.result, nil
+}
 
 func TestModuleAuditAdapterWritesImmutableCoreEntry(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:module-audit?mode=memory&cache=shared"), &gorm.Config{})
@@ -77,13 +90,17 @@ func TestOptionalModuleHTTPRegistrarsMountCompleteSurface(t *testing.T) {
 	if err := tickets.Migration().Apply(db); err != nil {
 		t.Fatalf("migrate tickets: %v", err)
 	}
-	registry, err := modules.NewRegistry(modules.NewSQLSettingsStore(db), tickets.Descriptor(), generallogging.Descriptor())
+	if err := honeypot.Migration().Apply(db); err != nil {
+		t.Fatalf("migrate honeypots: %v", err)
+	}
+	registry, err := modules.NewRegistry(modules.NewSQLSettingsStore(db), tickets.Descriptor(), generallogging.Descriptor(), honeypot.Descriptor())
 	if err != nil {
 		t.Fatalf("new registry: %v", err)
 	}
 	runtime := &Runtime{
-		Tickets: tickets.NewService(registry, tickets.NewStore(db), nil),
-		Logging: generallogging.NewService(registry, nil, nil, nil),
+		Tickets:  tickets.NewService(registry, tickets.NewStore(db), nil),
+		Logging:  generallogging.NewService(registry, nil, nil, nil),
+		Honeypot: honeypot.NewService(registry, honeypot.NewStore(db), nil, nil, nil, nil),
 	}
 	services := quack.NewWithConfigDependencies(config.Default(), store.New(db, nil), nil, nil, nil)
 	engine := gin.New()
@@ -94,6 +111,7 @@ func TestOptionalModuleHTTPRegistrarsMountCompleteSurface(t *testing.T) {
 		"GET /guilds/:discordGuildID/modules/tickets/status":               false,
 		"GET /guilds/:discordGuildID/modules/tickets/:ticketID/transcript": false,
 		"PUT /guilds/:discordGuildID/modules/general-logging/settings":     false,
+		"PUT /guilds/:discordGuildID/modules/honeypot/settings":            false,
 	}
 	for _, route := range engine.Routes() {
 		key := route.Method + " " + route.Path
@@ -105,6 +123,168 @@ func TestOptionalModuleHTTPRegistrarsMountCompleteSurface(t *testing.T) {
 		if !present {
 			t.Fatalf("missing optional module route %s", route)
 		}
+	}
+}
+
+func TestHoneypotCaseAdapterPreservesNormalPathEnvelope(t *testing.T) {
+	creator := &systemCaseCreatorFake{result: &quack.CaseResponse{ID: "case-1"}}
+	applier := honeypotCaseApplier{cases: creator}
+	request := honeypot.ApplyRequest{
+		GuildID: "guild", TemplateID: "template", TargetDiscordUserID: "target",
+		ContextChannelDiscordID: "channel", ContextMessageDiscordID: "message",
+		ContextURL: "https://discord.com/channels/1/2/3", IdempotencyKey: "honeypot:guild:message",
+		Source: honeypot.SourceHoneypot, ActorType: honeypot.ActorTypeSystem,
+	}
+	result, err := applier.ApplyHoneypotCase(context.Background(), request)
+	if err != nil || result.CaseID != "case-1" {
+		t.Fatalf("apply normal case: result=%+v err=%v", result, err)
+	}
+	if creator.guildID != request.GuildID || creator.input.TemplateID != request.TemplateID || creator.input.TargetDiscordUserID != request.TargetDiscordUserID || creator.input.Source != model.CaseSourceHoneypot || creator.input.ContextChannelDiscordID != request.ContextChannelDiscordID || creator.input.ContextMessageDiscordID != request.ContextMessageDiscordID || creator.input.ContextURL != request.ContextURL || creator.input.IdempotencyKey != request.IdempotencyKey {
+		t.Fatalf("adapter changed the normal-path envelope: guild=%q input=%+v", creator.guildID, creator.input)
+	}
+	request.ActorDiscordUserID = "fabricated-staff"
+	if _, err := applier.ApplyHoneypotCase(context.Background(), request); err == nil {
+		t.Fatal("adapter accepted fabricated staff attribution")
+	}
+}
+
+func TestHoneypotProjectionUsesCurrentMemberRolesAndPermissions(t *testing.T) {
+	guild := &discordgo.Guild{
+		ID: "guild", OwnerID: "owner",
+		Roles: []*discordgo.Role{
+			{ID: "guild", Permissions: discordgo.PermissionViewChannel},
+			{ID: "staff", Permissions: discordgo.PermissionModerateMembers},
+		},
+	}
+	channel := &discordgo.Channel{ID: "channel", GuildID: "guild"}
+	member := &discordgo.Member{GuildID: "guild", User: &discordgo.User{ID: "author", Bot: false}, Roles: []string{"staff", "exempt"}}
+	event := &discordgo.MessageCreate{Message: &discordgo.Message{ID: "message", GuildID: "guild", ChannelID: "channel", Author: &discordgo.User{ID: "author", Bot: true}}}
+	projection, err := projectHoneypotMessage(event, guild, channel, member, "quack")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projection.IsBot || !projection.AuthorCanModerate || len(projection.AuthorRoleDiscordIDs) != 2 || projection.AuthorRoleDiscordIDs[1] != "exempt" || projection.MessageURL != "https://discord.com/channels/guild/channel/message" {
+		t.Fatalf("projection trusted event claims or lost live facts: %+v", projection)
+	}
+	member.User.Bot = true
+	projection, _ = projectHoneypotMessage(event, guild, channel, member, "author")
+	if !projection.IsBot || !projection.IsQuack {
+		t.Fatalf("live bot identity was not authoritative: %+v", projection)
+	}
+}
+
+func TestGatewayIntentsFollowEnabledModulesWithoutMessageContentLeak(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:module-intents?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := modules.RegistryMigration().Apply(db); err != nil {
+		t.Fatal(err)
+	}
+	runtime := &Runtime{db: db}
+	intents, err := runtime.RequiredGatewayIntents(context.Background())
+	if err != nil || intents != discordgo.IntentGuilds {
+		t.Fatalf("disabled modules requested optional intents: intents=%d err=%v", intents, err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&modules.Configuration{ID: "honeypot", GuildID: "guild", ModuleID: modules.Honeypots, Enabled: true, ConfigJSON: `{}`, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	intents, err = runtime.RequiredGatewayIntents(context.Background())
+	if err != nil || intents&discordgo.IntentGuildMessages == 0 || intents&discordgo.IntentMessageContent != 0 {
+		t.Fatalf("honeypot intent boundary is wrong: intents=%d err=%v", intents, err)
+	}
+	if err := db.Create(&modules.Configuration{ID: "logging", GuildID: "guild", ModuleID: modules.GeneralLogging, Enabled: true, ConfigJSON: `{}`, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	intents, err = runtime.RequiredGatewayIntents(context.Background())
+	if err != nil || intents&discordgo.IntentGuildMembers == 0 || intents&discordgo.IntentGuildModeration == 0 || intents&discordgo.IntentMessageContent == 0 {
+		t.Fatalf("logging intent boundary is incomplete: intents=%d err=%v", intents, err)
+	}
+}
+
+func TestTemplateDriftDisablesOnlyMatchingHoneypotConfiguration(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:honeypot-template-drift?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := store.New(db, nil)
+	if err := repository.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	guild, err := repository.UpsertGuild(context.Background(), model.UpsertGuildParams{DiscordGuildID: "discord", Name: "Guild", OwnerDiscordUserID: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	template, err := repository.CreateCaseTemplate(context.Background(), model.CreateCaseTemplateParams{
+		Template: model.CaseTemplate{GuildID: guild.ID, Slug: "trap", Name: "Trap", ReasonTemplate: "Trap", CreatedByDiscordUserID: "admin", UpdatedByDiscordUserID: "admin"},
+		Levels:   []model.ExpandedCaseTemplateLevel{{Level: model.CaseTemplateLevel{Name: "Default", Position: 1, IsDefault: true}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := modules.NewRegistry(modules.NewSQLSettingsStore(db), honeypot.Descriptor())
+	if err != nil {
+		t.Fatal(err)
+	}
+	settingsJSON, _ := json.Marshal(honeypot.Settings{ChannelDiscordID: "channel", TemplateID: template.Template.ID})
+	if _, err := registry.SetConfiguration(context.Background(), modules.Configuration{GuildID: guild.ID, ModuleID: modules.Honeypots, Enabled: true, ConfigJSON: string(settingsJSON)}); err != nil {
+		t.Fatal(err)
+	}
+	service := honeypot.NewService(registry, honeypot.NewStore(db), nil, nil, nil, nil)
+	runtime := &Runtime{repository: repository, HoneypotDiscord: honeypot.NewDiscordAdapter(service)}
+	if _, err := repository.ArchiveCaseTemplate(context.Background(), guild.ID, template.Template.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	runtime.HandleTemplateChange(context.Background(), guild.ID, template.Template.ID)
+	configuration, err := registry.Configuration(context.Background(), guild.ID, modules.Honeypots)
+	if err != nil || configuration == nil || configuration.Enabled {
+		t.Fatalf("template drift did not disable matching honeypot: config=%+v err=%v", configuration, err)
+	}
+	var settings honeypot.Settings
+	if err := json.Unmarshal([]byte(configuration.ConfigJSON), &settings); err != nil || settings.TemplateID != template.Template.ID || settings.ChannelDiscordID != "channel" || settings.DisabledReason == "" {
+		t.Fatalf("drift repair context was not retained: settings=%+v err=%v", settings, err)
+	}
+}
+
+func TestGatewayDriftForwardsChannelAndGuildDeletionWithIsolation(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:honeypot-gateway-drift?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := store.New(db, nil)
+	if err := repository.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	guildOne, _ := repository.UpsertGuild(context.Background(), model.UpsertGuildParams{DiscordGuildID: "discord-1", Name: "One", OwnerDiscordUserID: "owner"})
+	guildTwo, _ := repository.UpsertGuild(context.Background(), model.UpsertGuildParams{DiscordGuildID: "discord-2", Name: "Two", OwnerDiscordUserID: "owner"})
+	registry, err := modules.NewRegistry(modules.NewSQLSettingsStore(db), honeypot.Descriptor())
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := func(guildID, channelID string) {
+		t.Helper()
+		payload, _ := json.Marshal(honeypot.Settings{ChannelDiscordID: channelID, TemplateID: "template"})
+		if _, err := registry.SetConfiguration(context.Background(), modules.Configuration{GuildID: guildID, ModuleID: modules.Honeypots, Enabled: true, ConfigJSON: string(payload)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set(guildOne.ID, "channel-1")
+	set(guildTwo.ID, "channel-2")
+	service := honeypot.NewService(registry, honeypot.NewStore(db), nil, nil, nil, nil)
+	runtime := &Runtime{db: db, registry: registry, resolver: guildResolver{db: db}, HoneypotDiscord: honeypot.NewDiscordAdapter(service)}
+	runtime.onChannelDelete(nil, &discordgo.ChannelDelete{Channel: &discordgo.Channel{ID: "channel-1", GuildID: "discord-1"}})
+	one, _ := registry.Configuration(context.Background(), guildOne.ID, modules.Honeypots)
+	two, _ := registry.Configuration(context.Background(), guildTwo.ID, modules.Honeypots)
+	if one.Enabled || !two.Enabled {
+		t.Fatalf("channel drift crossed guilds: one=%+v two=%+v", one, two)
+	}
+	set(guildOne.ID, "channel-1")
+	runtime.onGuildDelete(nil, &discordgo.GuildDelete{Guild: &discordgo.Guild{ID: "discord-1"}})
+	one, _ = registry.Configuration(context.Background(), guildOne.ID, modules.Honeypots)
+	two, _ = registry.Configuration(context.Background(), guildTwo.ID, modules.Honeypots)
+	if one.Enabled || !two.Enabled {
+		t.Fatalf("guild drift crossed guilds: one=%+v two=%+v", one, two)
 	}
 }
 
@@ -165,7 +345,7 @@ func TestRuntimeWorkerShutdownIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new Discord session: %v", err)
 	}
-	runtime, err := New(context.Background(), repository, session)
+	runtime, err := New(context.Background(), repository, session, quack.New(repository))
 	if err != nil {
 		t.Fatalf("new module runtime: %v", err)
 	}

@@ -66,10 +66,10 @@ func setupGuildRoutes(r *gin.Engine, services *quack.Services, moduleRuntime *mo
 		getTemplate(c, services)
 	})
 	guilds.PATCH("/:discordGuildID/templates/:templateID", middleware.RequireGuildContext(services, model.PermissionActionCaseTemplateWrite), func(c *gin.Context) {
-		updateTemplate(c, services)
+		updateTemplate(c, services, moduleRuntime)
 	})
 	guilds.DELETE("/:discordGuildID/templates/:templateID", middleware.RequireGuildContext(services, model.PermissionActionCaseTemplateDelete), func(c *gin.Context) {
-		archiveTemplate(c, services)
+		archiveTemplate(c, services, moduleRuntime)
 	})
 	guilds.GET("/:discordGuildID/cases", middleware.RequireGuildContext(services, model.PermissionActionCaseRead), func(c *gin.Context) {
 		listCases(c, services)

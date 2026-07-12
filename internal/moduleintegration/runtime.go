@@ -11,6 +11,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/internal/modules"
 	"github.com/quackdiscord/bot/internal/modules/generallogging"
+	"github.com/quackdiscord/bot/internal/modules/honeypot"
 	"github.com/quackdiscord/bot/internal/modules/tickets"
 	"github.com/quackdiscord/bot/internal/quack"
 	"github.com/quackdiscord/bot/internal/quack/model"
@@ -23,22 +24,31 @@ const (
 	transcriptSweepInterval = time.Hour
 	loggingQueueCapacity    = 1000
 	loggingQueueWorkers     = 2
+	honeypotQueueCapacity   = 256
+	honeypotQueueWorkers    = 2
 )
 
 // Runtime owns the optional-module services and their process-scoped workers.
 type Runtime struct {
-	Tickets       *tickets.Service
-	TicketDiscord *tickets.DiscordAdapter
-	Logging       *generallogging.Service
-	LoggingQueue  *generallogging.DeliveryQueue
+	Tickets         *tickets.Service
+	TicketDiscord   *tickets.DiscordAdapter
+	Logging         *generallogging.Service
+	LoggingQueue    *generallogging.DeliveryQueue
+	Honeypot        *honeypot.Service
+	HoneypotDiscord *honeypot.DiscordAdapter
+	HoneypotRuntime *honeypot.Runtime
 
-	db      *gorm.DB
-	cancel  context.CancelFunc
-	bulk    chan bulkDeleteEvent
-	bulkMu  sync.RWMutex
-	bulkWG  sync.WaitGroup
-	sweepWG sync.WaitGroup
-	closed  bool
+	db         *gorm.DB
+	registry   *modules.Registry
+	session    *discordgo.Session
+	resolver   guildResolver
+	repository quack.Repository
+	cancel     context.CancelFunc
+	bulk       chan bulkDeleteEvent
+	bulkMu     sync.RWMutex
+	bulkWG     sync.WaitGroup
+	sweepWG    sync.WaitGroup
+	closed     bool
 }
 
 // bulkDeleteEvent carries one bounded cache-aware bulk deletion job.
@@ -49,18 +59,22 @@ type bulkDeleteEvent struct {
 
 // New constructs the shared registry, immutable audit adapter, module stores,
 // Discord adapters, and bounded general-logging delivery workers.
-func New(_ context.Context, repositories *store.Store, session *discordgo.Session) (*Runtime, error) {
+func New(ctx context.Context, repositories *store.Store, session *discordgo.Session, services *quack.Services) (*Runtime, error) {
 	if repositories == nil || repositories.DB() == nil {
 		return nil, errors.New("optional module database is not configured")
 	}
 	if session == nil {
 		return nil, errors.New("optional module Discord session is not configured")
 	}
+	if services == nil || services.Cases == nil || services.Store == nil {
+		return nil, errors.New("optional module core services are not configured")
+	}
 
 	registry, err := modules.NewRegistry(
 		modules.NewSQLSettingsStore(repositories.DB()),
 		tickets.Descriptor(),
 		generallogging.Descriptor(),
+		honeypot.Descriptor(),
 	)
 	if err != nil {
 		return nil, err
@@ -71,16 +85,27 @@ func New(_ context.Context, repositories *store.Store, session *discordgo.Sessio
 	ticketClient := ticketDiscordClient{session: session, resolver: resolver}
 	loggingClient := loggingDiscordClient{session: session, resolver: resolver}
 	loggingService := generallogging.NewService(registry, auditor, loggingClient, nil)
-	workerCtx, cancel := context.WithCancel(context.Background())
+	honeypotTemplates := honeypotTemplateValidator{repository: repositories}
+	honeypotChannels := honeypotChannelValidator{session: session, resolver: resolver}
+	honeypotService := honeypot.NewService(registry, honeypot.NewStore(repositories.DB()), auditor, honeypotChannels, honeypotTemplates, honeypotCaseApplier{cases: services.Cases})
+	honeypotDiscord := honeypot.NewDiscordAdapter(honeypotService)
+	workerCtx, cancel := context.WithCancel(ctx)
 
 	runtime := &Runtime{
-		Tickets:       ticketService,
-		TicketDiscord: tickets.NewDiscordAdapter(ticketService, ticketClient),
-		Logging:       loggingService,
-		LoggingQueue:  generallogging.NewDeliveryQueue(workerCtx, loggingService, loggingQueueCapacity, loggingQueueWorkers),
-		db:            repositories.DB(),
-		cancel:        cancel,
-		bulk:          make(chan bulkDeleteEvent, loggingQueueCapacity),
+		Tickets:         ticketService,
+		TicketDiscord:   tickets.NewDiscordAdapter(ticketService, ticketClient),
+		Logging:         loggingService,
+		LoggingQueue:    generallogging.NewDeliveryQueue(workerCtx, loggingService, loggingQueueCapacity, loggingQueueWorkers),
+		Honeypot:        honeypotService,
+		HoneypotDiscord: honeypotDiscord,
+		HoneypotRuntime: honeypot.NewRuntime(workerCtx, honeypotDiscord, honeypotQueueCapacity, honeypotQueueWorkers),
+		db:              repositories.DB(),
+		registry:        registry,
+		session:         session,
+		resolver:        resolver,
+		repository:      repositories,
+		cancel:          cancel,
+		bulk:            make(chan bulkDeleteEvent, loggingQueueCapacity),
 	}
 	for range loggingQueueWorkers {
 		runtime.bulkWG.Add(1)
@@ -106,6 +131,9 @@ func (r *Runtime) Close() {
 	}
 	r.bulkMu.Unlock()
 	r.bulkWG.Wait()
+	if r.HoneypotRuntime != nil {
+		r.HoneypotRuntime.Close()
+	}
 	if r.LoggingQueue != nil {
 		r.LoggingQueue.Close()
 	}
@@ -199,6 +227,20 @@ func (r guildResolver) internalID(ctx context.Context, discordGuildID string) (s
 	}
 	if result.RowsAffected == 0 {
 		return "", errors.New("active guild is not registered")
+	}
+	return guild.ID, nil
+}
+
+// internalIDAny resolves preserved guild identity for departure cleanup even
+// when another gateway handler has already marked the guild inactive.
+func (r guildResolver) internalIDAny(ctx context.Context, discordGuildID string) (string, error) {
+	var guild model.Guild
+	result := r.db.WithContext(ctx).Where("discord_guild_id = ?", discordGuildID).Limit(1).Find(&guild)
+	if result.Error != nil {
+		return "", result.Error
+	}
+	if result.RowsAffected == 0 {
+		return "", errors.New("guild is not registered")
 	}
 	return guild.ID, nil
 }

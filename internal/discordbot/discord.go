@@ -29,7 +29,9 @@ func New(token string) (*Bot, error) {
 	if err != nil {
 		return nil, err
 	}
-	session.Identify.Intents = discordgo.Intent(3276543)
+	// Runtime adds only the intents required by currently enabled optional
+	// modules before opening the gateway.
+	session.Identify.Intents = discordgo.IntentGuilds
 	session.StateEnabled = true
 	session.State.MaxMessageCount = 5000
 	return &Bot{Session: session, HTTPClient: http.DefaultClient}, nil

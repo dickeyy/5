@@ -79,7 +79,7 @@ The intended v5 core still requires product behavior that is not complete today:
 
 Some v4 features remain part of Quack v5 as optional guild modules, not as extensions of the case model. Tickets and general logging now implement this boundary through the isolated module registry, lifecycle, Discord adapter, route, migration, and privacy contracts documented in `docs/modules/optional-tickets-and-logging.md`.
 
-- Honeypots now invoke a configured template through an injected normal-case application boundary, with system attribution, message deduplication, drift disablement, isolated statistics/migration/runtime contracts, and no direct case or action storage access. QI-2 owns the production adapter and central registration described in `docs/modules/optional-honeypots.md`.
+- Honeypots now invoke a configured template through an injected normal-case application boundary, with system attribution, message deduplication, drift disablement, isolated statistics/migration/runtime contracts, and no direct case or action storage access. QI-2 supplies the production system-only adapter, authoritative Discord projections/validators, central routes and frozen logical-0300 migration, drift forwarding, conditional intents, and bounded runtime lifecycle described in `docs/modules/optional-honeypots.md`.
 
 Purge, lockdown, ping, server information, and similar utilities may be considered later. They should not add fields, permissions, or special cases to the core moderation system.
 
