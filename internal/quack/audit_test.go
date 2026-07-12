@@ -13,7 +13,7 @@ import (
 func TestAuditServiceListPermissionsAndFilters(t *testing.T) {
 	ctx := context.Background()
 	store := newMigratedStore(t)
-	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
+	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionAdministrator))
 	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
 
 	entries := []model.AuditLogEntry{
@@ -27,9 +27,9 @@ func TestAuditServiceListPermissionsAndFilters(t *testing.T) {
 	}
 
 	service := quack.NewAuditService(store)
-	_, err := service.List(ctx, modContext, quack.AuditListInput{})
-	if !errors.Is(err, quack.ErrAuditPermissionDenied) {
-		t.Fatalf("expected moderator audit permission error, got %v", err)
+	moderatorList, err := service.List(ctx, modContext, quack.AuditListInput{})
+	if err != nil || moderatorList.Total != 2 {
+		t.Fatalf("expected moderator complete audit access, list=%+v err=%v", moderatorList, err)
 	}
 
 	list, err := service.List(ctx, adminContext, quack.AuditListInput{Result: string(model.AuditResultFailure), Limit: "10"})

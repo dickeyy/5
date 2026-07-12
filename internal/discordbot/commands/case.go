@@ -41,7 +41,7 @@ func HandleCaseInteraction(ctx ui.Context) ui.HandlerResult {
 		return ui.Immediate(ui.Error("Use `/case add` to create a case from a template."))
 	}
 
-	if err := validateCaseInteraction(ctx.Services, interaction, add); err != nil {
+	if err := validateCaseInteraction(ctx.Context, ctx.Services, interaction, add); err != nil {
 		return ui.Immediate(ui.Error(caseCommandErrorMessage(err)))
 	}
 
@@ -64,7 +64,7 @@ func HandleCaseInteraction(ctx ui.Context) ui.HandlerResult {
 }
 
 // validateCaseInteraction checks case interaction before state is read or changed.
-func validateCaseInteraction(services *quack.Services, interaction *discordgo.InteractionCreate, add *discordgo.ApplicationCommandInteractionDataOption) error {
+func validateCaseInteraction(ctx context.Context, services *quack.Services, interaction *discordgo.InteractionCreate, add *discordgo.ApplicationCommandInteractionDataOption) error {
 	if services == nil || services.Guilds == nil || services.Cases == nil {
 		return errors.New("case command services are not configured")
 	}
@@ -77,13 +77,11 @@ func validateCaseInteraction(services *quack.Services, interaction *discordgo.In
 	if templateOption == nil || userOption == nil {
 		return quack.ErrCaseValidation
 	}
-
-	_, _, permissionBits := interactionMemberFields(interaction)
-	if permissionBits&uint64(discordgo.PermissionAdministrator) == 0 &&
-		permissionBits&uint64(discordgo.PermissionModerateMembers) == 0 {
-		return quack.ErrCasePermissionDenied
+	guildContext, err := resolveInteractionGuildContext(ctx, services, interaction)
+	if err != nil {
+		return err
 	}
-	return nil
+	return services.Guilds.Authorize(ctx, guildContext, model.PermissionActionCaseCreate, model.AuditSourceDiscord)
 }
 
 // CaseCommandDefinition returns a fresh /case definition so Discord-side mutation cannot alter registry state.
@@ -151,8 +149,8 @@ func createCaseFromInteraction(ctx context.Context, services *quack.Services, in
 	if err != nil {
 		return nil, err
 	}
-	if !guildContext.Can(model.PermissionActionCaseCreate) {
-		return nil, quack.ErrCasePermissionDenied
+	if err := services.Guilds.Authorize(ctx, guildContext, model.PermissionActionCaseCreate, model.AuditSourceDiscord); err != nil {
+		return nil, err
 	}
 
 	templateID, template, err := resolveTemplate(ctx, services, guildContext, templateOption.StringValue())
@@ -209,7 +207,7 @@ func resolveTemplate(ctx context.Context, services *quack.Services, guildContext
 // handleTemplateAutocomplete handles template autocomplete and translates it into the package's application or response contract.
 func handleTemplateAutocomplete(ctx context.Context, services *quack.Services, interaction *discordgo.InteractionCreate) *discordgo.InteractionResponse {
 	guildContext, err := resolveInteractionGuildContext(ctx, services, interaction)
-	if err != nil || !guildContext.Can(model.PermissionActionCaseCreate) {
+	if err != nil || services.Guilds.Authorize(ctx, guildContext, model.PermissionActionCaseCreate, model.AuditSourceDiscord) != nil {
 		return autocompleteResponse(nil)
 	}
 
@@ -311,7 +309,7 @@ func truncateDiscordChoiceName(value string) string {
 // caseCommandErrorMessage converts case command error message into its transport presentation without leaking transport types into the core.
 func caseCommandErrorMessage(err error) string {
 	switch {
-	case errors.Is(err, quack.ErrCasePermissionDenied):
+	case errors.Is(err, quack.ErrCasePermissionDenied), errors.Is(err, quack.ErrAuthorizationDenied):
 		return "You do not have permission to create that case."
 	case errors.Is(err, quack.ErrCaseTemplateNotAvailable):
 		return "That case template is not available."

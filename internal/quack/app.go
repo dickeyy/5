@@ -36,6 +36,9 @@ func NewWithConfigDependencies(cfg config.Config, store Repository, discord Disc
 	services.Settings = NewGuildSettingsService(store)
 	services.Templates = NewTemplateService(store)
 	services.Cases = NewCaseService(store, scheduler)
+	if discord != nil {
+		services.Cases.authorizer = services.Guilds
+	}
 	services.Audits = NewAuditService(store)
 	services.Actions = NewActionService(store, actions)
 	services.Ops = NewOpsService(store, scheduler)

@@ -14,7 +14,8 @@ import (
 )
 
 type fakeDiscordClient struct {
-	botGuild *quack.DiscordBotGuild
+	botGuild                *quack.DiscordBotGuild
+	liveActorPermissionBits *uint64
 }
 
 func (f fakeDiscordClient) UserGuilds(ctx context.Context, accessToken string) ([]quack.DiscordUserGuild, error) {
@@ -30,6 +31,20 @@ func (f fakeDiscordClient) BotGuilds(ctx context.Context) ([]quack.DiscordBotGui
 
 func (f fakeDiscordClient) BotGuild(ctx context.Context, discordGuildID string) (*quack.DiscordBotGuild, error) {
 	return f.botGuild, nil
+}
+
+func (f fakeDiscordClient) GuildAuthorization(ctx context.Context, guildID, actorID, targetID string) (*quack.DiscordGuildAuthorization, error) {
+	permissionBits := uint64(discordgo.PermissionModerateMembers)
+	if f.liveActorPermissionBits != nil {
+		permissionBits = *f.liveActorPermissionBits
+	}
+	target := &quack.DiscordMemberAuthorization{DiscordUserID: targetID, Present: targetID != "", TopRolePosition: 1}
+	return &quack.DiscordGuildAuthorization{
+		Guild:  *f.botGuild,
+		Actor:  quack.DiscordMemberAuthorization{DiscordUserID: actorID, Present: true, PermissionBits: permissionBits, TopRolePosition: 10},
+		Bot:    quack.DiscordMemberAuthorization{DiscordUserID: "quack", Present: true, PermissionBits: ^uint64(0), TopRolePosition: 20, Bot: true},
+		Target: target,
+	}, nil
 }
 
 func TestCommandDefinitionDefinesCaseAdd(t *testing.T) {
@@ -118,7 +133,7 @@ func TestHandleCaseInteractionCreatesCase(t *testing.T) {
 	}
 }
 
-func TestHandleCaseInteractionDeniesMissingPermission(t *testing.T) {
+func TestHandleCaseInteractionDoesNotTrustStaleInteractionPermissionBits(t *testing.T) {
 	_, services, templateID := newCaseCommandHarness(t)
 
 	result := HandleCaseInteraction(ui.Context{
@@ -127,14 +142,26 @@ func TestHandleCaseInteractionDeniesMissingPermission(t *testing.T) {
 		Interaction: caseAddInteraction(templateID, "target-1", 0),
 	})
 	response := result.Response
-	if response == nil || response.Data == nil || len(response.Data.Embeds) != 1 || !strings.Contains(response.Data.Embeds[0].Description, "do not have permission") {
+	if response == nil || response.Type != discordgo.InteractionResponseDeferredChannelMessageWithSource {
 		t.Fatalf("unexpected response: %+v", response)
 	}
-	if result.Task != nil {
-		t.Fatalf("expected permission denial to be immediate")
+	if result.Task == nil {
+		t.Fatalf("expected live Discord permission to authorize despite stale interaction bits")
 	}
-	if response.Data.Flags&discordgo.MessageFlagsEphemeral == 0 {
-		t.Fatalf("expected ephemeral error response, got flags %d", response.Data.Flags)
+}
+
+func TestHandleCaseInteractionDeniesRevokedLivePermissionDespiteInteractionSnapshot(t *testing.T) {
+	_, services, templateID := newCaseCommandHarnessWithLivePermissions(t, 0)
+	result := HandleCaseInteraction(ui.Context{
+		Context: context.Background(), Services: services,
+		Interaction: caseAddInteraction(templateID, "target-1", ^uint64(0)),
+	})
+	response := result.Response
+	if response == nil || response.Data == nil || len(response.Data.Embeds) != 1 || !strings.Contains(response.Data.Embeds[0].Description, "do not have permission") {
+		t.Fatalf("unexpected live permission denial: %+v", response)
+	}
+	if result.Task != nil || response.Data.Flags&discordgo.MessageFlagsEphemeral == 0 {
+		t.Fatalf("expected immediate private denial, result=%+v", result)
 	}
 }
 
@@ -261,6 +288,10 @@ func (f *fakeResponder) UpdateMessage(edit ui.Edit) (*discordgo.Message, error) 
 }
 
 func newCaseCommandHarness(t *testing.T) (*store.Store, *quack.Services, string) {
+	return newCaseCommandHarnessWithLivePermissions(t, uint64(discordgo.PermissionModerateMembers))
+}
+
+func newCaseCommandHarnessWithLivePermissions(t *testing.T, permissionBits uint64) (*store.Store, *quack.Services, string) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -270,7 +301,7 @@ func newCaseCommandHarness(t *testing.T) (*store.Store, *quack.Services, string)
 	}
 
 	services := quack.NewWithDiscordClient(store, fakeDiscordClient{
-		botGuild: &quack.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "owner-1"},
+		botGuild: &quack.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "owner-1"}, liveActorPermissionBits: &permissionBits,
 	})
 	guildContext, err := services.Guilds.ResolveDiscordStaffContext(ctx, quack.DiscordStaffContextInput{
 		DiscordGuildID: "guild-1",

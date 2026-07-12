@@ -41,7 +41,6 @@ The current backend already supports important parts of the intended v5 directio
 The current implementation differs from the v5 definition in several core rules:
 
 - The current level-owned notification is still represented as a pre-enforcement `send_dm` action. V5 sends one structured notification after the action outcome is known.
-- Current case permissions do not fully enforce the actor's matching timeout, kick, or ban permission before case creation.
 - The current dashboard guild flow is staff-focused and does not yet provide case-owner access for members who left or were banned.
 - Template import, export, and restore are not yet defined in the running product.
 
@@ -60,7 +59,6 @@ Historical database compatibility may require a later migration rather than imme
 The intended v5 core still requires product behavior that is not complete today:
 
 - Real Discord timeout, kick, and ban execution.
-- Strict target, permission, and role-hierarchy checks before creating a punitive case.
 - Safe automatic retry classification and staff-controlled retry, dismiss, and void actions.
 - One structured member notification sent after the action outcome is known.
 - Structured template context fields shared by Discord and the dashboard.

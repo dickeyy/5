@@ -26,13 +26,12 @@ func RequireGuildContext(services *quack.Services, requiredAction model.Permissi
 			if errors.Is(err, quack.ErrBotNotInGuild) {
 				status = http.StatusNotFound
 			}
-
-			c.AbortWithStatusJSON(status, gin.H{"error": err.Error()})
+			c.AbortWithStatusJSON(status, gin.H{"error": "live guild authorization unavailable"})
 			return
 		}
 
-		if requiredAction != "" && !guildContext.Can(requiredAction) {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "missing required guild permission"})
+		if err := services.Guilds.Authorize(c.Request.Context(), guildContext, requiredAction, model.AuditSourceAPI); err != nil {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": quack.ErrAuthorizationDenied.Error()})
 			return
 		}
 

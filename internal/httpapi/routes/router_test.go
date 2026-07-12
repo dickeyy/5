@@ -284,6 +284,7 @@ func TestListUserGuildsRouteAuthenticated(t *testing.T) {
 			{ID: "guild-1", Name: "Guild One", Owner: true},
 			{ID: "guild-2", Name: "Guild Two", Permissions: uint64(discordgo.PermissionManageGuild)},
 			{ID: "guild-3", Name: "Guild Three", Permissions: uint64(discordgo.PermissionSendMessages)},
+			{ID: "guild-4", Name: "Guild Four", Permissions: uint64(discordgo.PermissionModerateMembers)},
 		},
 		botGuilds: []quack.DiscordBotGuild{{ID: "guild-2", Name: "Guild Two"}},
 	})
@@ -311,6 +312,7 @@ func TestListUserGuildsRouteAuthenticated(t *testing.T) {
 			DiscordGuildID string `json:"discord_guild_id"`
 			Name           string `json:"name"`
 			CanManageGuild bool   `json:"can_manage_guild"`
+			CanModerate    bool   `json:"can_moderate"`
 			QuackInGuild   bool   `json:"quack_in_guild"`
 		} `json:"guilds"`
 	}
@@ -318,14 +320,17 @@ func TestListUserGuildsRouteAuthenticated(t *testing.T) {
 		t.Fatalf("decode guild list response: %v", err)
 	}
 
-	if len(body.Guilds) != 2 {
-		t.Fatalf("expected only manageable guilds, got %+v", body.Guilds)
+	if len(body.Guilds) != 3 {
+		t.Fatalf("expected current Quack-capable guilds, got %+v", body.Guilds)
 	}
 	if body.Guilds[0].DiscordGuildID != "guild-1" || !body.Guilds[0].CanManageGuild || body.Guilds[0].QuackInGuild {
 		t.Fatalf("unexpected first guild: %+v", body.Guilds[0])
 	}
 	if body.Guilds[1].DiscordGuildID != "guild-2" || !body.Guilds[1].QuackInGuild {
 		t.Fatalf("unexpected second guild: %+v", body.Guilds[1])
+	}
+	if body.Guilds[2].DiscordGuildID != "guild-4" || body.Guilds[2].CanManageGuild || !body.Guilds[2].CanModerate {
+		t.Fatalf("expected Moderate Members guild entry, got %+v", body.Guilds[2])
 	}
 }
 
@@ -535,7 +540,7 @@ func TestGuildSettingsRoutesReadWriteAcknowledgeAndAuditDenied(t *testing.T) {
 	}
 	foundDenied := false
 	for _, audit := range audits {
-		if audit.Action == "guild_settings.update" && audit.Result == model.AuditResultDenied {
+		if audit.Action == "authorization.denied" && audit.ResourceID == string(model.PermissionActionGuildSettingsWrite) && audit.Result == model.AuditResultDenied {
 			foundDenied = true
 		}
 	}
@@ -806,8 +811,8 @@ func TestAuditLogRoutePermissionsAndFilters(t *testing.T) {
 	modRequest.Header.Set("Authorization", "Bearer "+modSessionID)
 	modResponse := httptest.NewRecorder()
 	modRouter.ServeHTTP(modResponse, modRequest)
-	if modResponse.Code != http.StatusForbidden {
-		t.Fatalf("expected moderator audit status %d, got %d body=%s", http.StatusForbidden, modResponse.Code, modResponse.Body.String())
+	if modResponse.Code != http.StatusOK {
+		t.Fatalf("expected moderator audit status %d, got %d body=%s", http.StatusOK, modResponse.Code, modResponse.Body.String())
 	}
 
 	adminRouter, adminSessionID, templateID := newCaseRouteHarness(t, uint64(discordgo.PermissionAdministrator))
@@ -910,6 +915,27 @@ func (f routeFakeDiscordClient) BotGuilds(ctx context.Context) ([]quack.DiscordB
 
 func (f routeFakeDiscordClient) BotGuild(ctx context.Context, discordGuildID string) (*quack.DiscordBotGuild, error) {
 	return f.botGuild, nil
+}
+
+func (f routeFakeDiscordClient) GuildAuthorization(ctx context.Context, guildID, actorID, targetID string) (*quack.DiscordGuildAuthorization, error) {
+	if f.botGuild == nil {
+		return nil, quack.ErrBotNotInGuild
+	}
+	actor := quack.DiscordMemberAuthorization{DiscordUserID: actorID, Present: true, TopRolePosition: 10}
+	for _, guild := range f.userGuilds {
+		if guild.ID == guildID {
+			actor.PermissionBits = guild.Permissions
+			break
+		}
+	}
+	snapshot := &quack.DiscordGuildAuthorization{
+		Guild: *f.botGuild, Actor: actor,
+		Bot: quack.DiscordMemberAuthorization{DiscordUserID: "quack", Present: true, PermissionBits: ^uint64(0), TopRolePosition: 20, Bot: true},
+	}
+	if targetID != "" {
+		snapshot.Target = &quack.DiscordMemberAuthorization{DiscordUserID: targetID, Present: true, TopRolePosition: 1}
+	}
+	return snapshot, nil
 }
 
 func routeTestSession(discordUserID string) *model.AuthSession {

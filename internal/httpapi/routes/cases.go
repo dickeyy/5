@@ -122,7 +122,7 @@ func writeCaseError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, quack.ErrCaseValidation):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-	case errors.Is(err, quack.ErrCasePermissionDenied):
+	case errors.Is(err, quack.ErrCasePermissionDenied), errors.Is(err, quack.ErrAuthorizationDenied):
 		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 	case errors.Is(err, quack.ErrCaseTemplateNotAvailable):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
