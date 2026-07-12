@@ -186,14 +186,11 @@ type CaseTemplate struct {
 	Name                   string
 	Description            string
 	ReasonTemplate         string
-	DefaultSeverity        CaseSeverity
 	Appealable             bool
-	Enabled                bool
 	Version                uint
 	CreatedByDiscordUserID string
 	UpdatedByDiscordUserID string
 	ArchivedAt             *time.Time
-	DeletedAt              *time.Time
 }
 
 // CaseTemplateLevel represents the persistence-free domain state for a case template level.
@@ -204,27 +201,16 @@ type CaseTemplateLevel struct {
 	Name             string
 	IsDefault        bool
 	TriggerCaseCount int
-	WindowMinutes    int
 	NotifyUser       bool
-	NotificationType string
-	Enabled          bool
 }
 
 // CaseTemplateLevelAction identifies the supported case template level action values stored and exchanged by Quack.
 type CaseTemplateLevelAction struct {
 	ULIDModel
-	LevelID          string
-	Position         int
-	ActionType       ActionType
-	ConfigJSON       string
-	NotifyUser       bool
-	NotificationType string
-	ContinueOnError  bool
-	MaxRetries       uint8
-	RetryBackoffMS   int
-	TimeoutMS        int
-	IdempotencyScope string
-	Enabled          bool
+	LevelID    string
+	ActionType ActionType
+	ConfigJSON string
+	MaxRetries uint8
 }
 
 // Case represents the persistence-free domain state for a case.

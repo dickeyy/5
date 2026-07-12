@@ -210,9 +210,6 @@ func resolveTemplate(ctx context.Context, services *quack.Services, guildContext
 	}
 	for _, template := range templates {
 		if template.ID == value || strings.EqualFold(template.Slug, value) {
-			if !template.Enabled {
-				return "", nil, quack.ErrCaseTemplateNotAvailable
-			}
 			matched := template
 			return template.ID, &matched, nil
 		}
@@ -247,9 +244,6 @@ func handleTemplateAutocomplete(ctx context.Context, services *quack.Services, i
 
 	choices := make([]*discordgo.ApplicationCommandOptionChoice, 0, 25)
 	for _, template := range templates {
-		if !template.Enabled {
-			continue
-		}
 		search := strings.ToLower(template.Slug + " " + template.Name + " " + template.Description)
 		if query != "" && !strings.Contains(search, query) {
 			continue

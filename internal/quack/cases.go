@@ -186,27 +186,20 @@ type templateSnapshot struct {
 
 // templateSnapshotTemplate groups the template snapshot template state used to keep this package's responsibilities explicit.
 type templateSnapshotTemplate struct {
-	ID              string             `json:"id"`
-	Slug            string             `json:"slug"`
-	Name            string             `json:"name"`
-	Version         uint               `json:"version"`
-	ReasonTemplate  string             `json:"reason_template"`
-	DefaultSeverity model.CaseSeverity `json:"default_severity"`
+	ID             string `json:"id"`
+	Slug           string `json:"slug"`
+	Name           string `json:"name"`
+	Version        uint   `json:"version"`
+	ReasonTemplate string `json:"reason_template"`
 }
 
 // templateSnapshotAction identifies the supported template snapshot action values stored and exchanged by Quack.
 type templateSnapshotAction struct {
-	ID               string           `json:"id"`
-	Position         int              `json:"position"`
-	ActionType       model.ActionType `json:"action_type"`
-	Config           any              `json:"config"`
-	NotifyUser       bool             `json:"notify_user"`
-	NotificationType string           `json:"notification_type,omitempty"`
-	ContinueOnError  bool             `json:"continue_on_error"`
-	MaxRetries       uint8            `json:"max_retries"`
-	RetryBackoffMS   int              `json:"retry_backoff_ms"`
-	TimeoutMS        int              `json:"timeout_ms"`
-	IdempotencyScope string           `json:"idempotency_scope"`
+	ID                     string           `json:"id"`
+	ActionType             model.ActionType `json:"action_type"`
+	TimeoutDurationSeconds int              `json:"timeout_duration_seconds,omitempty"`
+	DeleteMessageSeconds   int              `json:"delete_message_seconds,omitempty"`
+	MaxRetries             uint8            `json:"max_retries"`
 }
 
 // selectedTemplateLevel groups the selected template level state used to keep this package's responsibilities explicit.
@@ -436,7 +429,7 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 	if err != nil {
 		return nil, err
 	}
-	if template == nil || !template.Template.Enabled || template.Template.ArchivedAt != nil {
+	if template == nil || template.Template.ArchivedAt != nil {
 		return nil, ErrCaseTemplateNotAvailable
 	}
 
@@ -467,7 +460,7 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 		TargetDiscordUserID:     targetDiscordUserID,
 		ModeratorDiscordUserID:  guildContext.Staff.DiscordUserID,
 		Reason:                  reason,
-		Severity:                template.Template.DefaultSeverity,
+		Severity:                model.CaseSeverityMedium,
 		Weight:                  1,
 		Status:                  model.CaseStatusOpen,
 		Source:                  source,
@@ -480,20 +473,18 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 
 	actionExecutions := make([]model.CaseActionExecution, 0, len(selectedLevel.Actions)+1)
 	if selectedLevel.Level.NotifyUser {
-		actionExecutions = append(actionExecutions, warningNotificationExecution(caseModel, selectedLevel.Level.NotificationType))
+		actionExecutions = append(actionExecutions, warningNotificationExecution(caseModel))
 	}
 	for _, action := range selectedLevel.Actions {
 		templateActionID := action.ID
 		actionExecutions = append(actionExecutions, model.CaseActionExecution{
 			TemplateActionID:   &templateActionID,
-			Position:           action.Position,
+			Position:           1,
 			ActionType:         action.ActionType,
 			Status:             model.ActionExecutionPending,
 			ConfigSnapshotJSON: action.ConfigJSON,
-			NotifyUser:         action.NotifyUser,
-			NotificationType:   action.NotificationType,
 			MaxRetries:         action.MaxRetries,
-			RetryBackoffMS:     action.RetryBackoffMS,
+			RetryBackoffMS:     1000,
 			SafeForRetry:       !irreversibleAction(action.ActionType),
 			Irreversible:       irreversibleAction(action.ActionType),
 			CorrelationID:      correlationID,
@@ -517,7 +508,7 @@ func (s *CaseService) create(ctx context.Context, guildContext *GuildStaffContex
 	})
 }
 
-// selectTemplateLevel chooses the highest enabled escalation whose historical-case threshold is met, falling back to the enabled default level.
+// selectTemplateLevel chooses the highest escalation whose all-time historical-case threshold is met, falling back to the default level.
 func (s *CaseService) selectTemplateLevel(ctx context.Context, guildID, targetDiscordUserID string, template *model.ExpandedCaseTemplate) (*selectedTemplateLevel, error) {
 	if template == nil {
 		return nil, validationCaseError("template is required")
@@ -525,23 +516,19 @@ func (s *CaseService) selectTemplateLevel(ctx context.Context, guildID, targetDi
 
 	var fallback *selectedTemplateLevel
 	var best *selectedTemplateLevel
-	now := time.Now().UTC()
-
 	for _, expandedLevel := range template.Levels {
 		level := expandedLevel.Level
-		if !level.Enabled {
-			continue
+		if len(expandedLevel.Actions) > 1 {
+			return nil, validationCaseError("template level has more than one enforcement action")
 		}
-
-		enabledActions := enabledLevelActions(expandedLevel.Actions)
 		if level.IsDefault {
-			matchedCaseCount, err := s.matchingTemplateCaseCount(ctx, guildID, targetDiscordUserID, template.Template.ID, nil)
+			matchedCaseCount, err := s.matchingTemplateCaseCount(ctx, guildID, targetDiscordUserID, template.Template.ID)
 			if err != nil {
 				return nil, err
 			}
 			fallback = &selectedTemplateLevel{
 				Level:            level,
-				Actions:          enabledActions,
+				Actions:          expandedLevel.Actions,
 				MatchedCaseCount: matchedCaseCount,
 			}
 			continue
@@ -551,12 +538,7 @@ func (s *CaseService) selectTemplateLevel(ctx context.Context, guildID, targetDi
 			return nil, validationCaseError("escalation level trigger_case_count must be positive")
 		}
 
-		var since *time.Time
-		if level.WindowMinutes > 0 {
-			value := now.Add(-time.Duration(level.WindowMinutes) * time.Minute)
-			since = &value
-		}
-		matchedCaseCount, err := s.matchingTemplateCaseCount(ctx, guildID, targetDiscordUserID, template.Template.ID, since)
+		matchedCaseCount, err := s.matchingTemplateCaseCount(ctx, guildID, targetDiscordUserID, template.Template.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -565,18 +547,16 @@ func (s *CaseService) selectTemplateLevel(ctx context.Context, guildID, targetDi
 		}
 		candidate := &selectedTemplateLevel{
 			Level:            level,
-			Actions:          enabledActions,
+			Actions:          expandedLevel.Actions,
 			MatchedCaseCount: matchedCaseCount,
 		}
-		if best == nil ||
-			level.TriggerCaseCount > best.Level.TriggerCaseCount ||
-			(level.TriggerCaseCount == best.Level.TriggerCaseCount && level.Position > best.Level.Position) {
+		if best == nil || level.TriggerCaseCount > best.Level.TriggerCaseCount {
 			best = candidate
 		}
 	}
 
 	if fallback == nil {
-		return nil, validationCaseError("template has no enabled default level")
+		return nil, validationCaseError("template has no default level")
 	}
 	if best != nil {
 		return best, nil
@@ -586,12 +566,11 @@ func (s *CaseService) selectTemplateLevel(ctx context.Context, guildID, targetDi
 }
 
 // matchingTemplateCaseCount returns the relevant historical count plus the case currently being created, matching the user-facing meaning of a trigger count.
-func (s *CaseService) matchingTemplateCaseCount(ctx context.Context, guildID, targetDiscordUserID, templateID string, since *time.Time) (int64, error) {
+func (s *CaseService) matchingTemplateCaseCount(ctx context.Context, guildID, targetDiscordUserID, templateID string) (int64, error) {
 	priorCount, err := s.store.CountTemplateCasesForTarget(ctx, model.CountTemplateCasesForTargetParams{
 		GuildID:             guildID,
 		TemplateID:          templateID,
 		TargetDiscordUserID: targetDiscordUserID,
-		Since:               since,
 	})
 	if err != nil {
 		return 0, err
@@ -603,12 +582,11 @@ func (s *CaseService) matchingTemplateCaseCount(ctx context.Context, guildID, ta
 func buildTemplateSnapshot(template model.CaseTemplate, selectedLevel selectedTemplateLevel) (string, error) {
 	snapshot := templateSnapshot{
 		Template: templateSnapshotTemplate{
-			ID:              template.ID,
-			Slug:            template.Slug,
-			Name:            template.Name,
-			Version:         template.Version,
-			ReasonTemplate:  template.ReasonTemplate,
-			DefaultSeverity: template.DefaultSeverity,
+			ID:             template.ID,
+			Slug:           template.Slug,
+			Name:           template.Name,
+			Version:        template.Version,
+			ReasonTemplate: template.ReasonTemplate,
 		},
 		SelectedLevel: CaseSelectedLevel{
 			TemplateLevelDetails: templateLevelDetails(selectedLevel.Level),
@@ -618,18 +596,13 @@ func buildTemplateSnapshot(template model.CaseTemplate, selectedLevel selectedTe
 	}
 
 	for _, action := range selectedLevel.Actions {
+		settings := templateActionResponse(action)
 		snapshot.Actions = append(snapshot.Actions, templateSnapshotAction{
-			ID:               action.ID,
-			Position:         action.Position,
-			ActionType:       action.ActionType,
-			Config:           parseJSON(action.ConfigJSON),
-			NotifyUser:       action.NotifyUser,
-			NotificationType: action.NotificationType,
-			ContinueOnError:  action.ContinueOnError,
-			MaxRetries:       action.MaxRetries,
-			RetryBackoffMS:   action.RetryBackoffMS,
-			TimeoutMS:        action.TimeoutMS,
-			IdempotencyScope: action.IdempotencyScope,
+			ID:                     action.ID,
+			ActionType:             action.ActionType,
+			TimeoutDurationSeconds: settings.TimeoutDurationSeconds,
+			DeleteMessageSeconds:   settings.DeleteMessageSeconds,
+			MaxRetries:             action.MaxRetries,
 		})
 	}
 
@@ -641,16 +614,13 @@ func buildTemplateSnapshot(template model.CaseTemplate, selectedLevel selectedTe
 }
 
 // warningNotificationExecution encapsulates the warning notification execution rule so callers share one consistent package implementation.
-func warningNotificationExecution(caseModel model.Case, notificationType string) model.CaseActionExecution {
-	if strings.TrimSpace(notificationType) == "" {
-		notificationType = string(model.NotificationWarning)
-	}
+func warningNotificationExecution(caseModel model.Case) model.CaseActionExecution {
 	return model.CaseActionExecution{
 		Position:           0,
 		ActionType:         model.ActionSendDM,
 		Status:             model.ActionExecutionPending,
 		ConfigSnapshotJSON: warningNotificationConfig(caseModel.Reason),
-		NotificationType:   notificationType,
+		NotificationType:   string(model.NotificationWarning),
 		SafeForRetry:       true,
 		CorrelationID:      caseModel.CorrelationID,
 	}
@@ -807,9 +777,35 @@ func selectedLevelResponse(snapshotJSON string) *CaseSelectedLevel {
 
 // templateSnapshotResponse converts template snapshot response into its transport presentation without leaking transport types into the core.
 func templateSnapshotResponse(snapshotJSON string) *CaseTemplateSnapshotResponse {
-	var snapshot CaseTemplateSnapshotResponse
-	if err := json.Unmarshal([]byte(snapshotJSON), &snapshot); err != nil || snapshot.Template.ID == "" {
+	var stored struct {
+		Template      templateSnapshotTemplate `json:"template"`
+		SelectedLevel CaseSelectedLevel        `json:"selected_level"`
+		Actions       []json.RawMessage        `json:"actions"`
+	}
+	if err := json.Unmarshal([]byte(snapshotJSON), &stored); err != nil || stored.Template.ID == "" {
 		return nil
+	}
+	snapshot := CaseTemplateSnapshotResponse{
+		Template:      stored.Template,
+		SelectedLevel: stored.SelectedLevel,
+		Actions:       make([]templateSnapshotAction, 0, len(stored.Actions)),
+	}
+	for _, raw := range stored.Actions {
+		var action templateSnapshotAction
+		if err := json.Unmarshal(raw, &action); err != nil {
+			continue
+		}
+		if action.TimeoutDurationSeconds == 0 && action.DeleteMessageSeconds == 0 {
+			var legacy struct {
+				Config json.RawMessage `json:"config"`
+			}
+			if err := json.Unmarshal(raw, &legacy); err == nil && len(legacy.Config) > 0 {
+				settings := decodeTemplateActionConfig(string(legacy.Config))
+				action.TimeoutDurationSeconds = settings.DurationSeconds
+				action.DeleteMessageSeconds = settings.DeleteMessageSeconds
+			}
+		}
+		snapshot.Actions = append(snapshot.Actions, action)
 	}
 	return &snapshot
 }

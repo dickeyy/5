@@ -1,7 +1,9 @@
 package routes
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -24,7 +26,7 @@ func listTemplates(c *gin.Context, services *quack.Services) {
 // createTemplate creates template while preserving validation, authorization, and persistence invariants.
 func createTemplate(c *gin.Context, services *quack.Services) {
 	var input quack.TemplateInput
-	if err := c.ShouldBindJSON(&input); err != nil {
+	if err := bindTemplateInput(c, &input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid template payload"})
 		return
 	}
@@ -52,7 +54,7 @@ func getTemplate(c *gin.Context, services *quack.Services) {
 // updateTemplate updates template while retaining validation, compatibility, and audit requirements.
 func updateTemplate(c *gin.Context, services *quack.Services) {
 	var input quack.TemplateInput
-	if err := c.ShouldBindJSON(&input); err != nil {
+	if err := bindTemplateInput(c, &input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid template payload"})
 		return
 	}
@@ -64,6 +66,22 @@ func updateTemplate(c *gin.Context, services *quack.Services) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"template": template})
+}
+
+// bindTemplateInput rejects retired or unknown product fields instead of silently ignoring them.
+func bindTemplateInput(c *gin.Context, input *quack.TemplateInput) error {
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(input); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("multiple JSON values are not allowed")
+		}
+		return err
+	}
+	return nil
 }
 
 // archiveTemplate encapsulates the archive template rule so callers share one consistent package implementation.
@@ -84,6 +102,17 @@ func writeTemplateError(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case errors.Is(err, quack.ErrTemplateNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	case errors.Is(err, quack.ErrTemplateCompatibilityReviewRequired):
+		var compatibilityError *quack.TemplateCompatibilityReviewError
+		if errors.As(err, &compatibilityError) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":                quack.ErrTemplateCompatibilityReviewRequired.Error(),
+				"template_id":          compatibilityError.TemplateID,
+				"compatibility_reason": compatibilityError.Reason,
+			})
+			return
+		}
+		c.JSON(http.StatusConflict, gin.H{"error": quack.ErrTemplateCompatibilityReviewRequired.Error()})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "template operation failed"})
 	}

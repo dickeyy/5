@@ -160,10 +160,6 @@ func (s *Store) CountTemplateCasesForTarget(ctx context.Context, params CountTem
 		Where("template_id = ?", params.TemplateID).
 		Where("target_discord_user_id = ?", params.TargetDiscordUserID).
 		Where("status <> ?", model.CaseStatusVoided)
-	if params.Since != nil {
-		query = query.Where("created_at >= ?", *params.Since)
-	}
-
 	var count int64
 	if err := query.Count(&count).Error; err != nil {
 		return 0, fmt.Errorf("count template cases for target: %w", err)

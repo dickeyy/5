@@ -1,6 +1,35 @@
 package model
 
-import "time"
+import (
+	"errors"
+	"fmt"
+	"time"
+)
+
+// ErrTemplateCompatibilityReviewRequired marks a preserved legacy template that cannot be represented safely by the live v5 policy contract.
+var ErrTemplateCompatibilityReviewRequired = errors.New("template compatibility review required")
+
+// TemplateCompatibilityReviewError identifies a quarantined template and explains why its preserved policy cannot be returned as live v5 configuration.
+type TemplateCompatibilityReviewError struct {
+	TemplateID string
+	Reason     string
+}
+
+// Error returns an administrator-facing compatibility review message without projecting invalid legacy policy.
+func (e *TemplateCompatibilityReviewError) Error() string {
+	if e == nil {
+		return ErrTemplateCompatibilityReviewRequired.Error()
+	}
+	if e.Reason == "" {
+		return fmt.Sprintf("%s for template %s", ErrTemplateCompatibilityReviewRequired, e.TemplateID)
+	}
+	return fmt.Sprintf("%s for template %s: %s", ErrTemplateCompatibilityReviewRequired, e.TemplateID, e.Reason)
+}
+
+// Unwrap preserves sentinel matching across storage, service, and transport boundaries.
+func (e *TemplateCompatibilityReviewError) Unwrap() error {
+	return ErrTemplateCompatibilityReviewRequired
+}
 
 // ExpandedCaseTemplate groups the expanded case template state used to keep this package's responsibilities explicit.
 type ExpandedCaseTemplate struct {
@@ -60,7 +89,6 @@ type CreatedCase struct {
 // CountTemplateCasesForTargetParams groups the validated inputs needed for count template cases for target params.
 type CountTemplateCasesForTargetParams struct {
 	GuildID, TemplateID, TargetDiscordUserID string
-	Since                                    *time.Time
 }
 
 // ListCasesParams groups the validated inputs needed for list cases params.

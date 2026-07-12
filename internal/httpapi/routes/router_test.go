@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -427,6 +428,101 @@ func TestTemplateRoutesCreateUpdateDelete(t *testing.T) {
 	}
 }
 
+func TestTemplateRoutesRejectRetiredProductFields(t *testing.T) {
+	router, sessionID := newTemplateRouteHarness(t, uint64(discordgo.PermissionManageGuild))
+	payload := strings.Replace(templateRoutePayload("retired-field"), `"levels": [`, `"enabled": true, "levels": [`, 1)
+	request := httptest.NewRequest(http.MethodPost, "/guilds/guild-1/templates", bytes.NewBufferString(payload))
+	request.Header.Set("Authorization", "Bearer "+sessionID)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected retired field rejection status %d, got %d body=%s", http.StatusBadRequest, response.Code, response.Body.String())
+	}
+}
+
+func TestTemplateRouteRejectsQuarantinedLegacyPolicyExplicitly(t *testing.T) {
+	router, sessionID, repositories := newTemplateRouteHarnessWithStore(t, uint64(discordgo.PermissionAdministrator))
+	guild, err := repositories.UpsertGuild(context.Background(), storage.UpsertGuildParams{
+		DiscordGuildID:     "guild-1",
+		Name:               "Guild",
+		OwnerDiscordUserID: "owner-1",
+	})
+	if err != nil {
+		t.Fatalf("upsert compatibility guild: %v", err)
+	}
+	created, err := repositories.CreateCaseTemplate(context.Background(), storage.CreateCaseTemplateParams{
+		Template: model.CaseTemplate{
+			GuildID:                guild.ID,
+			Slug:                   "legacy-policy",
+			Name:                   "Legacy policy",
+			ReasonTemplate:         "Preserved legacy policy",
+			CreatedByDiscordUserID: "admin-1",
+			UpdatedByDiscordUserID: "admin-1",
+		},
+		Levels: []storage.ExpandedCaseTemplateLevel{
+			{
+				Level: model.CaseTemplateLevel{Position: 1, Name: "Legacy default one", IsDefault: true},
+				Actions: []model.CaseTemplateLevelAction{
+					{ActionType: model.ActionTimeoutUser, ConfigJSON: `{"duration_seconds":3600}`},
+				},
+			},
+			{Level: model.CaseTemplateLevel{Position: 2, Name: "Legacy default two", IsDefault: true}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create preserved legacy policy: %v", err)
+	}
+	now := time.Now().UTC()
+	var firstLevel storage.CaseTemplateLevelRecord
+	if err := repositories.DB().Where("template_id = ? AND position = ?", created.Template.ID, 1).First(&firstLevel).Error; err != nil {
+		t.Fatalf("load first legacy level: %v", err)
+	}
+	secondAction := storage.CaseTemplateLevelActionRecord{
+		ULIDModelRecord:  storage.ULIDModelRecord{ID: "route-compat-action0000000", CreatedAt: now, UpdatedAt: now},
+		LevelID:          firstLevel.ID,
+		Position:         2,
+		ActionType:       model.ActionKickUser,
+		ConfigJSON:       `{}`,
+		IdempotencyScope: "case",
+		Enabled:          true,
+	}
+	if err := repositories.DB().Select("*").Create(&secondAction).Error; err != nil {
+		t.Fatalf("create preserved second action: %v", err)
+	}
+	if err := repositories.DB().Model(&storage.CaseTemplateRecord{}).Where("id = ?", created.Template.ID).UpdateColumn("archived_at", now).Error; err != nil {
+		t.Fatalf("archive quarantined template: %v", err)
+	}
+	reason := "level has multiple actions; template does not have exactly one default level"
+	if err := repositories.DB().Exec(
+		"INSERT INTO quack_v5_0002_template_compatibility (template_id, previous_archived_at, previous_deleted_at, reason, recorded_at) VALUES (?, ?, ?, ?, ?)",
+		created.Template.ID, nil, nil, reason, now,
+	).Error; err != nil {
+		t.Fatalf("record compatibility state: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/guilds/guild-1/templates/"+created.Template.ID, nil)
+	request.Header.Set("Authorization", "Bearer "+sessionID)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("expected compatibility conflict %d, got %d body=%s", http.StatusConflict, response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode compatibility response: %v", err)
+	}
+	if body["error"] != quack.ErrTemplateCompatibilityReviewRequired.Error() || body["template_id"] != created.Template.ID || body["compatibility_reason"] != reason {
+		t.Fatalf("unexpected compatibility response: %+v", body)
+	}
+	if _, exists := body["template"]; exists {
+		t.Fatalf("compatibility response exposed invalid template policy: %+v", body)
+	}
+	if _, exists := body["levels"]; exists {
+		t.Fatalf("compatibility response exposed invalid levels: %+v", body)
+	}
+}
+
 func TestCaseRouteRequiresAuth(t *testing.T) {
 	testutil.SetTestConfig(t)
 	gin.SetMode(gin.TestMode)
@@ -701,6 +797,13 @@ func routeTestSession(discordUserID string) *model.AuthSession {
 
 func newTemplateRouteHarness(t *testing.T, permissionBits uint64) (*gin.Engine, string) {
 	t.Helper()
+	router, sessionID, _ := newTemplateRouteHarnessWithStore(t, permissionBits)
+	return router, sessionID
+}
+
+// newTemplateRouteHarnessWithStore exposes the adapter only for route-level persistence boundary fixtures.
+func newTemplateRouteHarnessWithStore(t *testing.T, permissionBits uint64) (*gin.Engine, string, *storage.Store) {
+	t.Helper()
 
 	testutil.SetTestConfig(t)
 	gin.SetMode(gin.TestMode)
@@ -726,7 +829,7 @@ func newTemplateRouteHarness(t *testing.T, permissionBits uint64) (*gin.Engine, 
 	router := gin.New()
 	SetupRoutes(router, services)
 
-	return router, session.ID
+	return router, session.ID, store
 }
 
 func newCaseRouteHarness(t *testing.T, permissionBits uint64) (*gin.Engine, string, string) {
@@ -755,14 +858,12 @@ func newCaseRouteHarness(t *testing.T, permissionBits uint64) (*gin.Engine, stri
 			Name:                   "Spam",
 			Description:            "Spam template",
 			ReasonTemplate:         "No spam",
-			DefaultSeverity:        model.CaseSeverityMedium,
-			Enabled:                true,
 			CreatedByDiscordUserID: "admin-1",
 			UpdatedByDiscordUserID: "admin-1",
 		},
 		Levels: []storage.ExpandedCaseTemplateLevel{
 			{
-				Level: model.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, Enabled: true},
+				Level: model.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true},
 			},
 		},
 	})
@@ -800,8 +901,7 @@ func templateRoutePayload(slug string) string {
 				"name": "Default",
 				"position": 1,
 				"is_default": true,
-				"enabled": true,
-				"actions": []
+					"actions": []
 			}
 		]
 	}`

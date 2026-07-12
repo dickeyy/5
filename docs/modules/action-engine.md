@@ -10,9 +10,7 @@ lives in `internal/quack/actions.go`.
 - claim the next runnable action for one case
 - dispatch that action to an executor module
 - persist attempts, execution status, and case events
-- send optional user notifications after successful moderation actions
 - reschedule retryable failures
-- skip later actions when a failure should stop the pipeline
 
 ## Execution Flow
 
@@ -26,9 +24,7 @@ lives in `internal/quack/actions.go`.
 5. `CompleteCaseAction` writes a `CaseActionAttempt`, updates the execution
    status, appends a case event, writes audit data, and recomputes the case
    status.
-6. If the action failed and the template snapshot does not allow
-   `continue_on_error`, `SkipCaseActions` marks later rows as skipped.
-7. If the failure is retryable and the execution allows retries,
+6. If the failure is retryable and the execution allows retries,
    the persisted `next_retry_at` makes the case discoverable when due.
 
 ## Executor Map
@@ -47,15 +43,11 @@ implemented.
 
 ## Notification Rules
 
-There are two notification paths:
-
-- Level notification: `CaseService.Create` inserts an internal `send_dm`
-  execution when the selected level has `notify_user` enabled.
-- Action notification: after an executor succeeds, `executeAction` sends a DM
-  when `CaseActionExecution.NotifyUser` is true.
-
-Action notifications happen only after executor success. Unsupported or failed
-actions do not send the follow-up DM.
+The selected level is the only template-owned notification decision.
+`CaseService.Create` currently represents that decision as one internal
+`send_dm` execution. Enforcement actions cannot configure or send an additional
+notification. V5-012 owns the remaining transition to outcome-aware case-level
+delivery after enforcement completes.
 
 ## Retry And Failure Semantics
 
@@ -64,9 +56,8 @@ actions do not send the follow-up DM.
 - `shouldRetryAction` currently allows retry while
   `AttemptCount <= MaxRetries`, so total attempts equal initial execution plus
   the configured retry count.
-- `nextRetryTime` uses `RetryBackoffMS`, defaulting to `1000` when unset.
-- `continueOnError` is read from the stored template snapshot, not live template
-  rows. Existing cases keep the policy that was captured at creation time.
+- `nextRetryTime` uses Quack's internal `RetryBackoffMS`, defaulting to `1000`
+  when unset. Templates cannot configure retry timing.
 
 ## Storage Contract
 
@@ -74,7 +65,6 @@ The action engine depends on these repository methods in `internal/store/cases.g
 
 - `ClaimNextCaseAction`
 - `CompleteCaseAction`
-- `SkipCaseActions`
 - `ListExecutableCaseIDs`
 
 `ClaimNextCaseAction` also enforces per-case serialization by refusing to claim
@@ -86,8 +76,8 @@ another row while one execution for the same case is already `running`.
   does not import the worker implementation.
 - Delayed retries are durable because timing is stored in MySQL and discovered
   by the scheduler rather than owned by a goroutine.
-- Because `continue_on_error` is read from `TemplateSnapshotJSON`, any change to
-  snapshot shape must stay backward compatible with `continueOnError`.
+- Retired action notification, ordering, and continuation columns remain frozen
+  in compatibility storage but do not influence newly created template actions.
 
 Relevant files:
 

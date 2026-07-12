@@ -19,17 +19,16 @@ The current backend already supports important parts of the intended v5 directio
 - Template and case reads are available for staff dashboard workflows.
 - Production schema changes use an ordered, checksum-tracked migration ledger
   that adopts current v5 data additively without startup `AutoMigrate`.
+- Live template contracts now use all-time distinct thresholds, archive-only
+  availability, level-owned notification, and zero or one typed enforcement
+  action. Frozen legacy columns remain storage-only compatibility data.
 
 ## Behavior That Must Change
 
 The current implementation differs from the v5 definition in several core rules:
 
-- Escalation currently supports per-level time windows. V5 uses all-time non-voided case counts only.
-- Templates and levels currently have enabled states in addition to archive behavior. V5 uses reversible archive as the only availability state.
 - Case creation currently accepts a moderator reason override. V5 keeps the admin-defined reason fixed and collects context separately.
-- A level currently supports several ordered actions. V5 permits zero or one timeout, kick, or ban action per level.
-- Action configuration currently exposes more execution details than v5 allows. V5 exposes only meaningful moderation settings and a safe retry-count limit.
-- Member notification can currently be represented as level and action notifications. V5 sends at most one structured notification for a case.
+- The current level-owned notification is still represented as a pre-enforcement `send_dm` action. V5 sends one structured notification after the action outcome is known.
 - Case status currently mixes case validity with action progress and appeal state. V5 treats case validity as valid or voided and tracks actions and appeals separately.
 - Current case permissions do not fully enforce the actor's matching timeout, kick, or ban permission before case creation.
 - The current dashboard guild flow is staff-focused and does not yet provide case-owner access for members who left or were banned.
@@ -40,10 +39,7 @@ The current implementation differs from the v5 definition in several core rules:
 These concepts appear in current models, documentation, or backlog history but do not belong in the v5 product model:
 
 - Severity and weight as case or template policy.
-- Escalation time windows.
-- A separate enabled state for templates or levels.
 - Moderator-provided reason overrides.
-- Multiple enforcement actions on one level.
 - Cross-template or cross-guild escalation.
 - Private or public free-form case notes.
 - Detailed case lifecycle states that duplicate action or appeal state.
@@ -58,7 +54,6 @@ The intended v5 core still requires product behavior that is not complete today:
 
 - Real Discord timeout, kick, and ban execution.
 - Strict target, permission, and role-hierarchy checks before creating a punitive case.
-- One-action-per-level validation and simplified action settings.
 - Safe automatic retry classification and staff-controlled retry, dismiss, and void actions.
 - One structured member notification sent after the action outcome is known.
 - Structured template context fields shared by Discord and the dashboard.

@@ -6,19 +6,19 @@ Items are grouped by concern, not by implementation order or priority. Completed
 
 ## Product Model Alignment
 
-- [ ] Remove escalation time windows from domain models, storage records, template requests, responses, snapshots, validation, and tests.
-- [ ] Change escalation counting to use all-time non-voided cases only.
+- [x] Remove escalation time windows from live domain models, template requests, responses, snapshots, validation, and tests while retaining frozen compatibility columns only.
+- [x] Change escalation counting to use all-time non-voided cases only.
 - [ ] Remove severity from templates, cases, API contracts, storage records, snapshots, filters, and tests.
 - [ ] Remove weight from cases, escalation behavior, storage records, API contracts, and tests.
-- [ ] Remove the separate enabled state from templates, levels, and level actions.
+- [x] Remove the separate enabled state from live templates, levels, and level actions while retaining frozen compatibility columns only.
 - [ ] Make reversible archive and restore the only template availability lifecycle.
 - [ ] Remove soft-delete concepts that imply templates or cases can be deleted outside the defined archive/void flows.
 - [ ] Remove moderator reason overrides from case inputs, HTTP routes, Discord commands, snapshots, and tests.
-- [ ] Enforce zero or one timeout, kick, or ban action per template level.
-- [ ] Remove ordered multi-action behavior and `continue_on_error` from the product model.
-- [ ] Remove action-level notification settings now that each case has one level-owned notification decision.
-- [ ] Remove technical action settings that are no longer admin-facing, including configurable backoff, execution timeout, and idempotency scope.
-- [ ] Retain only the admin-configurable safe retry-count limit in template action contracts.
+- [x] Enforce zero or one timeout, kick, or ban action per template level.
+- [x] Remove ordered multi-action behavior and `continue_on_error` from the product model.
+- [x] Remove action-level notification settings now that each case has one level-owned notification decision.
+- [x] Remove technical action settings that are no longer admin-facing, including configurable backoff, execution timeout, and idempotency scope.
+- [x] Retain only the admin-configurable safe retry-count limit in template action contracts.
 - [ ] Replace mixed case lifecycle statuses with valid or voided case state.
 - [ ] Keep action execution and appeal statuses separate from case validity.
 - [ ] Remove note-related case event types and note-oriented model fields.
@@ -101,16 +101,16 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [ ] Validate context-field names, labels, types, ordering, and required flags.
 - [ ] Treat all submitted context fields as member-visible.
 - [ ] Keep the official template reason fixed during case creation.
-- [ ] Require exactly one default level on every template.
-- [ ] Allow the default level to create a case without an enforcement action.
-- [ ] Validate positive case-count thresholds for every non-default level.
-- [ ] Reject duplicate or ambiguous threshold definitions.
-- [ ] Select the highest reached threshold and continue using it until a higher threshold is reached.
-- [ ] Count the new case when evaluating escalation.
-- [ ] Count matching non-voided cases across all versions of the same template identity.
+- [x] Require exactly one default level on every template.
+- [x] Allow the default level to create a case without an enforcement action.
+- [x] Validate positive case-count thresholds for every non-default level.
+- [x] Reject duplicate or ambiguous threshold definitions.
+- [x] Select the highest reached threshold and continue using it until a higher threshold is reached.
+- [x] Count the new case when evaluating escalation.
+- [x] Count matching non-voided cases across all versions of the same template identity.
 - [ ] Exclude voided and imported-v4 historical cases from escalation.
-- [ ] Preserve immutable case snapshots when templates are edited.
-- [ ] Ensure template edits increment the version without creating a new escalation identity.
+- [x] Preserve immutable case snapshots when templates are edited.
+- [x] Ensure template edits increment the version without creating a new escalation identity.
 - [ ] Implement reversible template archive behavior.
 - [ ] Implement template restore behavior.
 - [ ] Keep archived templates readable but unavailable for new cases.
@@ -120,9 +120,9 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [ ] Add template import validation and confirmation.
 - [ ] Create a new guild-owned template identity for every import.
 - [ ] Make valid imported templates active immediately after confirmation.
-- [ ] Validate timeout duration as a required setting for timeout levels.
-- [ ] Validate Discord-supported message-history deletion values for ban levels.
-- [ ] Validate the safe retry-count limit.
+- [x] Validate timeout duration as a required setting for timeout levels.
+- [x] Validate Discord-supported message-history deletion values for ban levels.
+- [x] Validate the safe retry-count limit.
 - [ ] Audit template create, update, archive, restore, import, and export success and failure.
 - [ ] Add backend contract tests for every template request and response shape.
 - [ ] Add template-version and cross-version escalation tests.

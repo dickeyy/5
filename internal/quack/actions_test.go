@@ -2,7 +2,6 @@ package quack_test
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -124,63 +123,6 @@ func TestActionServiceRetriesTransientFailure(t *testing.T) {
 	}
 }
 
-func TestActionServiceFailureSkipsLaterActionsUnlessContinueOnError(t *testing.T) {
-	ctx := context.Background()
-	store := newMigratedStore(t)
-	adminContext := templateGuildContext(t, store, "guild-1", "admin-1", uint64(discordgo.PermissionManageGuild))
-	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
-
-	input := actionTemplateInput("stop-on-error", []quack.TemplateActionInput{
-		{ActionType: model.ActionTimeoutUser, Config: json.RawMessage(`{"duration_minutes":60}`), IdempotencyScope: "case"},
-		{ActionType: model.ActionKickUser, Config: json.RawMessage(`{}`), IdempotencyScope: "case"},
-	})
-	input.Levels[0].NotifyUser = false
-	template := createAppTemplate(t, ctx, store, adminContext, input)
-	created, err := quack.NewCaseService(store).Create(ctx, modContext, quack.CaseInput{
-		TemplateID:          template.ID,
-		TargetDiscordUserID: "target-1",
-	})
-	if err != nil {
-		t.Fatalf("create case: %v", err)
-	}
-	fakeDiscord := &fakeActionClient{}
-	if err := quack.NewActionService(store, fakeDiscord).ProcessCaseActions(ctx, created.ID); err != nil {
-		t.Fatalf("process actions: %v", err)
-	}
-	actions, err := store.ListCaseActionExecutions(ctx, created.ID)
-	if err != nil {
-		t.Fatalf("list actions: %v", err)
-	}
-	if actions[0].Status != model.ActionExecutionFailed || actions[1].Status != model.ActionExecutionSkipped {
-		t.Fatalf("expected failure to skip later action, got %+v", actions)
-	}
-
-	continueInput := actionTemplateInput("continue-on-error", []quack.TemplateActionInput{
-		{ActionType: model.ActionTimeoutUser, Config: json.RawMessage(`{"duration_minutes":60}`), ContinueOnError: true, IdempotencyScope: "case"},
-		{ActionType: model.ActionKickUser, Config: json.RawMessage(`{}`), IdempotencyScope: "case"},
-	})
-	continueInput.Levels[0].NotifyUser = false
-	continueTemplate := createAppTemplate(t, ctx, store, adminContext, continueInput)
-	continued, err := quack.NewCaseService(store).Create(ctx, modContext, quack.CaseInput{
-		TemplateID:          continueTemplate.ID,
-		TargetDiscordUserID: "target-2",
-	})
-	if err != nil {
-		t.Fatalf("create continuing case: %v", err)
-	}
-	fakeDiscord = &fakeActionClient{}
-	if err := quack.NewActionService(store, fakeDiscord).ProcessCaseActions(ctx, continued.ID); err != nil {
-		t.Fatalf("process continuing actions: %v", err)
-	}
-	actions, err = store.ListCaseActionExecutions(ctx, continued.ID)
-	if err != nil {
-		t.Fatalf("list continuing actions: %v", err)
-	}
-	if actions[0].Status != model.ActionExecutionFailed || actions[1].Status != model.ActionExecutionFailed {
-		t.Fatalf("expected continue_on_error to run later action, got %+v", actions)
-	}
-}
-
 func TestActionServiceDoesNotNotifyForUnsupportedAction(t *testing.T) {
 	ctx := quack.ContextWithTrace(context.Background(), "req-action-1", "corr-action-1")
 	store := newMigratedStore(t)
@@ -188,7 +130,7 @@ func TestActionServiceDoesNotNotifyForUnsupportedAction(t *testing.T) {
 	modContext := templateGuildContext(t, store, "guild-1", "mod-1", uint64(discordgo.PermissionModerateMembers))
 
 	unsupportedInput := actionTemplateInput("unsupported-notify", []quack.TemplateActionInput{
-		{ActionType: model.ActionBanUser, Config: json.RawMessage(`{}`), NotifyUser: true, IdempotencyScope: "case"},
+		{ActionType: model.ActionBanUser},
 	})
 	unsupportedInput.Levels[0].NotifyUser = false
 	template := createAppTemplate(t, ctx, store, adminContext, unsupportedInput)

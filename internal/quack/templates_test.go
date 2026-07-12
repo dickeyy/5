@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/internal/quack"
@@ -32,9 +33,13 @@ func TestTemplateServiceCreateNormalizesActionsAndAudits(t *testing.T) {
 	if len(created.Levels[0].Actions) != 0 {
 		t.Fatalf("expected actionless default warning level, got %+v", created.Levels[0].Actions)
 	}
-	if !created.Levels[0].NotifyUser || created.Levels[0].NotificationType != string(model.NotificationWarning) {
-		t.Fatalf("expected default level to notify as warning, got %+v", created.Levels[0])
+	if !created.Levels[0].NotifyUser {
+		t.Fatalf("expected default level to notify, got %+v", created.Levels[0])
 	}
+	if action := created.Levels[1].Actions[0]; action.TimeoutDurationSeconds != 3600 || action.DeleteMessageSeconds != 0 {
+		t.Fatalf("expected typed timeout settings, got %+v", action)
+	}
+	assertSimplifiedTemplateJSON(t, created)
 
 	audits, err := store.ListAuditLogEntries(ctx, guildContext.Guild.ID)
 	if err != nil {
@@ -42,6 +47,38 @@ func TestTemplateServiceCreateNormalizesActionsAndAudits(t *testing.T) {
 	}
 	if len(audits) != 1 || audits[0].Action != "case_template.create" || audits[0].Result != model.AuditResultSuccess {
 		t.Fatalf("expected successful create audit, got %+v", audits)
+	}
+}
+
+func assertSimplifiedTemplateJSON(t *testing.T, template *quack.TemplateResponse) {
+	t.Helper()
+	body, err := json.Marshal(template)
+	if err != nil {
+		t.Fatalf("marshal template response: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("decode template response: %v", err)
+	}
+	if _, exists := decoded["enabled"]; exists {
+		t.Fatalf("template response leaked enabled: %s", body)
+	}
+	levels := decoded["levels"].([]any)
+	for _, rawLevel := range levels {
+		level := rawLevel.(map[string]any)
+		for _, retired := range []string{"enabled", "window_minutes", "notification_type"} {
+			if _, exists := level[retired]; exists {
+				t.Fatalf("level response leaked %s: %s", retired, body)
+			}
+		}
+		for _, rawAction := range level["actions"].([]any) {
+			action := rawAction.(map[string]any)
+			for _, retired := range []string{"position", "config", "notify_user", "notification_type", "continue_on_error", "retry_backoff_ms", "timeout_ms", "idempotency_scope", "enabled"} {
+				if _, exists := action[retired]; exists {
+					t.Fatalf("action response leaked %s: %s", retired, body)
+				}
+			}
+		}
 	}
 }
 
@@ -60,19 +97,33 @@ func TestTemplateServiceValidationFailures(t *testing.T) {
 		{name: "invalid action", edit: func(input *quack.TemplateInput) { input.Levels[1].Actions[0].ActionType = "explode_user" }},
 		{name: "record warning action", edit: func(input *quack.TemplateInput) { input.Levels[1].Actions[0].ActionType = "record_warning" }},
 		{name: "send dm action", edit: func(input *quack.TemplateInput) { input.Levels[1].Actions[0].ActionType = model.ActionSendDM }},
-		{name: "invalid config", edit: func(input *quack.TemplateInput) { input.Levels[1].Actions[0].Config = json.RawMessage(`[]`) }},
-		{name: "invalid notification type", edit: func(input *quack.TemplateInput) {
-			input.Levels[1].Actions[0].NotifyUser = true
-			input.Levels[1].Actions[0].NotificationType = "notice"
-		}},
-		{name: "invalid level notification type", edit: func(input *quack.TemplateInput) { input.Levels[0].NotificationType = "notice" }},
 		{name: "negative retry", edit: func(input *quack.TemplateInput) { input.Levels[1].Actions[0].MaxRetries = -1 }},
-		{name: "negative backoff", edit: func(input *quack.TemplateInput) { input.Levels[1].Actions[0].RetryBackoffMS = -1 }},
-		{name: "negative timeout", edit: func(input *quack.TemplateInput) { input.Levels[1].Actions[0].TimeoutMS = -1 }},
+		{name: "excess retry", edit: func(input *quack.TemplateInput) {
+			input.Levels[1].Actions[0].MaxRetries = quack.MaxTemplateSafeRetries + 1
+		}},
+		{name: "missing timeout duration", edit: func(input *quack.TemplateInput) { input.Levels[1].Actions[0].TimeoutDurationSeconds = 0 }},
+		{name: "excess timeout duration", edit: func(input *quack.TemplateInput) {
+			input.Levels[1].Actions[0].TimeoutDurationSeconds = quack.MaxTimeoutDurationSeconds + 1
+		}},
+		{name: "timeout ban setting", edit: func(input *quack.TemplateInput) { input.Levels[1].Actions[0].DeleteMessageSeconds = 1 }},
+		{name: "excess ban history", edit: func(input *quack.TemplateInput) {
+			input.Levels[1].Actions[0].ActionType = model.ActionBanUser
+			input.Levels[1].Actions[0].TimeoutDurationSeconds = 0
+			input.Levels[1].Actions[0].DeleteMessageSeconds = quack.MaxBanDeleteMessageSeconds + 1
+		}},
+		{name: "kick setting", edit: func(input *quack.TemplateInput) {
+			input.Levels[1].Actions[0].ActionType = model.ActionKickUser
+		}},
+		{name: "multiple actions", edit: func(input *quack.TemplateInput) {
+			input.Levels[1].Actions = append(input.Levels[1].Actions, quack.TemplateActionInput{ActionType: model.ActionKickUser})
+		}},
 		{name: "no default level", edit: func(input *quack.TemplateInput) { input.Levels[0].IsDefault = false }},
 		{name: "two default levels", edit: func(input *quack.TemplateInput) { input.Levels[1].IsDefault = true }},
 		{name: "default level trigger", edit: func(input *quack.TemplateInput) { input.Levels[0].TriggerCaseCount = 1 }},
 		{name: "escalation without trigger", edit: func(input *quack.TemplateInput) { input.Levels[1].TriggerCaseCount = 0 }},
+		{name: "duplicate threshold", edit: func(input *quack.TemplateInput) {
+			input.Levels = append(input.Levels, quack.TemplateLevelInput{Name: "Duplicate", TriggerCaseCount: input.Levels[1].TriggerCaseCount})
+		}},
 	}
 
 	for _, tt := range tests {
@@ -116,8 +167,8 @@ func TestTemplateServiceUpdateAndArchiveAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("archive template: %v", err)
 	}
-	if archived.Enabled || archived.ArchivedAt == nil {
-		t.Fatalf("expected archived disabled template")
+	if archived.ArchivedAt == nil {
+		t.Fatalf("expected archived template")
 	}
 
 	audits, err := store.ListAuditLogEntries(ctx, guildContext.Guild.ID)
@@ -144,6 +195,64 @@ func TestTemplateServiceGuildBoundary(t *testing.T) {
 	_, err = service.Update(ctx, guildTwo, created.ID, validTemplateInput("spam"))
 	if !errors.Is(err, quack.ErrTemplateNotFound) {
 		t.Fatalf("expected not found across guild boundary, got %v", err)
+	}
+}
+
+func TestTemplateServiceGetReturnsExplicitCompatibilityReviewError(t *testing.T) {
+	ctx := context.Background()
+	repositories := newMigratedStore(t)
+	guildContext := templateGuildContext(t, repositories, "guild-1", "user-1", uint64(discordgo.PermissionManageGuild))
+	service := quack.NewTemplateService(repositories)
+
+	created, err := service.Create(ctx, guildContext, validTemplateInput("legacy-policy"))
+	if err != nil {
+		t.Fatalf("create compatibility fixture: %v", err)
+	}
+
+	var escalation store.CaseTemplateLevelRecord
+	if err := repositories.DB().Where("template_id = ? AND is_default = ?", created.ID, false).First(&escalation).Error; err != nil {
+		t.Fatalf("load escalation level: %v", err)
+	}
+	now := time.Now().UTC()
+	secondAction := store.CaseTemplateLevelActionRecord{
+		ULIDModelRecord:  store.ULIDModelRecord{ID: "service-compat-action00000", CreatedAt: now, UpdatedAt: now},
+		LevelID:          escalation.ID,
+		Position:         2,
+		ActionType:       model.ActionKickUser,
+		ConfigJSON:       `{}`,
+		IdempotencyScope: "case",
+		Enabled:          true,
+	}
+	if err := repositories.DB().Select("*").Create(&secondAction).Error; err != nil {
+		t.Fatalf("create preserved second action: %v", err)
+	}
+	if err := repositories.DB().Model(&store.CaseTemplateLevelRecord{}).Where("template_id = ? AND is_default = ?", created.ID, true).UpdateColumn("is_default", false).Error; err != nil {
+		t.Fatalf("remove legacy default: %v", err)
+	}
+	if err := repositories.DB().Model(&store.CaseTemplateRecord{}).Where("id = ?", created.ID).UpdateColumn("archived_at", now).Error; err != nil {
+		t.Fatalf("archive quarantined template: %v", err)
+	}
+	reason := "level has multiple actions; template does not have exactly one default level"
+	if err := repositories.DB().Exec(
+		"INSERT INTO quack_v5_0002_template_compatibility (template_id, previous_archived_at, previous_deleted_at, reason, recorded_at) VALUES (?, ?, ?, ?, ?)",
+		created.ID, nil, nil, reason, now,
+	).Error; err != nil {
+		t.Fatalf("record compatibility state: %v", err)
+	}
+
+	response, err := service.Get(ctx, guildContext, created.ID)
+	if response != nil {
+		t.Fatalf("quarantined template returned a live response: %+v", response)
+	}
+	if !errors.Is(err, quack.ErrTemplateCompatibilityReviewRequired) {
+		t.Fatalf("expected compatibility review error, got %v", err)
+	}
+	var compatibilityError *quack.TemplateCompatibilityReviewError
+	if !errors.As(err, &compatibilityError) {
+		t.Fatalf("expected typed compatibility error, got %T", err)
+	}
+	if compatibilityError.TemplateID != created.ID || compatibilityError.Reason != reason {
+		t.Fatalf("unexpected compatibility error: %+v", compatibilityError)
 	}
 }
 
@@ -194,12 +303,10 @@ func validTemplateInput(slug string) quack.TemplateInput {
 				Name:             "Repeat spam",
 				Position:         2,
 				TriggerCaseCount: 3,
-				WindowMinutes:    1440,
 				Actions: []quack.TemplateActionInput{
 					{
-						ActionType:       model.ActionTimeoutUser,
-						Config:           json.RawMessage(`{"duration_minutes":60}`),
-						IdempotencyScope: "case",
+						ActionType:             model.ActionTimeoutUser,
+						TimeoutDurationSeconds: 60 * 60,
 					},
 				},
 			},

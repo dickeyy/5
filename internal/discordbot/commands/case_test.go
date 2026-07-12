@@ -161,17 +161,15 @@ func TestHandleTemplateAutocompleteReturnsUsableTemplates(t *testing.T) {
 	}
 }
 
-func TestHandleTemplateAutocompleteFiltersDisabledTemplates(t *testing.T) {
+func TestHandleTemplateAutocompleteFiltersArchivedTemplates(t *testing.T) {
 	_, services, _ := newCaseCommandHarness(t)
 	ctx := context.Background()
 	guildContext := caseCommandGuildContext(t, services)
-	enabled := false
-	createCaseCommandTemplate(t, services, guildContext, quack.TemplateInput{
+	template := createCaseCommandTemplate(t, services, guildContext, quack.TemplateInput{
 		Slug:           "ghost",
 		Name:           "Ghost",
 		Description:    "Hidden moderation workflow",
 		ReasonTemplate: "Hidden",
-		Enabled:        &enabled,
 		Levels: []quack.TemplateLevelInput{
 			{
 				Name:      "Default",
@@ -180,6 +178,9 @@ func TestHandleTemplateAutocompleteFiltersDisabledTemplates(t *testing.T) {
 			},
 		},
 	})
+	if _, err := services.Templates.Archive(ctx, guildContext, template.ID); err != nil {
+		t.Fatalf("archive template: %v", err)
+	}
 
 	result := HandleCaseInteraction(ui.Context{
 		Context:     ctx,
