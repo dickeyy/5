@@ -9,6 +9,14 @@ import (
 )
 
 // listUserGuilds returns user guilds subject to authorization, ordering, and filtering constraints.
+// @Summary List manageable Discord guilds
+// @Tags Guilds
+// @Produce json
+// @Security CookieAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Failure 502 {object} map[string]interface{}
+// @Router /guilds [get]
 func listUserGuilds(c *gin.Context, services *quack.Services) {
 	session := middleware.GetAuthSession(c)
 	if session == nil {
@@ -26,6 +34,15 @@ func listUserGuilds(c *gin.Context, services *quack.Services) {
 }
 
 // guildMe encapsulates the guild me rule so callers share one consistent package implementation.
+// @Summary Get current guild staff context
+// @Tags Guilds
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Security CookieAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/me [get]
 func guildMe(c *gin.Context) {
 	guildContext := middleware.GetGuildContext(c)
 	if guildContext == nil {

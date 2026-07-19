@@ -19,6 +19,15 @@ type templateChangeHandler interface {
 }
 
 // listTemplates returns templates subject to authorization, ordering, and filtering constraints.
+// @Summary List case templates
+// @Tags Templates
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Security CookieAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Failure 500 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/templates [get]
 func listTemplates(c *gin.Context, services *quack.Services) {
 	guildContext := middleware.GetGuildContext(c)
 	templates, err := services.Templates.List(c.Request.Context(), guildContext)
@@ -31,6 +40,17 @@ func listTemplates(c *gin.Context, services *quack.Services) {
 }
 
 // createTemplate creates template while preserving validation, authorization, and persistence invariants.
+// @Summary Create a case template
+// @Tags Templates
+// @Accept json
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Param template body quack.TemplateInput true "Template definition"
+// @Security CookieAuth
+// @Success 201 {object} map[string]interface{}
+// @Failure 400 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/templates [post]
 func createTemplate(c *gin.Context, services *quack.Services) {
 	var input quack.TemplateInput
 	if err := bindTemplateInput(c, &input); err != nil {
@@ -48,6 +68,16 @@ func createTemplate(c *gin.Context, services *quack.Services) {
 }
 
 // getTemplate retrieves template without exposing the underlying adapter implementation.
+// @Summary Get a case template
+// @Tags Templates
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Param templateID path string true "Template ID"
+// @Security CookieAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/templates/{templateID} [get]
 func getTemplate(c *gin.Context, services *quack.Services) {
 	template, err := services.Templates.Get(c.Request.Context(), middleware.GetGuildContext(c), c.Param("templateID"))
 	if err != nil {
@@ -59,6 +89,20 @@ func getTemplate(c *gin.Context, services *quack.Services) {
 }
 
 // updateTemplate updates template while retaining validation, compatibility, and audit requirements.
+// @Summary Update a case template
+// @Tags Templates
+// @Accept json
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Param templateID path string true "Template ID"
+// @Param template body quack.TemplateInput true "Template definition"
+// @Security CookieAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Failure 409 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/templates/{templateID} [patch]
 func updateTemplate(c *gin.Context, services *quack.Services, changes templateChangeHandler) {
 	var input quack.TemplateInput
 	if err := bindTemplateInput(c, &input); err != nil {
@@ -98,6 +142,16 @@ func bindTemplateInput(c *gin.Context, input *quack.TemplateInput) error {
 }
 
 // archiveTemplate encapsulates the archive template rule so callers share one consistent package implementation.
+// @Summary Archive a case template
+// @Tags Templates
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Param templateID path string true "Template ID"
+// @Security CookieAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/templates/{templateID} [delete]
 func archiveTemplate(c *gin.Context, services *quack.Services, changes templateChangeHandler) {
 	template, err := services.Templates.Archive(c.Request.Context(), middleware.GetGuildContext(c), c.Param("templateID"))
 	if err != nil {
@@ -115,6 +169,16 @@ func archiveTemplate(c *gin.Context, services *quack.Services, changes templateC
 }
 
 // restoreTemplate reverses archive without creating a new template identity.
+// @Summary Restore an archived template
+// @Tags Templates
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Param templateID path string true "Template ID"
+// @Security CookieAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/templates/{templateID}/restore [post]
 func restoreTemplate(c *gin.Context, services *quack.Services) {
 	template, err := services.Templates.Restore(c.Request.Context(), middleware.GetGuildContext(c), c.Param("templateID"))
 	if err != nil {
@@ -125,6 +189,16 @@ func restoreTemplate(c *gin.Context, services *quack.Services) {
 }
 
 // exportTemplate returns guild-neutral moderation policy only.
+// @Summary Export a case template policy
+// @Tags Templates
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Param templateID path string true "Template ID"
+// @Security CookieAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/templates/{templateID}/export [get]
 func exportTemplate(c *gin.Context, services *quack.Services) {
 	policy, err := services.Templates.Export(c.Request.Context(), middleware.GetGuildContext(c), c.Param("templateID"))
 	if err != nil {
@@ -135,6 +209,17 @@ func exportTemplate(c *gin.Context, services *quack.Services) {
 }
 
 // importTemplate requires explicit confirmation before activating a new guild-owned identity.
+// @Summary Import a case template policy
+// @Tags Templates
+// @Accept json
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Param template body quack.TemplateImportInput true "Confirmed policy import"
+// @Security CookieAuth
+// @Success 201 {object} map[string]interface{}
+// @Failure 400 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/templates/import [post]
 func importTemplate(c *gin.Context, services *quack.Services) {
 	var input quack.TemplateImportInput
 	if err := decodeStrictJSON(c, &input); err != nil {

@@ -34,6 +34,11 @@ type dbStatus struct {
 }
 
 // status encapsulates the status rule so callers share one consistent package implementation.
+// @Summary Report service status
+// @Tags Health
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Router /status [get]
 func status(c *gin.Context, services *quack.Services, discord DiscordStatusProvider) {
 	c.JSON(http.StatusOK, gin.H{
 		"discord":  getDiscordStatus(discord),

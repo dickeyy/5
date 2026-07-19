@@ -15,6 +15,15 @@ import (
 const opsKeyHeader = "X-Quack-Ops-Key"
 
 // globalOpsStatus encapsulates the global ops status rule so callers share one consistent package implementation.
+// @Summary Get global operations status
+// @Tags Operations
+// @Produce json
+// @Security OpsKey
+// @Success 200 {object} quack.OpsStatusResponse
+// @Failure 403 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Failure 500 {object} map[string]interface{}
+// @Router /ops/status [get]
 func globalOpsStatus(c *gin.Context, services *quack.Services) {
 	if !validOpsKey(c, services) {
 		if strings.TrimSpace(services.Config.API.OpsStatusToken) == "" {
@@ -34,6 +43,17 @@ func globalOpsStatus(c *gin.Context, services *quack.Services) {
 }
 
 // guildOpsStatus encapsulates the guild ops status rule so callers share one consistent package implementation.
+// @Summary Get guild operations status
+// @Tags Operations
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Security CookieAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Failure 500 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/ops/status [get]
 func guildOpsStatus(c *gin.Context, services *quack.Services) {
 	guildID, ok := guildOpsAuthorized(c, services)
 	if !ok {

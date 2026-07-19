@@ -12,6 +12,15 @@ import (
 )
 
 // getGuildSettings returns the guild-owned setup state to current Manage Guild authorities.
+// @Summary Get guild settings
+// @Tags Guild settings
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Security CookieAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/settings [get]
 func getGuildSettings(c *gin.Context, services *quack.Services) {
 	settings, err := services.Settings.Get(c.Request.Context(), middleware.GetGuildContext(c))
 	if err != nil {
@@ -22,6 +31,18 @@ func getGuildSettings(c *gin.Context, services *quack.Services) {
 }
 
 // updateGuildSettings applies a partial authorized guild settings write.
+// @Summary Update guild settings
+// @Tags Guild settings
+// @Accept json
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Param settings body quack.GuildSettingsInput true "Partial guild settings"
+// @Security CookieAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/settings [patch]
 func updateGuildSettings(c *gin.Context, services *quack.Services) {
 	var input quack.GuildSettingsInput
 	if err := bindGuildSettingsInput(c, &input); err != nil {
@@ -37,6 +58,15 @@ func updateGuildSettings(c *gin.Context, services *quack.Services) {
 }
 
 // acknowledgeStarterPolicyNotice explicitly marks the one-time dashboard setup notice complete.
+// @Summary Acknowledge the starter policy notice
+// @Tags Guild settings
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Security CookieAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/settings/starter-policy-notice/acknowledge [post]
 func acknowledgeStarterPolicyNotice(c *gin.Context, services *quack.Services) {
 	settings, err := services.Settings.AcknowledgeStarterPolicyNotice(c.Request.Context(), middleware.GetGuildContext(c))
 	if err != nil {

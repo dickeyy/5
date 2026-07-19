@@ -76,8 +76,16 @@ func setupAuthRoutes(r *gin.Engine, services *quack.Services) {
 	}
 }
 
-// starts oauth flow
-// default is redirect but mode=json returns url payload
+// discordLogin starts OAuth by redirecting or returning a JSON authorization URL.
+// @Summary Start Discord sign-in
+// @Tags Authentication
+// @Produce json
+// @Param mode query string false "Response mode" Enums(redirect,json)
+// @Param redirect_to query string false "Post-login relative redirect"
+// @Success 200 {object} map[string]interface{}
+// @Success 302 {string} string
+// @Failure 503 {object} apierror.Response
+// @Router /auth/discord/login [get]
 func discordLogin(c *gin.Context, services *quack.Services) {
 	if err := validateDiscordOAuthConfig(services.Config); err != nil {
 		apierror.Write(c, http.StatusServiceUnavailable, apierror.CodeDependency, "Discord sign-in is unavailable")
@@ -121,7 +129,19 @@ func discordLogin(c *gin.Context, services *quack.Services) {
 	c.Redirect(http.StatusFound, authURL)
 }
 
-// handles oauth callback from discord
+// discordCallback completes Discord OAuth and creates a browser session.
+// @Summary Complete Discord sign-in
+// @Tags Authentication
+// @Produce json
+// @Param code query string false "Discord authorization code"
+// @Param state query string true "Single-use OAuth state"
+// @Param error query string false "Discord OAuth error"
+// @Success 200 {object} map[string]interface{}
+// @Success 302 {string} string
+// @Failure 400 {object} apierror.Response
+// @Failure 401 {object} apierror.Response
+// @Failure 503 {object} apierror.Response
+// @Router /auth/discord/callback [get]
 func discordCallback(c *gin.Context, services *quack.Services) {
 	if err := validateDiscordOAuthConfig(services.Config); err != nil {
 		apierror.Write(c, http.StatusServiceUnavailable, apierror.CodeDependency, "Discord sign-in is unavailable")
@@ -224,7 +244,14 @@ func discordCallback(c *gin.Context, services *quack.Services) {
 	c.Redirect(http.StatusFound, sanitizeRedirectTarget(statePayload.RedirectTo, services.Config.Auth.PostLoginRedirect))
 }
 
-// simple whoami endpoint
+// authMe returns the authenticated user and session summary.
+// @Summary Get the current session
+// @Tags Authentication
+// @Produce json
+// @Security CookieAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} apierror.Response
+// @Router /auth/me [get]
 func authMe(c *gin.Context) {
 	session := middleware.GetAuthSession(c)
 	if session == nil {
@@ -248,7 +275,13 @@ func authMe(c *gin.Context) {
 	})
 }
 
-// handles logout request
+// authLogout revokes the current session and clears its cookies.
+// @Summary Log out the current session
+// @Tags Authentication
+// @Security CookieAuth
+// @Success 204
+// @Failure 503 {object} apierror.Response
+// @Router /auth/logout [post]
 func authLogout(c *gin.Context, services *quack.Services) {
 	session := middleware.GetAuthSession(c)
 	if session != nil {
@@ -266,6 +299,13 @@ func authLogout(c *gin.Context, services *quack.Services) {
 }
 
 // authLogoutAll revokes all indexed sessions for compromise response or account changes.
+// @Summary Log out every user session
+// @Tags Authentication
+// @Security CookieAuth
+// @Success 204
+// @Failure 401 {object} apierror.Response
+// @Failure 503 {object} apierror.Response
+// @Router /auth/logout-all [post]
 func authLogoutAll(c *gin.Context, services *quack.Services) {
 	session := middleware.GetAuthSession(c)
 	if session == nil {

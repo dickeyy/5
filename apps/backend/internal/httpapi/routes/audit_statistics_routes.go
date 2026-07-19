@@ -14,15 +14,32 @@ import (
 func RegisterAuditStatisticsStaffRoutes(group *gin.RouterGroup, services *quack.Services) {
 	statistics := quack.NewStaffStatisticsService(services.Store)
 	group.GET("/:discordGuildID/statistics", middleware.RequireGuildContext(services, model.PermissionActionAuditRead), func(c *gin.Context) {
-		result, err := statistics.Get(c.Request.Context(), middleware.GetGuildContext(c), quack.StatisticsInput{From: c.Query("from"), To: c.Query("to")})
-		if err != nil {
-			writeStatisticsError(c, err)
-			return
-		}
-		c.JSON(http.StatusOK, result)
+		getStatistics(c, statistics)
 	})
 }
 
+// getStatistics returns a bounded guild-scoped moderation snapshot.
+// @Summary Get guild moderation statistics
+// @Tags Audit
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Param from query string false "Inclusive RFC3339 start"
+// @Param to query string false "Exclusive RFC3339 end"
+// @Security CookieAuth
+// @Success 200 {object} model.StaffStatistics
+// @Failure 400 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/statistics [get]
+func getStatistics(c *gin.Context, statistics *quack.StaffStatisticsService) {
+	result, err := statistics.Get(c.Request.Context(), middleware.GetGuildContext(c), quack.StatisticsInput{From: c.Query("from"), To: c.Query("to")})
+	if err != nil {
+		writeStatisticsError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// writeStatisticsError maps statistics service failures to stable HTTP responses.
 func writeStatisticsError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, quack.ErrStatisticsValidation):

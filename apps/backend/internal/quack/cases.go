@@ -46,7 +46,7 @@ type CaseInput struct {
 // CaseContextValueInput carries one typed value keyed by its template definition.
 type CaseContextValueInput struct {
 	Key   string          `json:"key"`
-	Value json.RawMessage `json:"value"`
+	Value json.RawMessage `json:"value" swaggertype:"object"`
 }
 
 // CaseContextValueResponse is the immutable member-visible definition/value pair stored with the case.

@@ -39,11 +39,22 @@ type readinessResponse struct {
 
 // liveness reports only whether the process can serve requests. Dependency
 // outages must not cause an orchestrator restart loop.
+// @Summary Report process liveness
+// @Tags Health
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Router /livez [get]
 func liveness(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"live": true})
 }
 
 // readiness reports every dependency required to accept moderation work.
+// @Summary Report dependency readiness
+// @Tags Health
+// @Produce json
+// @Success 200 {object} readinessResponse
+// @Failure 503 {object} readinessResponse
+// @Router /readyz [get]
 func readiness(c *gin.Context, services *quack.Services, discord DiscordStatusProvider) {
 	result := readinessResponse{Ready: true, Checks: map[string]readinessCheck{}}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
@@ -129,6 +140,15 @@ func readinessDetail(ready bool, unavailable string) string {
 
 // metrics emits a token-protected Prometheus text snapshot with no actor,
 // guild, member, content, URL, or payload labels.
+// @Summary Export operational metrics
+// @Tags Operations
+// @Produce text/plain
+// @Security MetricsKey
+// @Success 200 {string} string
+// @Failure 403 {string} string
+// @Failure 404 {string} string
+// @Failure 503 {string} string
+// @Router /metrics [get]
 func metrics(c *gin.Context, services *quack.Services) {
 	configured := strings.TrimSpace(services.Config.Observability.MetricsToken)
 	provided := strings.TrimSpace(c.GetHeader("X-Quack-Metrics-Key"))

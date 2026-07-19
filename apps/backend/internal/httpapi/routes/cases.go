@@ -20,13 +20,27 @@ type caseCreateRequest struct {
 	ContextChannelDiscordID string                        `json:"context_channel_discord_id"`
 	ContextMessageDiscordID string                        `json:"context_message_discord_id"`
 	ContextURL              string                        `json:"context_url"`
-	Metadata                json.RawMessage               `json:"metadata"`
+	Metadata                json.RawMessage               `json:"metadata" swaggertype:"object"`
 	ContextValues           []quack.CaseContextValueInput `json:"context_values"`
 	EvidenceLinks           []string                      `json:"evidence_links"`
 	ReplacesCaseID          string                        `json:"replaces_case_id"`
 }
 
 // listCases returns cases subject to authorization, ordering, and filtering constraints.
+// @Summary List guild cases
+// @Tags Cases
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Param limit query int false "Page size"
+// @Param offset query int false "Page offset"
+// @Param target_discord_user_id query string false "Target Discord user ID"
+// @Param template_id query string false "Template ID"
+// @Param validity query string false "Case validity"
+// @Security CookieAuth
+// @Success 200 {object} quack.CaseListResponse
+// @Failure 400 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/cases [get]
 func listCases(c *gin.Context, services *quack.Services) {
 	result, err := services.Cases.List(c.Request.Context(), middleware.GetGuildContext(c), caseListInput(c))
 	if err != nil {
@@ -38,6 +52,19 @@ func listCases(c *gin.Context, services *quack.Services) {
 }
 
 // createCase creates case while preserving validation, authorization, and persistence invariants.
+// @Summary Create a moderation case
+// @Tags Cases
+// @Accept json
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Param Idempotency-Key header string false "Retry-safe request key"
+// @Param case body caseCreateRequest true "Case definition"
+// @Security CookieAuth
+// @Success 201 {object} map[string]interface{}
+// @Failure 400 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/cases [post]
 func createCase(c *gin.Context, services *quack.Services) {
 	var input caseCreateRequest
 	decoder := json.NewDecoder(c.Request.Body)
@@ -75,6 +102,19 @@ type voidCaseRequest struct {
 }
 
 // voidCase preserves the case and creates immutable correction history.
+// @Summary Void a moderation case
+// @Tags Cases
+// @Accept json
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Param caseRef path string true "Case ID or number"
+// @Param request body voidCaseRequest true "Void reason and replacement"
+// @Security CookieAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/cases/{caseRef}/void [post]
 func voidCase(c *gin.Context, services *quack.Services) {
 	var input voidCaseRequest
 	if err := decodeStrictJSON(c, &input); err != nil {
@@ -90,6 +130,17 @@ func voidCase(c *gin.Context, services *quack.Services) {
 }
 
 // listFailedActions returns the active staff recovery queue.
+// @Summary List failed case actions
+// @Tags Action recovery
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Param limit query int false "Page size"
+// @Param offset query int false "Page offset"
+// @Security CookieAuth
+// @Success 200 {object} model.FailedCaseActionResult
+// @Failure 400 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/action-failures [get]
 func listFailedActions(c *gin.Context, services *quack.Services) {
 	limit, offset, err := parsePageInts(c.Query("limit"), c.Query("offset"))
 	if err != nil {
@@ -105,6 +156,16 @@ func listFailedActions(c *gin.Context, services *quack.Services) {
 }
 
 // retryFailedAction requests a live-authorized retry of the same immutable action.
+// @Summary Retry a failed case action
+// @Tags Action recovery
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Param executionID path string true "Action execution ID"
+// @Security CookieAuth
+// @Success 202 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/action-failures/{executionID}/retry [post]
 func retryFailedAction(c *gin.Context, services *quack.Services) {
 	result, err := services.Actions.Retry(c.Request.Context(), middleware.GetGuildContext(c), c.Param("executionID"))
 	if err != nil {
@@ -115,6 +176,16 @@ func retryFailedAction(c *gin.Context, services *quack.Services) {
 }
 
 // dismissFailedAction removes a failure from active review without deleting history.
+// @Summary Dismiss a failed case action
+// @Tags Action recovery
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Param executionID path string true "Action execution ID"
+// @Security CookieAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/action-failures/{executionID}/dismiss [post]
 func dismissFailedAction(c *gin.Context, services *quack.Services) {
 	result, err := services.Actions.Dismiss(c.Request.Context(), middleware.GetGuildContext(c), c.Param("executionID"))
 	if err != nil {
@@ -132,6 +203,19 @@ type reverseActionRequest struct {
 }
 
 // reverseCaseAction queues an explicitly confirmed timeout removal or unban.
+// @Summary Reverse a case action
+// @Tags Action recovery
+// @Accept json
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Param caseRef path string true "Case ID or number"
+// @Param request body reverseActionRequest true "Confirmed reversal"
+// @Security CookieAuth
+// @Success 202 {object} map[string]interface{}
+// @Failure 400 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/cases/{caseRef}/reversals [post]
 func reverseCaseAction(c *gin.Context, services *quack.Services) {
 	var input reverseActionRequest
 	if err := decodeStrictJSON(c, &input); err != nil || !input.Confirm {
@@ -147,6 +231,16 @@ func reverseCaseAction(c *gin.Context, services *quack.Services) {
 }
 
 // listMemberOwnedCases uses the authenticated Discord identity rather than current guild membership.
+// @Summary List the current member's cases
+// @Tags Member cases
+// @Produce json
+// @Param guildID path string true "Quack guild ID"
+// @Param limit query int false "Page size"
+// @Param offset query int false "Page offset"
+// @Security CookieAuth
+// @Success 200 {object} quack.MemberCaseListResponse
+// @Failure 401 {object} map[string]interface{}
+// @Router /members/me/guilds/{guildID}/cases [get]
 func listMemberOwnedCases(c *gin.Context, services *quack.Services) {
 	session := middleware.GetAuthSession(c)
 	if session == nil {
@@ -162,6 +256,15 @@ func listMemberOwnedCases(c *gin.Context, services *quack.Services) {
 }
 
 // getMemberOwnedCase returns the privacy-safe projection only to the target identity.
+// @Summary Get the current member's case
+// @Tags Member cases
+// @Produce json
+// @Param caseID path string true "Case ID"
+// @Security CookieAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Router /members/me/cases/{caseID} [get]
 func getMemberOwnedCase(c *gin.Context, services *quack.Services) {
 	session := middleware.GetAuthSession(c)
 	if session == nil {
@@ -177,6 +280,16 @@ func getMemberOwnedCase(c *gin.Context, services *quack.Services) {
 }
 
 // getCase retrieves case without exposing the underlying adapter implementation.
+// @Summary Get a guild case
+// @Tags Cases
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Param caseRef path string true "Case ID or number"
+// @Security CookieAuth
+// @Success 200 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/cases/{caseRef} [get]
 func getCase(c *gin.Context, services *quack.Services) {
 	result, err := services.Cases.Get(c.Request.Context(), middleware.GetGuildContext(c), c.Param("caseRef"))
 	if err != nil {
@@ -188,6 +301,18 @@ func getCase(c *gin.Context, services *quack.Services) {
 }
 
 // listUserCases returns user cases subject to authorization, ordering, and filtering constraints.
+// @Summary List a guild member's case history
+// @Tags Cases
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Param targetDiscordUserID path string true "Target Discord user ID"
+// @Param limit query int false "Page size"
+// @Param offset query int false "Page offset"
+// @Security CookieAuth
+// @Success 200 {object} quack.CaseProfileResponse
+// @Failure 400 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/users/{targetDiscordUserID}/cases [get]
 func listUserCases(c *gin.Context, services *quack.Services) {
 	result, err := services.Cases.UserHistory(c.Request.Context(), middleware.GetGuildContext(c), c.Param("targetDiscordUserID"), caseListInput(c))
 	if err != nil {
@@ -199,6 +324,20 @@ func listUserCases(c *gin.Context, services *quack.Services) {
 }
 
 // listAuditLog returns audit log subject to authorization, ordering, and filtering constraints.
+// @Summary List guild audit entries
+// @Tags Audit
+// @Produce json
+// @Param discordGuildID path string true "Discord guild ID"
+// @Param limit query int false "Page size"
+// @Param offset query int false "Page offset"
+// @Param action query string false "Audit action"
+// @Param resource_type query string false "Resource type"
+// @Param result query string false "Audit result"
+// @Security CookieAuth
+// @Success 200 {object} quack.AuditListResponse
+// @Failure 400 {object} map[string]interface{}
+// @Failure 403 {object} map[string]interface{}
+// @Router /guilds/{discordGuildID}/audit-log [get]
 func listAuditLog(c *gin.Context, services *quack.Services) {
 	result, err := services.Audits.List(c.Request.Context(), middleware.GetGuildContext(c), quack.AuditListInput{
 		Limit:               c.Query("limit"),
