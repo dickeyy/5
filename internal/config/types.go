@@ -2,18 +2,45 @@ package config
 
 // Config is the complete immutable process configuration passed into runtime assembly.
 type Config struct {
-	Environment string
-	API         APIConfig
-	Discord     DiscordConfig
-	Auth        AuthConfig
-	Storage     StorageConfig
-	EventQueue  EventQueueConfig
+	Environment   string
+	API           APIConfig
+	Discord       DiscordConfig
+	Auth          AuthConfig
+	RateLimits    RateLimitConfig
+	Storage       StorageConfig
+	EventQueue    EventQueueConfig
+	Observability ObservabilityConfig
+}
+
+// RateLimitConfig defines documented fail-closed limits for dashboard and Discord adapter classes.
+type RateLimitConfig struct {
+	OAuth               RateLimitPolicyConfig
+	MemberRead          RateLimitPolicyConfig
+	TemplateWrite       RateLimitPolicyConfig
+	CaseCreate          RateLimitPolicyConfig
+	Retry               RateLimitPolicyConfig
+	Evidence            RateLimitPolicyConfig
+	IdempotencyTTLHours int
+}
+
+// RateLimitPolicyConfig defines a maximum request count within a fixed window.
+type RateLimitPolicyConfig struct {
+	Maximum       int
+	WindowSeconds int
 }
 
 // APIConfig controls the HTTP listener and privileged operations endpoint.
 type APIConfig struct {
-	Port           string
-	OpsStatusToken string
+	Port                     string
+	OpsStatusToken           string
+	CORSAllowedOrigins       []string
+	TrustedProxies           []string
+	MaxBodyBytes             int64
+	ReadHeaderTimeoutSeconds int
+	ReadTimeoutSeconds       int
+	WriteTimeoutSeconds      int
+	IdleTimeoutSeconds       int
+	ShutdownTimeoutSeconds   int
 }
 
 // DiscordConfig contains Discord credentials, OAuth settings, and command synchronization policy.
@@ -30,6 +57,7 @@ type DiscordConfig struct {
 // AuthConfig controls session lifetime, cookie behavior, and the post-login destination.
 type AuthConfig struct {
 	SessionCookieName string
+	CSRFCookieName    string
 	SessionTTLHours   int
 	StateTTLMinutes   int
 	PostLoginRedirect string
@@ -46,4 +74,10 @@ type StorageConfig struct {
 type EventQueueConfig struct {
 	Size    int
 	Workers int
+}
+
+// ObservabilityConfig controls the bounded metrics endpoint and service identity.
+type ObservabilityConfig struct {
+	MetricsToken string
+	ServiceName  string
 }

@@ -17,17 +17,13 @@ func TestCaseTemplateStorageCreateListGetExpanded(t *testing.T) {
 		Template: templateModel(guildID, "spam"),
 		Levels: []storage.ExpandedCaseTemplateLevel{
 			{
-				Level: model.CaseTemplateLevel{Position: 2, Name: "Second", TriggerCaseCount: 3, Enabled: true},
+				Level: model.CaseTemplateLevel{Position: 2, Name: "Second", TriggerCaseCount: 3},
 				Actions: []model.CaseTemplateLevelAction{
-					{Position: 1, ActionType: model.ActionTimeoutUser, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
+					{ActionType: model.ActionTimeoutUser, ConfigJSON: `{"duration_seconds":3600}`},
 				},
 			},
 			{
-				Level: model.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, NotifyUser: true, NotificationType: string(model.NotificationWarning), Enabled: true},
-				Actions: []model.CaseTemplateLevelAction{
-					{Position: 2, ActionType: model.ActionKickUser, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
-					{Position: 1, ActionType: model.ActionBanUser, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
-				},
+				Level: model.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, NotifyUser: true},
 			},
 		},
 	})
@@ -41,8 +37,8 @@ func TestCaseTemplateStorageCreateListGetExpanded(t *testing.T) {
 	if len(created.Levels) != 2 || created.Levels[0].Level.Position != 1 || created.Levels[1].Level.Position != 2 {
 		t.Fatalf("expected levels ordered by position, got %+v", created.Levels)
 	}
-	if len(created.Levels[0].Actions) != 2 || created.Levels[0].Actions[0].Position != 1 || created.Levels[0].Actions[1].Position != 2 {
-		t.Fatalf("expected actions ordered by position, got %+v", created.Levels[0].Actions)
+	if len(created.Levels[0].Actions) != 0 || len(created.Levels[1].Actions) != 1 {
+		t.Fatalf("expected zero or one action per level, got %+v", created.Levels)
 	}
 
 	list, err := store.ListCaseTemplates(ctx, guildID)
@@ -75,10 +71,9 @@ func TestCaseTemplateStorageUpdateReplacesChildrenAndIncrementsVersion(t *testin
 		Template:   update,
 		Levels: []storage.ExpandedCaseTemplateLevel{
 			{
-				Level: model.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, Enabled: true},
+				Level: model.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true},
 				Actions: []model.CaseTemplateLevelAction{
-					{Position: 1, ActionType: model.ActionTimeoutUser, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
-					{Position: 2, ActionType: model.ActionKickUser, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: false},
+					{ActionType: model.ActionTimeoutUser, ConfigJSON: `{"duration_seconds":3600}`},
 				},
 			},
 		},
@@ -89,7 +84,7 @@ func TestCaseTemplateStorageUpdateReplacesChildrenAndIncrementsVersion(t *testin
 	if updated.Template.Version != created.Template.Version+1 {
 		t.Fatalf("expected version increment, got %d then %d", created.Template.Version, updated.Template.Version)
 	}
-	if len(updated.Levels) != 1 || len(updated.Levels[0].Actions) != 2 || updated.Levels[0].Actions[0].ActionType != model.ActionTimeoutUser {
+	if len(updated.Levels) != 1 || len(updated.Levels[0].Actions) != 1 || updated.Levels[0].Actions[0].ActionType != model.ActionTimeoutUser {
 		t.Fatalf("expected replaced levels and actions, got %+v", updated.Levels)
 	}
 }
@@ -110,16 +105,16 @@ func TestCaseTemplateStorageArchiveHidesFromListButDetailStillWorks(t *testing.T
 	if err != nil {
 		t.Fatalf("archive template: %v", err)
 	}
-	if archived.Template.ArchivedAt == nil || archived.Template.Enabled {
-		t.Fatalf("expected archived disabled template")
+	if archived.Template.ArchivedAt == nil {
+		t.Fatalf("expected archived template")
 	}
 
 	list, err := store.ListCaseTemplates(ctx, guildID)
 	if err != nil {
 		t.Fatalf("list templates: %v", err)
 	}
-	if len(list) != 0 {
-		t.Fatalf("expected archived template hidden from list")
+	if len(list) != 1 || list[0].Template.ArchivedAt == nil {
+		t.Fatalf("expected archived template retained in authorized list")
 	}
 
 	detail, err := store.GetCaseTemplateExpanded(ctx, guildID, created.Template.ID)
@@ -159,10 +154,9 @@ func templateLevels() []storage.ExpandedCaseTemplateLevel {
 				Position:  1,
 				Name:      "Default",
 				IsDefault: true,
-				Enabled:   true,
 			},
 			Actions: []model.CaseTemplateLevelAction{
-				{Position: 1, ActionType: model.ActionTimeoutUser, ConfigJSON: `{}`, IdempotencyScope: "case", Enabled: true},
+				{ActionType: model.ActionTimeoutUser, ConfigJSON: `{"duration_seconds":3600}`},
 			},
 		},
 	}
@@ -196,8 +190,6 @@ func templateModel(guildID, slug string) model.CaseTemplate {
 		Name:                   "Spam",
 		Description:            "Spam template",
 		ReasonTemplate:         "No spam",
-		DefaultSeverity:        model.CaseSeverityMedium,
-		Enabled:                true,
 		CreatedByDiscordUserID: "moderator-1",
 		UpdatedByDiscordUserID: "moderator-1",
 	}

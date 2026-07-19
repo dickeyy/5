@@ -1,11 +1,41 @@
 package model
 
-import "time"
+import (
+	"errors"
+	"fmt"
+	"time"
+)
+
+// ErrTemplateCompatibilityReviewRequired marks a preserved legacy template that cannot be represented safely by the live v5 policy contract.
+var ErrTemplateCompatibilityReviewRequired = errors.New("template compatibility review required")
+
+// TemplateCompatibilityReviewError identifies a quarantined template and explains why its preserved policy cannot be returned as live v5 configuration.
+type TemplateCompatibilityReviewError struct {
+	TemplateID string
+	Reason     string
+}
+
+// Error returns an administrator-facing compatibility review message without projecting invalid legacy policy.
+func (e *TemplateCompatibilityReviewError) Error() string {
+	if e == nil {
+		return ErrTemplateCompatibilityReviewRequired.Error()
+	}
+	if e.Reason == "" {
+		return fmt.Sprintf("%s for template %s", ErrTemplateCompatibilityReviewRequired, e.TemplateID)
+	}
+	return fmt.Sprintf("%s for template %s: %s", ErrTemplateCompatibilityReviewRequired, e.TemplateID, e.Reason)
+}
+
+// Unwrap preserves sentinel matching across storage, service, and transport boundaries.
+func (e *TemplateCompatibilityReviewError) Unwrap() error {
+	return ErrTemplateCompatibilityReviewRequired
+}
 
 // ExpandedCaseTemplate groups the expanded case template state used to keep this package's responsibilities explicit.
 type ExpandedCaseTemplate struct {
-	Template CaseTemplate
-	Levels   []ExpandedCaseTemplateLevel
+	Template      CaseTemplate
+	ContextFields []CaseTemplateContextField
+	Levels        []ExpandedCaseTemplateLevel
 }
 
 // ExpandedCaseTemplateLevel groups the expanded case template level state used to keep this package's responsibilities explicit.
@@ -16,24 +46,27 @@ type ExpandedCaseTemplateLevel struct {
 
 // CreateCaseTemplateParams groups the validated inputs needed for create case template params.
 type CreateCaseTemplateParams struct {
-	Template CaseTemplate
-	Levels   []ExpandedCaseTemplateLevel
-	Audit    *AuditLogEntry
+	Template      CaseTemplate
+	ContextFields []CaseTemplateContextField
+	Levels        []ExpandedCaseTemplateLevel
+	Audit         *AuditLogEntry
 }
 
 // UpdateCaseTemplateParams groups the validated inputs needed for update case template params.
 type UpdateCaseTemplateParams struct {
 	GuildID, TemplateID string
 	Template            CaseTemplate
+	ContextFields       []CaseTemplateContextField
 	Levels              []ExpandedCaseTemplateLevel
 	Audit               *AuditLogEntry
 }
 
 // ListAuditLogEntriesParams groups the validated inputs needed for list audit log entries params.
 type ListAuditLogEntriesParams struct {
-	GuildID, ActorDiscordUserID, Action, ResourceType, ResourceID string
-	Result                                                        AuditResult
-	Limit, Offset                                                 int
+	GuildID, ActorDiscordUserID, Source, Action, ResourceType, ResourceID string
+	CaseID, MemberDiscordUserID, CreatedAfter, CreatedBefore, BeforeID    string
+	Result                                                                AuditResult
+	Limit, Offset                                                         int
 }
 
 // ListAuditLogEntriesResult captures the outcome of list audit log entries result for the caller.
@@ -47,7 +80,11 @@ type CreateCaseParams struct {
 	Case             Case
 	Event            CaseEvent
 	ActionExecutions []CaseActionExecution
+	Evidence         []CaseEvidenceSnapshot
+	Attachments      []CaseEvidenceAttachment
+	Notification     *CaseNotification
 	Audit            *AuditLogEntry
+	AdditionalAudits []AuditLogEntry
 }
 
 // CreatedCase groups the created case state used to keep this package's responsibilities explicit.
@@ -55,19 +92,22 @@ type CreatedCase struct {
 	Case             Case
 	Event            CaseEvent
 	ActionExecutions []CaseActionExecution
+	Evidence         []CaseEvidenceSnapshot
+	Attachments      []CaseEvidenceAttachment
+	Notification     *CaseNotification
 }
 
 // CountTemplateCasesForTargetParams groups the validated inputs needed for count template cases for target params.
 type CountTemplateCasesForTargetParams struct {
 	GuildID, TemplateID, TargetDiscordUserID string
-	Since                                    *time.Time
 }
 
 // ListCasesParams groups the validated inputs needed for list cases params.
 type ListCasesParams struct {
-	GuildID, TargetDiscordUserID, ModeratorDiscordUserID, TemplateID string
-	Status                                                           CaseStatus
-	Limit, Offset                                                    int
+	GuildID, TargetDiscordUserID, ModeratorDiscordUserID, TemplateID    string
+	CaseNumber, ActionResult, AppealStatus, CreatedAfter, CreatedBefore string
+	Validity                                                            CaseValidity
+	Limit, Offset                                                       int
 }
 
 // ListCasesResult captures the outcome of list cases result for the caller.
@@ -79,7 +119,7 @@ type ListCasesResult struct {
 // TargetCaseSummary groups the target case summary state used to keep this package's responsibilities explicit.
 type TargetCaseSummary struct {
 	Total      int64
-	ByStatus   map[CaseStatus]int64
+	ByValidity map[CaseValidity]int64
 	ByTemplate map[string]int64
 }
 
@@ -95,6 +135,7 @@ type ClaimCaseActionParams struct{ CaseID, WorkerID string }
 // CompleteCaseActionParams groups the validated inputs needed for complete case action params.
 type CompleteCaseActionParams struct {
 	ExecutionID                                                      string
+	LeaseToken                                                       string
 	AttemptNumber                                                    uint8
 	WorkerID                                                         string
 	AttemptStatus                                                    ActionAttemptStatus
@@ -103,6 +144,58 @@ type CompleteCaseActionParams struct {
 	NextRetryAt                                                      *time.Time
 	EventType                                                        CaseEventType
 	EventBody, EventMetadataJSON, CorrelationID, RequestID           string
+}
+
+// VoidCaseParams carries the immutable correction decision and audit evidence for a case.
+type VoidCaseParams struct {
+	GuildID, CaseID, ActorDiscordUserID, Reason string
+	ReplacementCaseID                           *string
+	Audit                                       *AuditLogEntry
+}
+
+// RetryCaseActionParams carries an authorized manual retry request.
+type RetryCaseActionParams struct {
+	GuildID, ExecutionID, ActorDiscordUserID string
+	Audit                                    *AuditLogEntry
+}
+
+// DismissCaseActionParams carries an authorized failed-action dismissal.
+type DismissCaseActionParams struct {
+	GuildID, ExecutionID, ActorDiscordUserID string
+	Audit                                    *AuditLogEntry
+}
+
+// QueueCaseReversalParams carries an explicit, staff-confirmed timeout-removal or unban operation.
+type QueueCaseReversalParams struct {
+	GuildID, CaseID, ActorDiscordUserID string
+	OriginalExecutionID                 string
+	AppealID                            *string
+	ActionType                          ActionType
+	Audit                               *AuditLogEntry
+}
+
+// FailedCaseActionFilter bounds staff review queries to one guild.
+type FailedCaseActionFilter struct {
+	GuildID       string
+	Limit, Offset int
+}
+
+// FailedCaseActionResult contains stable failed-action review pagination.
+type FailedCaseActionResult struct {
+	Executions []CaseActionExecution
+	Total      int64
+}
+
+// ClaimCaseNotificationParams carries the case and worker identity used for a fenced notification claim.
+type ClaimCaseNotificationParams struct{ CaseID, WorkerID string }
+
+// CompleteCaseNotificationParams carries a fenced notification delivery outcome.
+type CompleteCaseNotificationParams struct {
+	NotificationID, LeaseToken, WorkerID                                string
+	Status                                                              NotificationStatus
+	PreparedChannelDiscordID, RenderedMessage, DeliveryMessageDiscordID string
+	ErrorCode, ErrorMessage                                             string
+	EventType                                                           CaseEventType
 }
 
 // SkipCaseActionsParams groups the validated inputs needed for skip case actions params.
@@ -114,6 +207,27 @@ type SkipCaseActionsParams struct {
 
 // UpsertGuildParams groups the validated inputs needed for upsert guild params.
 type UpsertGuildParams struct{ DiscordGuildID, Name, IconURL, OwnerDiscordUserID string }
+
+// BootstrapGuildParams carries authoritative Discord guild metadata used by the idempotent install transaction.
+type BootstrapGuildParams struct {
+	DiscordGuildID, Name, IconURL, OwnerDiscordUserID string
+	KnownChannelDiscordIDs                            []string
+}
+
+// BootstrapGuildResult reports the durable guild, settings, and starter-policy state produced by an install or rejoin event.
+type BootstrapGuildResult struct {
+	Guild                  Guild
+	Settings               GuildSettings
+	StarterTemplate        ExpandedCaseTemplate
+	GuildCreated           bool
+	StarterTemplateCreated bool
+}
+
+// UpdateGuildSettingsParams contains a complete validated settings replacement and its immutable audit evidence.
+type UpdateGuildSettingsParams struct {
+	Settings GuildSettings
+	Audit    *AuditLogEntry
+}
 
 // UpsertStaffMemberParams groups the validated inputs needed for upsert staff member params.
 type UpsertStaffMemberParams struct {

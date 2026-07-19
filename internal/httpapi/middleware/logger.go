@@ -12,17 +12,14 @@ import (
 func Logger(c *gin.Context) {
 	start := time.Now()
 	path := c.Request.URL.Path
-	raw := c.Request.URL.RawQuery
 
 	c.Next()
 
-	if raw != "" {
-		path = path + "?" + raw
-	}
-
 	event := log.Info()
-	if len(c.Errors) > 0 {
-		event = log.Error().Err(c.Errors.Last())
+	if c.Writer.Status() >= 500 {
+		event = log.Error()
+	} else if c.Writer.Status() >= 400 {
+		event = log.Warn()
 	}
 
 	event.

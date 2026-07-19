@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/quackdiscord/bot/internal/quack/model"
@@ -40,18 +41,17 @@ func (s *Store) CreateCaseTemplate(ctx context.Context, params CreateCaseTemplat
 		return nil, fmt.Errorf("prepare case template model: %w", err)
 	}
 	template.Version = 1
+	templateRecord := caseTemplateRecordFromModel(template)
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Select("*").Create(&template).Error; err != nil {
+		if err := tx.Select("*").Create(&templateRecord).Error; err != nil {
 			return fmt.Errorf("create case template: %w", err)
-		}
-		if !params.Template.Enabled {
-			if err := tx.Model(&model.CaseTemplate{}).Where("id = ?", template.ID).Update("enabled", false).Error; err != nil {
-				return fmt.Errorf("set case template enabled state: %w", err)
-			}
 		}
 
 		if err := createTemplateLevels(tx, template.ID, params.Levels, now); err != nil {
+			return err
+		}
+		if err := createTemplateContextFields(tx, template.ID, params.ContextFields, now); err != nil {
 			return err
 		}
 
@@ -78,16 +78,17 @@ func (s *Store) ListCaseTemplates(ctx context.Context, guildID string) ([]Expand
 		return nil, errors.New("database not connected")
 	}
 
-	var templates []model.CaseTemplate
+	var records []CaseTemplateRecord
 	if err := s.db.WithContext(ctx).
-		Where("guild_id = ? AND archived_at IS NULL", guildID).
+		Where("guild_id = ?", guildID).
 		Order("slug ASC").
-		Find(&templates).Error; err != nil {
+		Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("list case templates: %w", err)
 	}
 
-	expanded := make([]ExpandedCaseTemplate, 0, len(templates))
-	for _, template := range templates {
+	expanded := make([]ExpandedCaseTemplate, 0, len(records))
+	for _, record := range records {
+		template := caseTemplateModelFromRecord(record)
 		item, err := s.GetCaseTemplateExpanded(ctx, guildID, template.ID)
 		if err != nil {
 			return nil, err
@@ -115,14 +116,15 @@ func (s *Store) GetCaseTemplateBySlug(ctx context.Context, guildID, slug string)
 		return nil, errors.New("database not connected")
 	}
 
-	var template model.CaseTemplate
-	if err := s.db.WithContext(ctx).Where("guild_id = ? AND slug = ?", guildID, slug).First(&template).Error; err != nil {
+	var record CaseTemplateRecord
+	if err := s.db.WithContext(ctx).Where("guild_id = ? AND slug = ?", guildID, slug).First(&record).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get case template by slug: %w", err)
 	}
 
+	template := caseTemplateModelFromRecord(record)
 	return &template, nil
 }
 
@@ -133,44 +135,48 @@ func (s *Store) UpdateCaseTemplate(ctx context.Context, params UpdateCaseTemplat
 	}
 
 	now := time.Now().UTC()
-	var template model.CaseTemplate
+	var record CaseTemplateRecord
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("id = ? AND guild_id = ?", params.TemplateID, params.GuildID).First(&template).Error; err != nil {
+		if err := tx.Where("id = ? AND guild_id = ?", params.TemplateID, params.GuildID).First(&record).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return gorm.ErrRecordNotFound
 			}
 			return fmt.Errorf("get case template for update: %w", err)
 		}
 
-		template.Slug = params.Template.Slug
-		template.Name = params.Template.Name
-		template.Description = params.Template.Description
-		template.ReasonTemplate = params.Template.ReasonTemplate
-		template.DefaultSeverity = params.Template.DefaultSeverity
-		template.Appealable = params.Template.Appealable
-		template.Enabled = params.Template.Enabled
-		template.UpdatedByDiscordUserID = params.Template.UpdatedByDiscordUserID
-		template.Version++
-		template.UpdatedAt = now
+		record.Slug = params.Template.Slug
+		record.Name = params.Template.Name
+		record.Description = params.Template.Description
+		record.ReasonTemplate = params.Template.ReasonTemplate
+		record.Appealable = params.Template.Appealable
+		record.UpdatedByDiscordUserID = params.Template.UpdatedByDiscordUserID
+		record.Version++
+		record.UpdatedAt = now
 
-		if err := tx.Save(&template).Error; err != nil {
+		if err := tx.Save(&record).Error; err != nil {
 			return fmt.Errorf("update case template: %w", err)
 		}
 
-		levelIDs := tx.Model(&model.CaseTemplateLevel{}).Select("id").Where("template_id = ?", template.ID)
-		if err := tx.Where("level_id IN (?)", levelIDs).Delete(&model.CaseTemplateLevelAction{}).Error; err != nil {
+		levelIDs := tx.Model(&CaseTemplateLevelRecord{}).Select("id").Where("template_id = ?", record.ID)
+		if err := tx.Where("level_id IN (?)", levelIDs).Delete(&CaseTemplateLevelActionRecord{}).Error; err != nil {
 			return fmt.Errorf("replace case template level actions: %w", err)
 		}
-		if err := tx.Where("template_id = ?", template.ID).Delete(&model.CaseTemplateLevel{}).Error; err != nil {
+		if err := tx.Where("template_id = ?", record.ID).Delete(&CaseTemplateLevelRecord{}).Error; err != nil {
 			return fmt.Errorf("replace case template levels: %w", err)
 		}
-		if err := createTemplateLevels(tx, template.ID, params.Levels, now); err != nil {
+		if err := createTemplateLevels(tx, record.ID, params.Levels, now); err != nil {
+			return err
+		}
+		if err := tx.Where("template_id = ?", record.ID).Delete(&CaseTemplateContextFieldRecord{}).Error; err != nil {
+			return fmt.Errorf("replace case template context fields: %w", err)
+		}
+		if err := createTemplateContextFields(tx, record.ID, params.ContextFields, now); err != nil {
 			return err
 		}
 
 		if params.Audit != nil {
 			audit := *params.Audit
-			audit.ResourceID = template.ID
+			audit.ResourceID = record.ID
 			if err := createAuditLogEntry(tx, &audit, now); err != nil {
 				return err
 			}
@@ -185,7 +191,45 @@ func (s *Store) UpdateCaseTemplate(ctx context.Context, params UpdateCaseTemplat
 		return nil, err
 	}
 
-	return s.GetCaseTemplateExpanded(ctx, params.GuildID, template.ID)
+	return s.GetCaseTemplateExpanded(ctx, params.GuildID, record.ID)
+}
+
+// RestoreCaseTemplate makes an archived template available again without changing its identity or version.
+func (s *Store) RestoreCaseTemplate(ctx context.Context, guildID, templateID string, audit *model.AuditLogEntry) (*ExpandedCaseTemplate, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("database not connected")
+	}
+	now := time.Now().UTC()
+	var record CaseTemplateRecord
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("id = ? AND guild_id = ?", templateID, guildID).First(&record)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return gorm.ErrRecordNotFound
+		}
+		if result.Error != nil {
+			return fmt.Errorf("get case template for restore: %w", result.Error)
+		}
+		record.ArchivedAt = nil
+		record.UpdatedAt = now
+		if err := tx.Save(&record).Error; err != nil {
+			return fmt.Errorf("restore case template: %w", err)
+		}
+		if audit != nil {
+			entry := *audit
+			entry.ResourceID = record.ID
+			if err := createAuditLogEntry(tx, &entry, now); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.GetCaseTemplateExpanded(ctx, guildID, templateID)
 }
 
 // ArchiveCaseTemplate archives case template without deleting historical moderation references.
@@ -195,25 +239,24 @@ func (s *Store) ArchiveCaseTemplate(ctx context.Context, guildID, templateID str
 	}
 
 	now := time.Now().UTC()
-	var template model.CaseTemplate
+	var record CaseTemplateRecord
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("id = ? AND guild_id = ?", templateID, guildID).First(&template).Error; err != nil {
+		if err := tx.Where("id = ? AND guild_id = ?", templateID, guildID).First(&record).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return gorm.ErrRecordNotFound
 			}
 			return fmt.Errorf("get case template for archive: %w", err)
 		}
 
-		template.Enabled = false
-		template.ArchivedAt = &now
-		template.UpdatedAt = now
-		if err := tx.Save(&template).Error; err != nil {
+		record.ArchivedAt = &now
+		record.UpdatedAt = now
+		if err := tx.Save(&record).Error; err != nil {
 			return fmt.Errorf("archive case template: %w", err)
 		}
 
 		if audit != nil {
 			audit := *audit
-			audit.ResourceID = template.ID
+			audit.ResourceID = record.ID
 			if err := createAuditLogEntry(tx, &audit, now); err != nil {
 				return err
 			}
@@ -228,7 +271,7 @@ func (s *Store) ArchiveCaseTemplate(ctx context.Context, guildID, templateID str
 		return nil, err
 	}
 
-	return s.GetCaseTemplateExpanded(ctx, guildID, template.ID)
+	return s.GetCaseTemplateExpanded(ctx, guildID, record.ID)
 }
 
 // CreateAuditLogEntry creates audit log entry while preserving validation, authorization, and persistence invariants.
@@ -277,9 +320,18 @@ func (s *Store) ListAuditLogEntriesFiltered(ctx context.Context, params ListAudi
 		return nil, fmt.Errorf("count audit log entries: %w", err)
 	}
 
+	query := filteredAuditQuery(s.db.WithContext(ctx).Model(&model.AuditLogEntry{}), params)
+	if params.BeforeID != "" {
+		var cursor model.AuditLogEntry
+		result := s.db.WithContext(ctx).Where("guild_id = ? AND id = ?", params.GuildID, params.BeforeID).First(&cursor)
+		if result.Error != nil {
+			return nil, fmt.Errorf("resolve audit cursor: %w", result.Error)
+		}
+		query = query.Where("created_at < ? OR (created_at = ? AND id < ?)", cursor.CreatedAt, cursor.CreatedAt, cursor.ID)
+	}
 	var entries []model.AuditLogEntry
-	if err := filteredAuditQuery(s.db.WithContext(ctx).Model(&model.AuditLogEntry{}), params).
-		Order("created_at DESC").
+	if err := query.
+		Order("created_at DESC, id DESC").
 		Limit(limit).
 		Offset(offset).
 		Find(&entries).Error; err != nil {
@@ -295,6 +347,9 @@ func filteredAuditQuery(query *gorm.DB, params ListAuditLogEntriesParams) *gorm.
 	if params.ActorDiscordUserID != "" {
 		query = query.Where("actor_discord_user_id = ?", params.ActorDiscordUserID)
 	}
+	if params.Source != "" {
+		query = query.Where("source = ?", params.Source)
+	}
 	if params.Action != "" {
 		query = query.Where("action = ?", params.Action)
 	}
@@ -307,29 +362,70 @@ func filteredAuditQuery(query *gorm.DB, params ListAuditLogEntriesParams) *gorm.
 	if params.Result != "" {
 		query = query.Where("result = ?", params.Result)
 	}
+	if params.CaseID != "" {
+		pattern := `%"case_id":"` + params.CaseID + `"%`
+		query = query.Where("(resource_type = ? AND resource_id = ?) OR metadata_json LIKE ?", "case", params.CaseID, pattern)
+	}
+	if params.MemberDiscordUserID != "" {
+		pattern := `%"member_discord_user_id":"` + params.MemberDiscordUserID + `"%`
+		targetPattern := `%"target_discord_user_id":"` + params.MemberDiscordUserID + `"%`
+		query = query.Where("actor_discord_user_id = ? OR metadata_json LIKE ? OR metadata_json LIKE ?", params.MemberDiscordUserID, pattern, targetPattern)
+	}
+	if params.CreatedAfter != "" {
+		if value, err := time.Parse(time.RFC3339Nano, params.CreatedAfter); err == nil {
+			query = query.Where("created_at >= ?", value.UTC())
+		}
+	}
+	if params.CreatedBefore != "" {
+		if value, err := time.Parse(time.RFC3339Nano, params.CreatedBefore); err == nil {
+			query = query.Where("created_at < ?", value.UTC())
+		}
+	}
 	return query
 }
 
 // getCaseTemplateExpanded retrieves case template expanded without exposing the underlying adapter implementation.
 func getCaseTemplateExpanded(db *gorm.DB, guildID, templateID string) (*ExpandedCaseTemplate, error) {
-	var template model.CaseTemplate
-	if err := db.Where("id = ? AND guild_id = ?", templateID, guildID).First(&template).Error; err != nil {
+	var templateRecord CaseTemplateRecord
+	if err := db.Where("id = ? AND guild_id = ?", templateID, guildID).First(&templateRecord).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get case template: %w", err)
 	}
 
-	var levels []model.CaseTemplateLevel
-	if err := db.Where("template_id = ?", template.ID).Order("position ASC").Find(&levels).Error; err != nil {
+	var compatibility migration0002TemplateCompatibility
+	compatibilityResult := db.Where("template_id = ?", templateRecord.ID).Limit(1).Find(&compatibility)
+	if compatibilityResult.Error != nil {
+		return nil, fmt.Errorf("get case template compatibility state: %w", compatibilityResult.Error)
+	}
+	if compatibilityResult.RowsAffected > 0 {
+		return nil, &model.TemplateCompatibilityReviewError{
+			TemplateID: templateRecord.ID,
+			Reason:     compatibility.Reason,
+		}
+	}
+
+	template := caseTemplateModelFromRecord(templateRecord)
+	var contextFields []model.CaseTemplateContextField
+	if err := db.Where("template_id = ?", template.ID).Order("position ASC").Find(&contextFields).Error; err != nil {
+		return nil, fmt.Errorf("get case template context fields: %w", err)
+	}
+	var levelRecords []CaseTemplateLevelRecord
+	if err := db.Where("template_id = ?", template.ID).Order("position ASC").Find(&levelRecords).Error; err != nil {
 		return nil, fmt.Errorf("get case template levels: %w", err)
 	}
 
-	expandedLevels := make([]ExpandedCaseTemplateLevel, 0, len(levels))
-	for _, level := range levels {
-		var actions []model.CaseTemplateLevelAction
-		if err := db.Where("level_id = ?", level.ID).Order("position ASC").Find(&actions).Error; err != nil {
+	expandedLevels := make([]ExpandedCaseTemplateLevel, 0, len(levelRecords))
+	for _, levelRecord := range levelRecords {
+		level := caseTemplateLevelModelFromRecord(levelRecord)
+		var actionRecords []CaseTemplateLevelActionRecord
+		if err := db.Where("level_id = ?", level.ID).Order("position ASC").Find(&actionRecords).Error; err != nil {
 			return nil, fmt.Errorf("get case template level actions: %w", err)
+		}
+		actions := make([]model.CaseTemplateLevelAction, 0, len(actionRecords))
+		for _, actionRecord := range actionRecords {
+			actions = append(actions, caseTemplateLevelActionModelFromRecord(actionRecord))
 		}
 		expandedLevels = append(expandedLevels, ExpandedCaseTemplateLevel{
 			Level:   level,
@@ -338,9 +434,23 @@ func getCaseTemplateExpanded(db *gorm.DB, guildID, templateID string) (*Expanded
 	}
 
 	return &ExpandedCaseTemplate{
-		Template: template,
-		Levels:   expandedLevels,
+		Template: template, ContextFields: contextFields, Levels: expandedLevels,
 	}, nil
+}
+
+// createTemplateContextFields persists validated definitions in their stable display order.
+func createTemplateContextFields(tx *gorm.DB, templateID string, fields []model.CaseTemplateContextField, now time.Time) error {
+	for i := range fields {
+		field := fields[i]
+		field.TemplateID = templateID
+		if err := prepareULIDModel(&field.ULIDModel, now); err != nil {
+			return fmt.Errorf("prepare template context field: %w", err)
+		}
+		if err := tx.Select("*").Create(&field).Error; err != nil {
+			return fmt.Errorf("create template context field: %w", err)
+		}
+	}
+	return nil
 }
 
 // createTemplateLevels creates template levels while preserving validation, authorization, and persistence invariants.
@@ -348,38 +458,126 @@ func createTemplateLevels(tx *gorm.DB, templateID string, levels []ExpandedCaseT
 	for i := range levels {
 		level := levels[i].Level
 		level.TemplateID = templateID
-		levelEnabled := level.Enabled
 		if err := prepareULIDModel(&level.ULIDModel, now); err != nil {
 			return fmt.Errorf("prepare case template level model: %w", err)
 		}
-		if err := tx.Select("*").Create(&level).Error; err != nil {
+		levelRecord := caseTemplateLevelRecordFromModel(level)
+		if err := tx.Select("*").Create(&levelRecord).Error; err != nil {
 			return fmt.Errorf("create case template level: %w", err)
-		}
-		if !levelEnabled {
-			if err := tx.Model(&model.CaseTemplateLevel{}).Where("id = ?", level.ID).Update("enabled", false).Error; err != nil {
-				return fmt.Errorf("set case template level enabled state: %w", err)
-			}
 		}
 
 		for j := range levels[i].Actions {
 			action := levels[i].Actions[j]
 			action.LevelID = level.ID
-			actionEnabled := action.Enabled
 			if err := prepareULIDModel(&action.ULIDModel, now); err != nil {
 				return fmt.Errorf("prepare case template level action model: %w", err)
 			}
-			if err := tx.Select("*").Create(&action).Error; err != nil {
+			actionRecord := caseTemplateLevelActionRecordFromModel(action)
+			if err := tx.Select("*").Create(&actionRecord).Error; err != nil {
 				return fmt.Errorf("create case template level action: %w", err)
-			}
-			if !actionEnabled {
-				if err := tx.Model(&model.CaseTemplateLevelAction{}).Where("id = ?", action.ID).Update("enabled", false).Error; err != nil {
-					return fmt.Errorf("set case template level action enabled state: %w", err)
-				}
 			}
 		}
 	}
 
 	return nil
+}
+
+// caseTemplateRecordFromModel maps the live template model into the compatibility storage shape.
+func caseTemplateRecordFromModel(template model.CaseTemplate) CaseTemplateRecord {
+	return CaseTemplateRecord{
+		ULIDModelRecord:        ulidRecordFromModel(template.ULIDModel),
+		GuildID:                template.GuildID,
+		Slug:                   template.Slug,
+		Name:                   template.Name,
+		Description:            template.Description,
+		ReasonTemplate:         template.ReasonTemplate,
+		DefaultSeverity:        "medium",
+		Appealable:             template.Appealable,
+		Enabled:                true,
+		Version:                template.Version,
+		CreatedByDiscordUserID: template.CreatedByDiscordUserID,
+		UpdatedByDiscordUserID: template.UpdatedByDiscordUserID,
+		ArchivedAt:             template.ArchivedAt,
+	}
+}
+
+// caseTemplateModelFromRecord omits retired compatibility columns from live behavior.
+func caseTemplateModelFromRecord(record CaseTemplateRecord) model.CaseTemplate {
+	return model.CaseTemplate{
+		ULIDModel:              ulidModelFromRecord(record.ULIDModelRecord),
+		GuildID:                record.GuildID,
+		Slug:                   record.Slug,
+		Name:                   record.Name,
+		Description:            record.Description,
+		ReasonTemplate:         record.ReasonTemplate,
+		Appealable:             record.Appealable,
+		Version:                record.Version,
+		CreatedByDiscordUserID: record.CreatedByDiscordUserID,
+		UpdatedByDiscordUserID: record.UpdatedByDiscordUserID,
+		ArchivedAt:             record.ArchivedAt,
+	}
+}
+
+// caseTemplateLevelRecordFromModel stores live level state with inert compatibility defaults.
+func caseTemplateLevelRecordFromModel(level model.CaseTemplateLevel) CaseTemplateLevelRecord {
+	return CaseTemplateLevelRecord{
+		ULIDModelRecord:  ulidRecordFromModel(level.ULIDModel),
+		TemplateID:       level.TemplateID,
+		Position:         level.Position,
+		Name:             level.Name,
+		IsDefault:        level.IsDefault,
+		TriggerCaseCount: level.TriggerCaseCount,
+		NotifyUser:       level.NotifyUser,
+		Enabled:          true,
+	}
+}
+
+// caseTemplateLevelModelFromRecord omits retired compatibility columns from live behavior.
+func caseTemplateLevelModelFromRecord(record CaseTemplateLevelRecord) model.CaseTemplateLevel {
+	return model.CaseTemplateLevel{
+		ULIDModel:        ulidModelFromRecord(record.ULIDModelRecord),
+		TemplateID:       record.TemplateID,
+		Position:         record.Position,
+		Name:             record.Name,
+		IsDefault:        record.IsDefault,
+		TriggerCaseCount: record.TriggerCaseCount,
+		NotifyUser:       record.NotifyUser,
+	}
+}
+
+// caseTemplateLevelActionRecordFromModel stores one live action with inert compatibility defaults.
+func caseTemplateLevelActionRecordFromModel(action model.CaseTemplateLevelAction) CaseTemplateLevelActionRecord {
+	return CaseTemplateLevelActionRecord{
+		ULIDModelRecord:  ulidRecordFromModel(action.ULIDModel),
+		LevelID:          action.LevelID,
+		Position:         1,
+		ActionType:       action.ActionType,
+		ConfigJSON:       action.ConfigJSON,
+		MaxRetries:       action.MaxRetries,
+		IdempotencyScope: "case",
+		Enabled:          true,
+	}
+}
+
+// caseTemplateLevelActionModelFromRecord omits retired compatibility columns from live behavior.
+func caseTemplateLevelActionModelFromRecord(record CaseTemplateLevelActionRecord) model.CaseTemplateLevelAction {
+	return model.CaseTemplateLevelAction{
+		ULIDModel:  ulidModelFromRecord(record.ULIDModelRecord),
+		LevelID:    record.LevelID,
+		ActionType: record.ActionType,
+		ConfigJSON: record.ConfigJSON,
+		MaxRetries: record.MaxRetries,
+	}
+}
+
+// ulidRecordFromModel maps shared identifier and timestamp fields into storage.
+func ulidRecordFromModel(value model.ULIDModel) ULIDModelRecord {
+	return ULIDModelRecord{ID: value.ID, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt}
+}
+
+// ulidModelFromRecord maps shared identifier and timestamp fields into the domain.
+func ulidModelFromRecord(value ULIDModelRecord) model.ULIDModel {
+	return model.ULIDModel{ID: value.ID, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt}
 }
 
 // createAuditLogEntry creates audit log entry while preserving validation, authorization, and persistence invariants.
@@ -393,6 +591,8 @@ func createAuditLogEntry(db *gorm.DB, entry *model.AuditLogEntry, now time.Time)
 	if entry.MetadataJSON == "" {
 		entry.MetadataJSON = "{}"
 	}
+	entry.MetadataJSON = model.RedactAuditMetadata(entry.MetadataJSON)
+	entry.FailureReason = redactAuditFailureReason(entry.FailureReason)
 	if err := prepareULIDModel(&entry.ULIDModel, now); err != nil {
 		return fmt.Errorf("prepare audit log entry model: %w", err)
 	}
@@ -401,4 +601,23 @@ func createAuditLogEntry(db *gorm.DB, entry *model.AuditLogEntry, now time.Time)
 	}
 
 	return nil
+}
+
+// redactAuditFailureReason keeps bounded classifications while stripping credentials accidentally embedded in an error.
+func redactAuditFailureReason(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	lower := strings.ToLower(value)
+	for _, fragment := range []string{"token=", "authorization:", "bearer ", "password=", "secret=", "cookie="} {
+		if strings.Contains(lower, fragment) {
+			return "sensitive failure detail redacted"
+		}
+	}
+	runes := []rune(value)
+	if len(runes) > 240 {
+		return string(runes[:240])
+	}
+	return value
 }

@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/internal/discordbot/interactions"
 	"github.com/quackdiscord/bot/internal/discordbot/ui"
 	"github.com/quackdiscord/bot/internal/quack"
+	"github.com/redis/go-redis/v9"
 )
 
 // CommandSpec binds one Discord command definition to the handler that implements it.
@@ -23,6 +25,10 @@ type CommandSpec struct {
 type Registry struct {
 	commands map[string]CommandSpec
 }
+
+// ComponentRegistrar installs integration-owned component and modal handlers
+// into the same dispatcher as application commands.
+type ComponentRegistrar func(*interactions.ComponentRegistry) error
 
 // NewRegistry constructs registry with required dependencies explicit so callers control lifecycle and substitution.
 func NewRegistry() *Registry {
@@ -91,7 +97,7 @@ func (r *Registry) LookupCommand(name string) (ui.Handler, bool) {
 }
 
 // Register explicitly wires register so runtime behavior does not depend on init-time registration.
-func Register(session *discordgo.Session, services *quack.Services) error {
+func Register(session *discordgo.Session, services *quack.Services, componentRegistrars ...ComponentRegistrar) error {
 	if session == nil {
 		return errors.New("discord session is not configured")
 	}
@@ -103,7 +109,21 @@ func Register(session *discordgo.Session, services *quack.Services) error {
 	if err := registry.Register(CaseCommandSpec()); err != nil {
 		return err
 	}
+	if err := registry.Register(MessageCaseCommandSpec()); err != nil {
+		return err
+	}
 	dispatcher := interactions.NewDispatcher(services, registry)
+	if provider, ok := services.Store.(interface{ Redis() *redis.Client }); ok {
+		dispatcher.Deduper = interactions.NewRedisInteractionDeduper(provider.Redis(), 15*time.Minute)
+	}
+	for _, register := range componentRegistrars {
+		if register == nil {
+			continue
+		}
+		if err := register(dispatcher.Components); err != nil {
+			return fmt.Errorf("register Discord components: %w", err)
+		}
+	}
 	session.AddHandler(dispatcher.Handle)
 
 	appID := strings.TrimSpace(services.Config.Discord.AppID)

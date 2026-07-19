@@ -14,10 +14,36 @@ import (
 )
 
 type fakeDiscordClient struct {
-	userGuilds []quack.DiscordUserGuild
-	botGuilds  []quack.DiscordBotGuild
-	botGuild   *quack.DiscordBotGuild
-	botErr     error
+	userGuilds    []quack.DiscordUserGuild
+	botGuilds     []quack.DiscordBotGuild
+	botGuild      *quack.DiscordBotGuild
+	botErr        error
+	authorization *quack.DiscordGuildAuthorization
+}
+
+func (f fakeDiscordClient) GuildAuthorization(ctx context.Context, guildID, actorID, targetID string) (*quack.DiscordGuildAuthorization, error) {
+	if f.botErr != nil {
+		return nil, f.botErr
+	}
+	if f.authorization != nil {
+		copy := *f.authorization
+		return &copy, nil
+	}
+	if f.botGuild == nil {
+		return nil, quack.ErrBotNotInGuild
+	}
+	actor := quack.DiscordMemberAuthorization{DiscordUserID: actorID}
+	for _, guild := range f.userGuilds {
+		if guild.ID == guildID {
+			actor.Present = true
+			actor.PermissionBits = guild.Permissions
+			break
+		}
+	}
+	return &quack.DiscordGuildAuthorization{
+		Guild: *f.botGuild, Actor: actor,
+		Bot: quack.DiscordMemberAuthorization{DiscordUserID: "quack", Present: true, PermissionBits: ^uint64(0), TopRolePosition: 100, Bot: true},
+	}, nil
 }
 
 func (f fakeDiscordClient) UserGuilds(ctx context.Context, accessToken string) ([]quack.DiscordUserGuild, error) {
@@ -72,7 +98,7 @@ func TestResolveStaffContextOwnerBypassAllowsAllActions(t *testing.T) {
 	store := newMigratedStore(t)
 	service := quack.NewGuildService(store, fakeDiscordClient{
 		userGuilds: []quack.DiscordUserGuild{{ID: "guild-1", Owner: true, Permissions: 0}},
-		botGuild:   &quack.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "owner-1"},
+		botGuild:   &quack.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "user-1"},
 	})
 
 	guildContext, err := service.ResolveStaffContext(context.Background(), testSession("user-1"), "guild-1")
@@ -114,8 +140,8 @@ func TestResolveStaffContextEvaluatesPermissionBits(t *testing.T) {
 	if guildContext.Can(model.PermissionActionCaseTemplateWrite) {
 		t.Fatalf("expected moderate members permission not to allow case_template.write")
 	}
-	if guildContext.Can(model.PermissionActionAuditRead) {
-		t.Fatalf("expected moderate members permission not to allow audit.read")
+	if !guildContext.Can(model.PermissionActionAuditRead) {
+		t.Fatalf("expected moderate members permission to allow audit.read")
 	}
 
 }
@@ -150,9 +176,12 @@ func TestResolveStaffContextRejectsMissingUserGuildMembership(t *testing.T) {
 		botGuild:   &quack.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "owner-1"},
 	})
 
-	_, err := service.ResolveStaffContext(context.Background(), testSession("user-1"), "guild-1")
-	if !errors.Is(err, quack.ErrUserNotInGuild) {
-		t.Fatalf("expected ErrUserNotInGuild, got %v", err)
+	guildContext, err := service.ResolveStaffContext(context.Background(), testSession("user-1"), "guild-1")
+	if err != nil {
+		t.Fatalf("resolve former staff context: %v", err)
+	}
+	if err := service.Authorize(context.Background(), guildContext, model.PermissionActionCaseCreate, model.AuditSourceAPI); !errors.Is(err, quack.ErrAuthorizationDenied) {
+		t.Fatalf("expected live membership denial, got %v", err)
 	}
 }
 
@@ -173,6 +202,11 @@ func TestResolveDiscordStaffContextEvaluatesInteractionPermissions(t *testing.T)
 	store := newMigratedStore(t)
 	service := quack.NewGuildService(store, fakeDiscordClient{
 		botGuild: &quack.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "owner-1"},
+		authorization: &quack.DiscordGuildAuthorization{
+			Guild: quack.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "owner-1"},
+			Actor: quack.DiscordMemberAuthorization{DiscordUserID: "user-1", DisplayName: "Live Command User", Present: true, PermissionBits: uint64(discordgo.PermissionModerateMembers)},
+			Bot:   quack.DiscordMemberAuthorization{DiscordUserID: "quack", Present: true},
+		},
 	})
 
 	guildContext, err := service.ResolveDiscordStaffContext(context.Background(), quack.DiscordStaffContextInput{
@@ -185,7 +219,7 @@ func TestResolveDiscordStaffContextEvaluatesInteractionPermissions(t *testing.T)
 		t.Fatalf("resolve discord staff context: %v", err)
 	}
 
-	if guildContext.Staff.LastKnownDisplayName != "Command User" {
+	if guildContext.Staff.LastKnownDisplayName != "Live Command User" {
 		t.Fatalf("expected display name to be stored, got %q", guildContext.Staff.LastKnownDisplayName)
 	}
 	if !guildContext.Can(model.PermissionActionCaseCreate) {
@@ -200,6 +234,11 @@ func TestResolveDiscordStaffContextOwnerBypassAllowsAllActions(t *testing.T) {
 	store := newMigratedStore(t)
 	service := quack.NewGuildService(store, fakeDiscordClient{
 		botGuild: &quack.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "owner-1"},
+		authorization: &quack.DiscordGuildAuthorization{
+			Guild: quack.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "owner-1"},
+			Actor: quack.DiscordMemberAuthorization{DiscordUserID: "owner-1", Present: true},
+			Bot:   quack.DiscordMemberAuthorization{DiscordUserID: "quack", Present: true},
+		},
 	})
 
 	guildContext, err := service.ResolveDiscordStaffContext(context.Background(), quack.DiscordStaffContextInput{

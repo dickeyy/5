@@ -76,15 +76,40 @@ func TestQueueStopDrainsWithoutDeadlock(t *testing.T) {
 	}
 }
 
+func TestQueueStopContextCancelsActiveDependencyWork(t *testing.T) {
+	started := make(chan struct{})
+	q := New(1, 1)
+	q.Start(context.Background(), func(ctx context.Context, _ string) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	}, nil)
+	q.Submit(context.Background(), "case-1")
+	<-started
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := q.StopContext(shutdownCtx); err == nil {
+		t.Fatal("expected active handler to be bounded by shutdown deadline")
+	}
+}
+
 func TestQueueSaturationLeavesWorkDiscoverable(t *testing.T) {
 	q := New(1, 1)
 	block := make(chan struct{})
+	started := make(chan struct{})
+	var startedOnce sync.Once
 	q.Start(context.Background(), func(context.Context, string) error {
+		startedOnce.Do(func() { close(started) })
 		<-block
 		return nil
 	}, nil)
-	q.Submit(context.Background(), "one")
-	q.Submit(context.Background(), "two")
+	if !q.Submit(context.Background(), "one") {
+		t.Fatal("expected first immediate hint to be accepted")
+	}
+	<-started
+	if !q.Submit(context.Background(), "two") {
+		t.Fatal("expected second immediate hint to fill the queue")
+	}
 	if q.Submit(context.Background(), "three") {
 		t.Fatal("expected saturated queue to reject immediate hint")
 	}

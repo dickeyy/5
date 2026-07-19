@@ -1,137 +1,77 @@
 # Case Pipeline
 
-The case pipeline connects templates, permission-checked case creation, action
-row generation, and later queued execution. The creation logic starts in
-`internal/quack/cases.go`, while persistence lives in `internal/store/cases.go`.
+The case pipeline connects versioned templates, structured member-visible
+context, immutable Discord evidence, live authorization, optional enforcement,
+and one case-level notification. Core orchestration lives in
+`internal/quack/cases.go`; atomic persistence lives in
+`internal/store/cases.go`.
 
-## Inputs And Boundaries
+## Entrypoints
 
-Case creation is exposed through two entrypoints:
+- HTTP case creation: `POST /guilds/:discordGuildID/cases`.
+- Discord creation: `/case add` and the `Create moderation case` message
+  context command.
+- Staff reads: guild case search, detail, and member history.
+- Member reads: the registrars in `core_moderation_routes.go` use the
+  authenticated Discord identity, not current guild membership.
 
-- HTTP: `POST /guilds/:discordGuildID/cases` in `internal/httpapi/routes/cases.go`
-- Discord: `/case add` in `internal/discordbot/commands/case.go`
+`RegisterCoreModerationStaffRoutes` exposes template restore/import/export,
+void, failed-action, retry, dismissal, and reversal handlers without owning the
+central router. `RegisterCoreModerationMemberRoutes` exposes target-owned reads.
 
-Both entrypoints eventually call `CaseService.Create(...)` through
-`quack.Services`.
+## Atomic Creation Flow
 
-Staff dashboard case reads are exposed through the HTTP API:
+1. Validate guild, template, target, source, metadata, context, and the optional
+   idempotency key.
+2. Load an active template and select the highest reached all-time threshold.
+   Counts include the new case and only non-voided, non-v4-import cases for the
+   same guild, target, and template identity across versions.
+3. Refresh actor, bot, target, permissions, and both role hierarchies through
+   Discord. Reject unsafe targets or an action either actor cannot perform.
+4. Capture linked Discord messages before the database transaction. Enforce
+   message, embed, attachment, and total-work bounds. Eligible attachments are
+   copied to the managed staff-only evidence channel; a copy failure retains
+   metadata and becomes a visible partial-capture warning.
+5. Acquire the guild transaction lock and reselect the template version and
+   escalation. A concurrent change causes a retry instead of committing stale
+   preflight data.
+6. Snapshot context definitions/values, official reason, template version,
+   selected level, and its zero-or-one action.
+7. Atomically assign the never-reused guild case number and persist the case,
+   event, evidence, action work, notification work, and audits.
+8. Submit the case ID as a queue wake-up hint after commit.
 
-- `GET /guilds/:discordGuildID/cases`
-- `GET /guilds/:discordGuildID/cases/:caseRef`
-- `GET /guilds/:discordGuildID/users/:targetDiscordUserID/cases`
+An idempotency key maps repeated Discord interactions or HTTP requests to the
+same durable case and cannot be reused for a different target/template request.
 
-These routes require the same foundation staff permission used for case
-creation. `caseRef` resolves to a per-guild case number when it is numeric and
-to a case ULID otherwise. List routes use offset pagination and return newest
-cases first.
+## Reads And Privacy
 
-## Creation Flow
+Staff search supports case number, target, moderator, template, validity,
+action result, appeal status, RFC3339 date bounds, stable newest-first ordering,
+and bounded pagination. Detail includes snapshots, evidence, action attempts,
+events, and notification state.
 
-1. Validate guild context, permission, template ID, target user, source, and
-   metadata.
-2. Load the expanded template with `GetCaseTemplateExpanded`.
-3. Reject disabled or archived templates.
-4. Resolve the case reason from `reason_override` or the template
-   `reason_template`.
-5. Choose the selected template level based on prior case count for the same
-   target and template.
-6. Build `TemplateSnapshotJSON` so the case keeps the policy that was used at
-   creation time.
-7. Build action execution rows from the selected level actions.
-8. Add a generated `send_dm` execution first when the level itself has
-   `notify_user` enabled.
-9. Persist the case, initial case event, action executions, and audit row in
-   one transaction.
-10. Enqueue the case for asynchronous action processing.
+Member detail is available only to the target Discord identity. It includes the
+official reason, visible context/evidence, validity and correction link,
+selected outcome, public history, notification state, and appealability. It
+hides moderator identity, raw Discord errors/payloads, worker IDs, retry state,
+and staff-only evidence channel identity. Permission-sensitive reads are
+audited.
 
-## Level Selection Rules
+## Correction
 
-Level selection in `selectTemplateLevel` depends on:
+`CaseService.Void` requires a reason, preserves the case, appends public
+history, removes it from escalation, and cancels work that has not crossed an
+external-delivery boundary. A replacement is a new case with immutable links;
+case numbers are never reused. Action and notification failure never changes
+case validity.
 
-- `enabled`
-- `is_default`
-- `trigger_case_count`
-- `window_minutes`
+## Durable Boundaries
 
-The service counts prior non-voided cases for the same guild, template, and
-target user. Matching uses the current stored case history, not transient queue
-state.
-
-The default level acts as fallback when no escalation level matches. Validation
-in `internal/quack/templates.go` expects exactly one enabled default level.
-
-## Snapshot Contract
-
-`TemplateSnapshotJSON` is not just audit data. Runtime behavior depends on it.
-
-Current consumers include:
-
-- `continueOnError` in `internal/quack/actions.go`
-- API and Discord responses that expose selected level and action details
-
-Changing the snapshot shape needs migration discipline because old cases keep
-their stored JSON.
-
-## Dashboard Read Contract
-
-Case list responses include the selected level snapshot and current action
-summary for each case. Case detail responses include the case fields, template
-snapshot, action executions, action attempts grouped under each execution, and
-timeline events ordered oldest first.
-
-Target user history is the case list scoped to one Discord user plus summary
-counts by status and template. Audit log reads are exposed separately through
-`GET /guilds/:discordGuildID/audit-log`, require `audit.read`, and support
-offset pagination plus filters for actor, action, resource, and result.
-
-## Action Execution Rows
-
-For each selected template action, `CaseService.Create` snapshots:
-
-- action type
-- config JSON
-- notification settings
-- retry settings
-- whether the action is considered irreversible
-
-Storage then fills in:
-
-- ULIDs
-- `case_id`
-- default pending status
-- idempotency key in the form `case:<caseID>:action:<position>` when none is supplied
-
-`storage.CreateCase` also assigns the next per-guild case number inside the
-transaction.
-
-## Status Progression
-
-Initial case status is `open`. Later updates come from the action engine in
-`internal/store/updateCaseStatusFromActions`:
-
-- `action_running` while any execution is pending, running, or retrying
-- `completed` when all executions succeed or are otherwise terminal without failure
-- `failed` when any execution is failed
-
-Resolved timestamps are currently written automatically when the case reaches
-`completed` or `failed`.
-
-## Maintainability Notes
-
-- Warning notification is modeled as a generated internal action, not as a
-  direct side effect of case creation.
-- The template snapshot is the durable policy source for a created case; live
-  template edits do not rewrite old cases.
-- Action idempotency scope exists in template input and snapshots, but current
-  execution flow mainly relies on the stored per-row idempotency key.
-
-Relevant files:
-
-- `internal/quack/cases.go`
-- `internal/quack/audit.go`
-- `internal/quack/templates.go`
-- `internal/httpapi/routes/cases.go`
-- `internal/discordbot/commands/case.go`
-- `internal/store/cases.go`
-- `internal/store/templates.go`
-- `internal/quack/model/schema.go`
+- `TemplateSnapshotJSON` remains the understandable policy source for old
+  cases after template edits.
+- Evidence uses transport-neutral snapshots; Discord objects never enter core
+  persistence.
+- `notify_user` creates one `case_notifications` row, never a `send_dm` action.
+- Retired compatibility columns and events remain stored but do not shape live
+  v5 behavior.

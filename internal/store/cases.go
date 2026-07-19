@@ -8,10 +8,14 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/quackdiscord/bot/internal/quack/idutil"
 	"github.com/quackdiscord/bot/internal/quack/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+// retiredCaseEventTypes are preserved compatibility rows that must not cross the live v5 event boundary.
+var retiredCaseEventTypes = []string{"note_added", "note_edited", "note_deleted", "status_changed"}
 
 // CreateCaseParams aliases the core create case params contract so Store satisfies the port without maintaining a second data shape.
 type CreateCaseParams = model.CreateCaseParams
@@ -54,11 +58,11 @@ func (s *Store) CreateCase(ctx context.Context, params CreateCaseParams) (*Creat
 	if err := prepareULIDModel(&caseModel.ULIDModel, now); err != nil {
 		return nil, fmt.Errorf("prepare case model: %w", err)
 	}
-	if caseModel.Status == "" {
-		caseModel.Status = model.CaseStatusOpen
+	if caseModel.Validity == "" {
+		caseModel.Validity = model.CaseValidityValid
 	}
 	if caseModel.Source == "" {
-		caseModel.Source = model.CaseSourceAPI
+		caseModel.Source = model.CaseSourceDashboard
 	}
 	if caseModel.TemplateSnapshotJSON == "" {
 		caseModel.TemplateSnapshotJSON = "{}"
@@ -66,10 +70,18 @@ func (s *Store) CreateCase(ctx context.Context, params CreateCaseParams) (*Creat
 	if caseModel.MetadataJSON == "" {
 		caseModel.MetadataJSON = "{}"
 	}
+	if caseModel.ContextValuesJSON == "" {
+		caseModel.ContextValuesJSON = "[]"
+	}
 
 	event := params.Event
 	actionExecutions := make([]model.CaseActionExecution, len(params.ActionExecutions))
 	copy(actionExecutions, params.ActionExecutions)
+	evidence := make([]model.CaseEvidenceSnapshot, len(params.Evidence))
+	copy(evidence, params.Evidence)
+	attachments := make([]model.CaseEvidenceAttachment, len(params.Attachments))
+	copy(attachments, params.Attachments)
+	var notification *model.CaseNotification
 
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		caseNumber, err := nextCaseNumber(tx, caseModel.GuildID)
@@ -127,10 +139,67 @@ func (s *Store) CreateCase(ctx context.Context, params CreateCaseParams) (*Creat
 			}
 		}
 
+		for i := range evidence {
+			evidence[i].CaseID = caseModel.ID
+			evidence[i].GuildID = caseModel.GuildID
+			if evidence[i].EmbedsJSON == "" {
+				evidence[i].EmbedsJSON = "[]"
+			}
+			if err := prepareULIDModel(&evidence[i].ULIDModel, now); err != nil {
+				return err
+			}
+			if err := tx.Select("*").Create(&evidence[i]).Error; err != nil {
+				return fmt.Errorf("create case evidence: %w", err)
+			}
+		}
+		for i := range attachments {
+			if attachments[i].EvidenceID == "" {
+				return errors.New("evidence attachment has no snapshot")
+			}
+			if err := prepareULIDModel(&attachments[i].ULIDModel, now); err != nil {
+				return err
+			}
+			if err := tx.Select("*").Create(&attachments[i]).Error; err != nil {
+				return fmt.Errorf("create case evidence attachment: %w", err)
+			}
+		}
+		if params.Notification != nil {
+			copyValue := *params.Notification
+			copyValue.CaseID = caseModel.ID
+			if copyValue.Status == "" {
+				copyValue.Status = model.NotificationPending
+			}
+			if err := prepareULIDModel(&copyValue.ULIDModel, now); err != nil {
+				return err
+			}
+			if err := tx.Select("*").Create(&copyValue).Error; err != nil {
+				return fmt.Errorf("create case notification: %w", err)
+			}
+			notification = &copyValue
+		}
+		if caseModel.ReplacesCaseID != nil {
+			result := tx.Model(&model.Case{}).Where("id = ? AND guild_id = ? AND status = ? AND replacement_case_id IS NULL", *caseModel.ReplacesCaseID, caseModel.GuildID, model.CaseValidityVoided).Update("replacement_case_id", caseModel.ID)
+			if result.Error != nil {
+				return fmt.Errorf("link replacement case: %w", result.Error)
+			}
+			if result.RowsAffected != 1 {
+				return errors.New("replacement case is no longer available")
+			}
+		}
+
 		if params.Audit != nil {
 			audit := *params.Audit
 			audit.ResourceID = caseModel.ID
 			if err := createAuditLogEntry(tx, &audit, now); err != nil {
+				return err
+			}
+		}
+		for i := range params.AdditionalAudits {
+			entry := params.AdditionalAudits[i]
+			if entry.ResourceID == "" || entry.ResourceID == "unknown" {
+				entry.ResourceID = caseModel.ID
+			}
+			if err := createAuditLogEntry(tx, &entry, now); err != nil {
 				return err
 			}
 		}
@@ -145,6 +214,7 @@ func (s *Store) CreateCase(ctx context.Context, params CreateCaseParams) (*Creat
 		Case:             caseModel,
 		Event:            event,
 		ActionExecutions: actionExecutions,
+		Evidence:         evidence, Attachments: attachments, Notification: notification,
 	}, nil
 }
 
@@ -159,11 +229,8 @@ func (s *Store) CountTemplateCasesForTarget(ctx context.Context, params CountTem
 		Where("guild_id = ?", params.GuildID).
 		Where("template_id = ?", params.TemplateID).
 		Where("target_discord_user_id = ?", params.TargetDiscordUserID).
-		Where("status <> ?", model.CaseStatusVoided)
-	if params.Since != nil {
-		query = query.Where("created_at >= ?", *params.Since)
-	}
-
+		Where("status <> ?", model.CaseValidityVoided)
+	query = query.Where("source <> ?", model.CaseSourceV4Import)
 	var count int64
 	if err := query.Count(&count).Error; err != nil {
 		return 0, fmt.Errorf("count template cases for target: %w", err)
@@ -245,6 +312,96 @@ func (s *Store) GetCaseByIDOrNumber(ctx context.Context, guildID, caseRef string
 	return &caseModel, nil
 }
 
+// GetCaseByID retrieves a case without requiring current guild membership, for member-owned access checks performed by the service.
+func (s *Store) GetCaseByID(ctx context.Context, caseID string) (*model.Case, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("database not connected")
+	}
+	var item model.Case
+	result := s.db.WithContext(ctx).Where("id = ?", caseID).First(&item)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if result.Error != nil {
+		return nil, fmt.Errorf("get case by id: %w", result.Error)
+	}
+	return &item, nil
+}
+
+// GetCaseByIdempotencyKey retrieves the durable result of an externally retried case request.
+func (s *Store) GetCaseByIdempotencyKey(ctx context.Context, guildID, key string) (*model.Case, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("database not connected")
+	}
+	var item model.Case
+	result := s.db.WithContext(ctx).Where("guild_id = ? AND idempotency_key = ?", guildID, key).First(&item)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &item, nil
+}
+
+// VoidCase atomically changes only case validity and appends immutable correction history.
+func (s *Store) VoidCase(ctx context.Context, params model.VoidCaseParams) (*model.Case, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("database not connected")
+	}
+	now := time.Now().UTC()
+	var item model.Case
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND guild_id = ?", params.CaseID, params.GuildID).First(&item)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return gorm.ErrRecordNotFound
+		}
+		if result.Error != nil {
+			return result.Error
+		}
+		if item.Validity == model.CaseValidityVoided {
+			if item.VoidedReason == params.Reason {
+				return nil
+			}
+			return errors.New("case is already voided with a different reason")
+		}
+		item.Validity = model.CaseValidityVoided
+		item.VoidedReason = params.Reason
+		item.VoidedByDiscordUserID = params.ActorDiscordUserID
+		item.VoidedAt = &now
+		item.ReplacementCaseID = params.ReplacementCaseID
+		item.UpdatedAt = now
+		if err := tx.Select("*").Save(&item).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.CaseActionExecution{}).Where("case_id = ? AND status IN ?", item.ID, []model.ActionExecutionStatus{model.ActionExecutionPending, model.ActionExecutionRetrying}).Updates(map[string]any{"status": model.ActionExecutionCancelled, "last_error_code": "case_voided", "last_error": "case was voided before enforcement", "finished_at": now, "next_retry_at": nil}).Error; err != nil {
+			return fmt.Errorf("cancel voided case actions: %w", err)
+		}
+		if err := tx.Model(&model.CaseNotification{}).Where("case_id = ? AND status IN ?", item.ID, []model.NotificationStatus{model.NotificationPending, model.NotificationPrepared, model.NotificationClaimed}).Updates(map[string]any{"status": model.NotificationFailed, "last_error_code": "case_voided", "last_error": "case was voided before notification", "lease_token": "", "lease_expires_at": nil, "updated_at": now}).Error; err != nil {
+			return fmt.Errorf("cancel voided case notification: %w", err)
+		}
+		event := model.CaseEvent{CaseID: item.ID, EventType: model.CaseEventVoided, ActorDiscordUserID: params.ActorDiscordUserID, ActorType: "staff", Visibility: model.EventVisibilityPublic, Body: "Case voided", MetadataJSON: marshalJSONObject(map[string]any{"reason": params.Reason, "replacement_case_id": params.ReplacementCaseID})}
+		if err := appendCaseEvent(tx, &event, now); err != nil {
+			return err
+		}
+		if params.Audit != nil {
+			audit := *params.Audit
+			audit.ResourceID = item.ID
+			if err := createAuditLogEntry(tx, &audit, now); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
 // TargetCaseSummary encapsulates the target case summary rule so callers share one consistent package implementation.
 func (s *Store) TargetCaseSummary(ctx context.Context, guildID, targetDiscordUserID string) (*TargetCaseSummary, error) {
 	if s == nil || s.db == nil {
@@ -252,7 +409,7 @@ func (s *Store) TargetCaseSummary(ctx context.Context, guildID, targetDiscordUse
 	}
 
 	summary := &TargetCaseSummary{
-		ByStatus:   map[model.CaseStatus]int64{},
+		ByValidity: map[model.CaseValidity]int64{},
 		ByTemplate: map[string]int64{},
 	}
 
@@ -265,15 +422,15 @@ func (s *Store) TargetCaseSummary(ctx context.Context, guildID, targetDiscordUse
 		return nil, fmt.Errorf("count target cases: %w", err)
 	}
 
-	var statusRows []struct {
-		Status model.CaseStatus
-		Count  int64
+	var validityRows []struct {
+		Validity model.CaseValidity `gorm:"column:status"`
+		Count    int64
 	}
-	if err := targetCases().Select("status, COUNT(*) AS count").Group("status").Scan(&statusRows).Error; err != nil {
-		return nil, fmt.Errorf("count target cases by status: %w", err)
+	if err := targetCases().Select("status, COUNT(*) AS count").Group("status").Scan(&validityRows).Error; err != nil {
+		return nil, fmt.Errorf("count target cases by validity: %w", err)
 	}
-	for _, row := range statusRows {
-		summary.ByStatus[row.Status] = row.Count
+	for _, row := range validityRows {
+		summary.ByValidity[row.Validity] = row.Count
 	}
 
 	var templateRows []struct {
@@ -297,7 +454,11 @@ func (s *Store) ListCaseEvents(ctx context.Context, caseID string) ([]model.Case
 	}
 
 	var events []model.CaseEvent
-	if err := s.db.WithContext(ctx).Where("case_id = ?", caseID).Order("created_at ASC").Find(&events).Error; err != nil {
+	if err := s.db.WithContext(ctx).
+		Where("case_id = ?", caseID).
+		Where("event_type NOT IN ?", retiredCaseEventTypes).
+		Order("created_at ASC").
+		Find(&events).Error; err != nil {
 		return nil, fmt.Errorf("list case events: %w", err)
 	}
 
@@ -338,6 +499,60 @@ func (s *Store) ListCaseActionAttempts(ctx context.Context, executionIDs []strin
 	return attempts, nil
 }
 
+// GetCaseActionExecution retrieves one guild-scoped action for staff recovery controls.
+func (s *Store) GetCaseActionExecution(ctx context.Context, guildID, executionID string) (*model.CaseActionExecution, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("database not connected")
+	}
+	var item model.CaseActionExecution
+	result := s.db.WithContext(ctx).Where("id = ? AND case_id IN (SELECT id FROM cases WHERE guild_id = ?)", executionID, guildID).First(&item)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &item, nil
+}
+
+// ListCaseEvidence returns immutable snapshots and attachment metadata for one case.
+func (s *Store) ListCaseEvidence(ctx context.Context, caseID string) ([]model.CaseEvidenceSnapshot, []model.CaseEvidenceAttachment, error) {
+	if s == nil || s.db == nil {
+		return nil, nil, errors.New("database not connected")
+	}
+	var snapshots []model.CaseEvidenceSnapshot
+	if err := s.db.WithContext(ctx).Where("case_id = ?", caseID).Order("created_at ASC").Find(&snapshots).Error; err != nil {
+		return nil, nil, fmt.Errorf("list case evidence: %w", err)
+	}
+	ids := make([]string, 0, len(snapshots))
+	for _, item := range snapshots {
+		ids = append(ids, item.ID)
+	}
+	var attachments []model.CaseEvidenceAttachment
+	if len(ids) > 0 {
+		if err := s.db.WithContext(ctx).Where("evidence_id IN ?", ids).Order("created_at ASC").Find(&attachments).Error; err != nil {
+			return nil, nil, fmt.Errorf("list evidence attachments: %w", err)
+		}
+	}
+	return snapshots, attachments, nil
+}
+
+// GetCaseNotification returns the one notification record when the selected level enabled member delivery.
+func (s *Store) GetCaseNotification(ctx context.Context, caseID string) (*model.CaseNotification, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("database not connected")
+	}
+	var item model.CaseNotification
+	result := s.db.WithContext(ctx).Where("case_id = ?", caseID).First(&item)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if result.Error != nil {
+		return nil, fmt.Errorf("get case notification: %w", result.Error)
+	}
+	return &item, nil
+}
+
 // filteredCasesQuery encapsulates the filtered cases query rule so callers share one consistent package implementation.
 func filteredCasesQuery(query *gorm.DB, params ListCasesParams) *gorm.DB {
 	query = query.Where("guild_id = ?", params.GuildID)
@@ -350,8 +565,23 @@ func filteredCasesQuery(query *gorm.DB, params ListCasesParams) *gorm.DB {
 	if params.TemplateID != "" {
 		query = query.Where("template_id = ?", params.TemplateID)
 	}
-	if params.Status != "" {
-		query = query.Where("status = ?", params.Status)
+	if params.Validity != "" {
+		query = query.Where("status = ?", params.Validity)
+	}
+	if params.CaseNumber != "" {
+		query = query.Where("case_number = ?", params.CaseNumber)
+	}
+	if params.CreatedAfter != "" {
+		query = query.Where("created_at >= ?", params.CreatedAfter)
+	}
+	if params.CreatedBefore != "" {
+		query = query.Where("created_at <= ?", params.CreatedBefore)
+	}
+	if params.ActionResult != "" {
+		query = query.Where("EXISTS (SELECT 1 FROM case_action_executions cae WHERE cae.case_id = cases.id AND cae.status = ?)", params.ActionResult)
+	}
+	if params.AppealStatus != "" {
+		query = query.Where("EXISTS (SELECT 1 FROM appeals a WHERE a.case_id = cases.id AND a.status = ?)", params.AppealStatus)
 	}
 	return query
 }
@@ -406,7 +636,7 @@ func (s *Store) ClaimNextCaseAction(ctx context.Context, params ClaimCaseActionP
 
 		var running int64
 		if err := tx.Model(&model.CaseActionExecution{}).
-			Where("case_id = ? AND status = ?", params.CaseID, model.ActionExecutionRunning).
+			Where("case_id = ? AND status = ? AND lease_expires_at > ?", params.CaseID, model.ActionExecutionRunning, now).
 			Count(&running).Error; err != nil {
 			return fmt.Errorf("count running case actions: %w", err)
 		}
@@ -416,11 +646,7 @@ func (s *Store) ClaimNextCaseAction(ctx context.Context, params ClaimCaseActionP
 
 		var execution model.CaseActionExecution
 		result = tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("case_id = ? AND status IN ? AND (next_retry_at IS NULL OR next_retry_at <= ?)",
-				params.CaseID,
-				[]model.ActionExecutionStatus{model.ActionExecutionPending, model.ActionExecutionRetrying},
-				now,
-			).
+			Where("case_id = ? AND ((status IN ? AND (next_retry_at IS NULL OR next_retry_at <= ?)) OR (status = ? AND lease_expires_at <= ?))", params.CaseID, []model.ActionExecutionStatus{model.ActionExecutionPending, model.ActionExecutionRetrying}, now, model.ActionExecutionRunning, now).
 			Order("position ASC").
 			Limit(1).
 			Find(&execution)
@@ -432,21 +658,50 @@ func (s *Store) ClaimNextCaseAction(ctx context.Context, params ClaimCaseActionP
 		}
 
 		execution.Status = model.ActionExecutionRunning
+		if execution.AttemptCount > 0 {
+			var prior model.CaseActionAttempt
+			priorResult := tx.Where("execution_id = ? AND attempt_number = ? AND status = ?", execution.ID, execution.AttemptCount, model.ActionAttemptRunning).First(&prior)
+			if priorResult.Error == nil {
+				prior.Status = model.ActionAttemptFailed
+				prior.FinishedAt = &now
+				prior.DurationMS = now.Sub(prior.StartedAt).Milliseconds()
+				prior.ErrorCode = "lease_expired"
+				prior.ErrorMessage = "worker lease expired before completion"
+				prior.UpdatedAt = now
+				if err := tx.Select("*").Save(&prior).Error; err != nil {
+					return fmt.Errorf("close expired action attempt: %w", err)
+				}
+				if err := createAuditLogEntry(tx, &model.AuditLogEntry{GuildID: caseModel.GuildID, Source: model.AuditSourceSystem, Action: string(model.AuditActionActionRecovered), ResourceType: "case_action_execution", ResourceID: execution.ID, Result: model.AuditResultFailure, FailureReason: "lease_expired", CorrelationID: firstNonEmpty(execution.CorrelationID, caseModel.CorrelationID), MetadataJSON: marshalJSONObject(map[string]any{"case_id": caseModel.ID, "attempt_number": prior.AttemptNumber, "recovery": "lease_reclaimed"})}, now); err != nil {
+					return err
+				}
+			} else if !errors.Is(priorResult.Error, gorm.ErrRecordNotFound) {
+				return priorResult.Error
+			}
+		}
 		execution.AttemptCount++
 		execution.StartedAt = &now
 		execution.FinishedAt = nil
 		execution.NextRetryAt = nil
+		leaseToken, err := idutil.NewULID()
+		if err != nil {
+			return fmt.Errorf("create action lease token: %w", err)
+		}
+		leaseExpiry := now.Add(2 * time.Minute)
+		execution.LeaseToken = leaseToken
+		execution.LeaseExpiresAt = &leaseExpiry
 		execution.UpdatedAt = now
 		if err := tx.Select("*").Save(&execution).Error; err != nil {
 			return fmt.Errorf("mark case action running: %w", err)
 		}
-
-		if caseModel.Status == model.CaseStatusOpen {
-			caseModel.Status = model.CaseStatusActionRunning
-			caseModel.UpdatedAt = now
-			if err := tx.Save(&caseModel).Error; err != nil {
-				return fmt.Errorf("mark case action running: %w", err)
-			}
+		attempt := model.CaseActionAttempt{ExecutionID: execution.ID, AttemptNumber: execution.AttemptCount, Status: model.ActionAttemptRunning, WorkerID: params.WorkerID, StartedAt: now, RequestPayloadJSON: "{}", ResponsePayloadJSON: "{}"}
+		if err := prepareULIDModel(&attempt.ULIDModel, now); err != nil {
+			return err
+		}
+		if err := tx.Select("*").Create(&attempt).Error; err != nil {
+			return fmt.Errorf("create running action attempt: %w", err)
+		}
+		if err := createAuditLogEntry(tx, &model.AuditLogEntry{GuildID: caseModel.GuildID, Source: model.AuditSourceSystem, Action: string(model.AuditActionActionAttempt), ResourceType: "case_action_execution", ResourceID: execution.ID, Result: model.AuditResultSuccess, CorrelationID: firstNonEmpty(execution.CorrelationID, caseModel.CorrelationID), MetadataJSON: marshalJSONObject(map[string]any{"case_id": caseModel.ID, "attempt_number": attempt.AttemptNumber, "status": attempt.Status})}, now); err != nil {
+			return err
 		}
 
 		claimed = &ClaimedCaseAction{
@@ -471,14 +726,20 @@ func (s *Store) CompleteCaseAction(ctx context.Context, params CompleteCaseActio
 	now := time.Now().UTC()
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var execution model.CaseActionExecution
-		result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ?", params.ExecutionID).
+		query := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", params.ExecutionID)
+		if params.LeaseToken != "" {
+			query = query.Where("lease_token = ?", params.LeaseToken)
+		}
+		result := query.
 			Limit(1).
 			Find(&execution)
 		if result.Error != nil {
 			return fmt.Errorf("get case action execution: %w", result.Error)
 		}
 		if result.RowsAffected == 0 {
+			if params.LeaseToken != "" {
+				return errors.New("case action lease is stale")
+			}
 			return nil
 		}
 
@@ -493,27 +754,30 @@ func (s *Store) CompleteCaseAction(ctx context.Context, params CompleteCaseActio
 		if execution.StartedAt != nil {
 			startedAt = *execution.StartedAt
 		}
-		attempt := model.CaseActionAttempt{
-			ExecutionID:         execution.ID,
-			AttemptNumber:       params.AttemptNumber,
-			Status:              params.AttemptStatus,
-			WorkerID:            params.WorkerID,
-			StartedAt:           startedAt,
-			FinishedAt:          &now,
-			DurationMS:          now.Sub(startedAt).Milliseconds(),
-			ErrorCode:           params.ErrorCode,
-			ErrorMessage:        params.ErrorMessage,
-			RequestPayloadJSON:  params.RequestPayloadJSON,
-			ResponsePayloadJSON: params.ResponsePayloadJSON,
+		attemptNumber := params.AttemptNumber
+		if attemptNumber == 0 {
+			attemptNumber = execution.AttemptCount
 		}
-		if attempt.AttemptNumber == 0 {
-			attempt.AttemptNumber = execution.AttemptCount
+		var attempt model.CaseActionAttempt
+		attemptResult := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("execution_id = ? AND attempt_number = ?", execution.ID, attemptNumber).First(&attempt)
+		if errors.Is(attemptResult.Error, gorm.ErrRecordNotFound) {
+			attempt = model.CaseActionAttempt{ExecutionID: execution.ID, AttemptNumber: attemptNumber, StartedAt: startedAt, WorkerID: params.WorkerID}
+			if err := prepareULIDModel(&attempt.ULIDModel, now); err != nil {
+				return err
+			}
+		} else if attemptResult.Error != nil {
+			return attemptResult.Error
 		}
-		if err := prepareULIDModel(&attempt.ULIDModel, now); err != nil {
-			return fmt.Errorf("prepare case action attempt model: %w", err)
-		}
-		if err := tx.Select("*").Create(&attempt).Error; err != nil {
-			return fmt.Errorf("create case action attempt: %w", err)
+		attempt.Status = params.AttemptStatus
+		attempt.FinishedAt = &now
+		attempt.DurationMS = now.Sub(attempt.StartedAt).Milliseconds()
+		attempt.ErrorCode = params.ErrorCode
+		attempt.ErrorMessage = params.ErrorMessage
+		attempt.RequestPayloadJSON = params.RequestPayloadJSON
+		attempt.ResponsePayloadJSON = params.ResponsePayloadJSON
+		attempt.UpdatedAt = now
+		if err := tx.Select("*").Save(&attempt).Error; err != nil {
+			return fmt.Errorf("complete case action attempt: %w", err)
 		}
 
 		execution.Status = params.ExecutionStatus
@@ -521,6 +785,8 @@ func (s *Store) CompleteCaseAction(ctx context.Context, params CompleteCaseActio
 		execution.LastError = params.ErrorMessage
 		execution.FinishedAt = &now
 		execution.NextRetryAt = params.NextRetryAt
+		execution.LeaseToken = ""
+		execution.LeaseExpiresAt = nil
 		execution.UpdatedAt = now
 		if params.ExecutionStatus == model.ActionExecutionRetrying {
 			execution.FinishedAt = nil
@@ -534,7 +800,7 @@ func (s *Store) CompleteCaseAction(ctx context.Context, params CompleteCaseActio
 				CaseID:       execution.CaseID,
 				EventType:    params.EventType,
 				ActorType:    "system",
-				Visibility:   model.EventVisibilityStaff,
+				Visibility:   model.EventVisibilityPublic,
 				Body:         params.EventBody,
 				MetadataJSON: params.EventMetadataJSON,
 			}
@@ -550,7 +816,7 @@ func (s *Store) CompleteCaseAction(ctx context.Context, params CompleteCaseActio
 			return err
 		}
 
-		return updateCaseStatusFromActions(tx, execution.CaseID, now)
+		return nil
 	})
 }
 
@@ -585,7 +851,7 @@ func (s *Store) SkipCaseActions(ctx context.Context, params SkipCaseActionsParam
 			}
 		}
 
-		return updateCaseStatusFromActions(tx, params.CaseID, now)
+		return nil
 	})
 }
 
@@ -661,7 +927,10 @@ func createSkippedCaseActionAudit(tx *gorm.DB, execution model.CaseActionExecuti
 	}, now)
 }
 
-// ListExecutableCaseIDs returns executable case ids subject to authorization, ordering, and filtering constraints.
+// ListExecutableCaseIDs returns a bounded guild-fair executable-case batch.
+// Every active guild receives one slot before a busy guild receives another,
+// and the cursor rotates across calls when the batch is smaller than the guild
+// count. ClaimNextCaseAction remains the authoritative transactional fence.
 func (s *Store) ListExecutableCaseIDs(ctx context.Context, limit int) ([]string, error) {
 	if s == nil || s.db == nil {
 		return nil, errors.New("database not connected")
@@ -670,24 +939,63 @@ func (s *Store) ListExecutableCaseIDs(ctx context.Context, limit int) ([]string,
 		limit = 100
 	}
 
+	s.executableMu.Lock()
+	defer s.executableMu.Unlock()
+
 	now := time.Now().UTC()
 	var rows []struct {
-		CaseID string
+		CaseID  string
+		GuildID string
 	}
-	if err := s.db.WithContext(ctx).
-		Model(&model.CaseActionExecution{}).
-		Select("case_id").
-		Where("status IN ? AND (next_retry_at IS NULL OR next_retry_at <= ?)", []model.ActionExecutionStatus{model.ActionExecutionPending, model.ActionExecutionRetrying}, now).
-		Group("case_id").
-		Order("MIN(position) ASC").
-		Limit(limit).
-		Scan(&rows).Error; err != nil {
+	query := `
+WITH executable_cases AS (
+    SELECT e.case_id,
+           c.guild_id,
+           MIN(e.position) AS first_position,
+           MIN(COALESCE(e.next_retry_at, e.lease_expires_at, e.created_at)) AS ready_at
+      FROM case_action_executions AS e
+      JOIN cases AS c ON c.id = e.case_id
+     WHERE ((e.status IN (?, ?) AND (e.next_retry_at IS NULL OR e.next_retry_at <= ?))
+            OR (e.status = ? AND e.lease_expires_at <= ?))
+     GROUP BY e.case_id, c.guild_id
+), ranked_cases AS (
+    SELECT case_id,
+           guild_id,
+           first_position,
+           ready_at,
+           ROW_NUMBER() OVER (
+               PARTITION BY guild_id
+               ORDER BY first_position ASC, ready_at ASC, case_id ASC
+           ) AS guild_rank
+      FROM executable_cases
+)
+SELECT case_id, guild_id
+  FROM ranked_cases
+ ORDER BY guild_rank ASC,
+          CASE WHEN guild_id > ? THEN 0 ELSE 1 END ASC,
+          guild_id ASC,
+          first_position ASC,
+          ready_at ASC,
+          case_id ASC
+ LIMIT ?`
+	if err := s.db.WithContext(ctx).Raw(query,
+		model.ActionExecutionPending,
+		model.ActionExecutionRetrying,
+		now,
+		model.ActionExecutionRunning,
+		now,
+		s.executableGuildCursor,
+		limit,
+	).Scan(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list executable case ids: %w", err)
 	}
 
 	caseIDs := make([]string, 0, len(rows))
 	for _, row := range rows {
 		caseIDs = append(caseIDs, row.CaseID)
+	}
+	if len(rows) > 0 {
+		s.executableGuildCursor = rows[len(rows)-1].GuildID
 	}
 	return caseIDs, nil
 }
@@ -718,43 +1026,6 @@ func appendCaseEvent(tx *gorm.DB, event *model.CaseEvent, now time.Time) error {
 	}
 	if err := tx.Select("*").Create(event).Error; err != nil {
 		return fmt.Errorf("create case event: %w", err)
-	}
-	return nil
-}
-
-// updateCaseStatusFromActions updates case status from actions while retaining validation, compatibility, and audit requirements.
-func updateCaseStatusFromActions(tx *gorm.DB, caseID string, now time.Time) error {
-	var executions []model.CaseActionExecution
-	if err := tx.Where("case_id = ?", caseID).Find(&executions).Error; err != nil {
-		return fmt.Errorf("list case actions for status: %w", err)
-	}
-	if len(executions) == 0 {
-		return nil
-	}
-
-	nextStatus := model.CaseStatusCompleted
-	for _, execution := range executions {
-		switch execution.Status {
-		case model.ActionExecutionFailed:
-			nextStatus = model.CaseStatusFailed
-		case model.ActionExecutionPending, model.ActionExecutionRunning, model.ActionExecutionRetrying:
-			if nextStatus != model.CaseStatusFailed {
-				nextStatus = model.CaseStatusActionRunning
-			}
-		}
-	}
-
-	updates := map[string]any{
-		"status":     nextStatus,
-		"updated_at": now,
-	}
-	if nextStatus == model.CaseStatusCompleted || nextStatus == model.CaseStatusFailed {
-		updates["resolved_at"] = now
-		updates["resolved_by_discord_user_id"] = "system"
-	}
-
-	if err := tx.Model(&model.Case{}).Where("id = ?", caseID).Updates(updates).Error; err != nil {
-		return fmt.Errorf("update case status: %w", err)
 	}
 	return nil
 }

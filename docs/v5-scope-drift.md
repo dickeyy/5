@@ -17,66 +17,84 @@ The current backend already supports important parts of the intended v5 directio
 - Action rows are persisted so work can recover after queue saturation or process restart.
 - Discord interactions support deferred work, public case results, template autocomplete, and reusable UI components.
 - Template and case reads are available for staff dashboard workflows.
+- Production schema changes use an ordered, checksum-tracked migration ledger
+  that adopts current v5 data additively without startup `AutoMigrate`.
+- Live template contracts now use all-time distinct thresholds, archive-only
+  availability, level-owned notification, and zero or one typed enforcement
+  action. Frozen legacy columns remain storage-only compatibility data.
+- Live case contracts now use only valid/voided validity and the dashboard,
+  Discord, honeypot, and v4-import sources. Action and appeal state remain
+  separate, and the official reason always comes from the immutable template
+  snapshot source.
+- Severity, weight, reason overrides, and free-form note lifecycle are absent
+  from live case models and contracts. Migration 0003 preserves legacy columns
+  and events, inventories retired event rows, and exposes none of them through
+  live v5 case/event reads.
+- GuildCreate bootstrap now atomically persists guild-owned channel and
+  notification settings, independent optional-module enablement, the exact
+  editable starter policy, and its one-time dashboard review notice. Guild
+  update, leave, rejoin, and channel-deletion events preserve history while
+  refreshing identity and clearing stale configured references.
+- Templates now own validated ordered context definitions, reversible archive
+  and restore, and confirmed policy-only import/export. Case snapshots preserve
+  definitions and submitted member-visible values across versions.
+- Case creation now atomically stores immutable evidence, correction links,
+  optional enforcement, and exactly-one notification work. All-time escalation
+  excludes voided and imported-v4 history.
+- Discord timeout, kick, ban, timeout removal, and unban use classified,
+  redacted outcomes. Action leases/fencing recover crashes; staff can review,
+  retry, dismiss, void, or reverse without deleting history.
+- Member notification is a case-level post-outcome workflow rather than a
+  `send_dm` action. Evidence capture and managed attachment copies share one
+  bounded HTTP/Discord service.
+- The QP-D package now provides target-owned case summaries/details, the final
+  case-linked appeal state machine, form snapshots, atomic acceptance/voiding,
+  audited timelines, notification outbox/adapters, and explicit reversal
+  offers without relying on current Discord membership.
+- QI-2 installs the QP-D member/staff routes, appeal migration and outbox,
+  reversal components, QP-E audit/statistics routes and mirror lifecycle, and
+  QP-F honeypot runtime on the live process boundary.
+- QP-G installs a privacy-safe, idempotent v4 historical-case import contract,
+  non-escalating projections, command cutover validation, restore manifests,
+  archive-only live template storage, and final storage constraints without
+  coupling unfinished module history into core import.
+- QP-H installs the complete dashboard/internal endpoint policy, durable Redis
+  Discord dedupe, separate liveness/readiness, aggregate metrics, strict startup
+  validation, redacted operational logging, and bounded shutdown contracts.
 
 ## Behavior That Must Change
 
-The current implementation differs from the v5 definition in several core rules:
-
-- Escalation currently supports per-level time windows. V5 uses all-time non-voided case counts only.
-- Templates and levels currently have enabled states in addition to archive behavior. V5 uses reversible archive as the only availability state.
-- Case creation currently accepts a moderator reason override. V5 keeps the admin-defined reason fixed and collects context separately.
-- A level currently supports several ordered actions. V5 permits zero or one timeout, kick, or ban action per level.
-- Action configuration currently exposes more execution details than v5 allows. V5 exposes only meaningful moderation settings and a safe retry-count limit.
-- Member notification can currently be represented as level and action notifications. V5 sends at most one structured notification for a case.
-- Case status currently mixes case validity with action progress and appeal state. V5 treats case validity as valid or voided and tracks actions and appeals separately.
-- Current case permissions do not fully enforce the actor's matching timeout, kick, or ban permission before case creation.
-- The current dashboard guild flow is staff-focused and does not yet provide case-owner access for members who left or were banned.
-- Template import, export, restore, and automatic starter policy behavior are not yet defined in the running product.
+No storage or integration-owned product mismatch remains in this section.
 
 ## Rejected Concepts to Remove
 
 These concepts appear in current models, documentation, or backlog history but do not belong in the v5 product model:
 
-- Severity and weight as case or template policy.
-- Escalation time windows.
-- A separate enabled state for templates or levels.
-- Moderator-provided reason overrides.
-- Multiple enforcement actions on one level.
 - Cross-template or cross-guild escalation.
-- Private or public free-form case notes.
-- Detailed case lifecycle states that duplicate action or appeal state.
 - Direct `/warn`, `/timeout`, `/kick`, and `/ban` workflows after migration.
 - Generic bot utilities as requirements for the moderation core.
 
 Historical database compatibility may require a later migration rather than immediate column removal. Keeping old data temporarily does not make the rejected concept part of the product.
 
+The accepted QP-G storage head retires live GORM soft-delete semantics while
+preserving the frozen compatibility column, converts residual legacy delete
+state to archive state in logical migration 0410, and provides command-scope
+checks plus the documented cutover that removes direct punishment commands.
+
 ## Missing Core Behavior
 
-The intended v5 core still requires product behavior that is not complete today:
+The accepted QP-G package supplies the final privacy-safe, idempotent v4
+historical-case importer, batch/source ledgers, dry-run and rollback controls,
+non-escalating history projection, and direct-command cutover validation.
 
-- Real Discord timeout, kick, and ban execution.
-- Strict target, permission, and role-hierarchy checks before creating a punitive case.
-- One-action-per-level validation and simplified action settings.
-- Safe automatic retry classification and staff-controlled retry, dismiss, and void actions.
-- One structured member notification sent after the action outcome is known.
-- Structured template context fields shared by Discord and the dashboard.
-- Discord message context actions and pasted-link evidence capture.
-- Permanent message snapshots and attachment preservation through a managed evidence channel.
-- Member-facing case access with the agreed transparency and staff-identity rules.
-- Case voiding and replacement behavior.
-- A complete case-linked appeal flow.
-- Searchable audit views and optional Discord audit mirroring for all moderators.
-- Derived staff statistics.
-- V4 historical-case import that does not affect escalation.
-- Removal of legacy direct moderation commands after migration.
+QP-E's audit/statistics contracts and the separately owned appeal/honeypot
+contracts are installed on the combined QI-2 runtime anchor.
 
 ## Optional Modules Must Stay Separate
 
-Some v4 features remain part of Quack v5 as optional guild modules, not as extensions of the case model:
+Some v4 features remain part of Quack v5 as optional guild modules, not as extensions of the case model. Tickets and general logging now implement this boundary through the isolated module registry, lifecycle, Discord adapter, route, migration, and privacy contracts documented in `docs/modules/optional-tickets-and-logging.md`.
 
-- Tickets remain private Discord support threads with their own lifecycle and transcripts.
-- General logging sends selected Discord events to staff log channels and remains separate from the audit log.
-- Honeypots may invoke a configured template automatically, but the resulting moderation still uses the normal case, action, notification, and audit flow.
+- Honeypots now invoke a configured template through an injected normal-case application boundary, with system attribution, message deduplication, drift disablement, isolated statistics/migration/runtime contracts, and no direct case or action storage access. QI-2 supplies the production system-only adapter, authoritative Discord projections/validators, central routes and frozen logical-0300 migration, drift forwarding, conditional intents, and bounded runtime lifecycle described in `docs/modules/optional-honeypots.md`.
 
 Purge, lockdown, ping, server information, and similar utilities may be considered later. They should not add fields, permissions, or special cases to the core moderation system.
 

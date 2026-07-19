@@ -19,6 +19,7 @@ type Context struct {
 type Responder interface {
 	EditOriginal(Edit) (*discordgo.Message, error)
 	Followup(Message) (*discordgo.Message, error)
+	EditFollowup(string, Edit) (*discordgo.Message, error)
 	DeleteOriginal() error
 	UpdateMessage(Edit) (*discordgo.Message, error)
 }

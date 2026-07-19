@@ -80,6 +80,15 @@ Run the test suite:
 go test ./...
 ```
 
+Apply only database migrations without starting the other adapters:
+
+```sh
+go run ./cmd/quack-migrate up
+```
+
+See [`migrations.md`](migrations.md) before any production forward or rollback
+operation.
+
 When you need a stable local cache path on macOS, this repo has previously been
 run with:
 
@@ -109,8 +118,8 @@ Discord commands.
 - The authoritative product definition lives in `v5.md`.
 - High-level differences between that definition and the current backend live
   in `docs/v5-scope-drift.md`.
-- CORS is currently fixed to localhost port `3000`, which matters whenever the
-  dashboard moves ports.
+- Development CORS defaults to localhost port `3000`; production requires an
+  explicit exact-origin allowlist and fails startup when it is absent.
 - Action execution is in-process, not an external worker service.
 
 Relevant files:

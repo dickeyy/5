@@ -154,3 +154,22 @@ func TestCustomIDRejectsInvalidAndTooLongValues(t *testing.T) {
 		t.Fatalf("expected too long custom id error, got %v", err)
 	}
 }
+
+func FuzzCustomIDCodec(f *testing.F) {
+	f.Add("case:next:v1:target=123")
+	f.Add("case:missing")
+	f.Add("")
+	f.Fuzz(func(t *testing.T, encoded string) {
+		decoded, err := ui.DecodeCustomID(encoded)
+		if err != nil {
+			return
+		}
+		roundTrip, err := ui.EncodeCustomID(decoded)
+		if err != nil {
+			t.Fatalf("decoded custom ID could not be encoded: %v", err)
+		}
+		if roundTrip != strings.TrimSpace(encoded) {
+			t.Fatalf("custom ID round trip changed value: got %q want %q", roundTrip, strings.TrimSpace(encoded))
+		}
+	})
+}

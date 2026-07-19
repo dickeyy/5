@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,6 +47,45 @@ func TestSetupRoutesStatus(t *testing.T) {
 	}
 	if body["database"]["connected"] != false {
 		t.Fatalf("expected database to be disconnected in route smoke test")
+	}
+}
+
+func TestSetupRoutesMountsCoreModerationRegistrarsInProductionRouter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	SetupRoutes(router, quack.New(nil))
+
+	routes := map[string]bool{}
+	for _, route := range router.Routes() {
+		routes[route.Method+" "+route.Path] = true
+	}
+	want := []struct {
+		method string
+		path   string
+		call   string
+	}{
+		{http.MethodPost, "/guilds/:discordGuildID/templates/:templateID/restore", "/guilds/guild/templates/template/restore"},
+		{http.MethodGet, "/guilds/:discordGuildID/templates/:templateID/export", "/guilds/guild/templates/template/export"},
+		{http.MethodPost, "/guilds/:discordGuildID/templates/import", "/guilds/guild/templates/import"},
+		{http.MethodPost, "/guilds/:discordGuildID/cases/:caseRef/void", "/guilds/guild/cases/1/void"},
+		{http.MethodGet, "/guilds/:discordGuildID/action-failures", "/guilds/guild/action-failures"},
+		{http.MethodPost, "/guilds/:discordGuildID/action-failures/:executionID/retry", "/guilds/guild/action-failures/execution/retry"},
+		{http.MethodPost, "/guilds/:discordGuildID/action-failures/:executionID/dismiss", "/guilds/guild/action-failures/execution/dismiss"},
+		{http.MethodPost, "/guilds/:discordGuildID/cases/:caseRef/reversals", "/guilds/guild/cases/1/reversals"},
+		{http.MethodGet, "/members/me/guilds/:guildID/cases", "/members/me/guilds/guild/cases"},
+		{http.MethodGet, "/members/me/cases/:caseID", "/members/me/cases/case"},
+	}
+	for _, route := range want {
+		if !routes[route.method+" "+route.path] {
+			t.Errorf("production router is missing %s %s", route.method, route.path)
+			continue
+		}
+		request := httptest.NewRequest(route.method, route.call, nil)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusUnauthorized {
+			t.Errorf("mounted route %s %s bypassed authentication or fell through: status=%d body=%s", route.method, route.call, response.Code, response.Body.String())
+		}
 	}
 }
 
@@ -112,11 +152,18 @@ func TestOpsStatusRouteRequiresKey(t *testing.T) {
 	if err := json.Unmarshal(allowedResponse.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode ops body: %v", err)
 	}
-	if body.Scope != "global" || len(body.Actions.Capabilities) != 4 {
+	if body.Scope != "global" || len(body.Actions.Capabilities) != 5 {
 		t.Fatalf("unexpected ops body: %+v", body)
 	}
-	if body.Actions.Capabilities[1].Executable || body.Actions.Capabilities[1].Status != "not_implemented" {
-		t.Fatalf("expected punitive actions to be visible as unsupported, got %+v", body.Actions.Capabilities)
+	for _, capability := range body.Actions.Capabilities[:3] {
+		if !capability.Executable || capability.Status != "implemented" {
+			t.Fatalf("expected punitive actions to be executable, got %+v", body.Actions.Capabilities)
+		}
+	}
+	for _, capability := range body.Actions.Capabilities[3:] {
+		if !capability.Executable || capability.Status != "staff_confirmed_reversal" {
+			t.Fatalf("expected reversals to require staff confirmation, got %+v", body.Actions.Capabilities)
+		}
 	}
 }
 
@@ -283,6 +330,7 @@ func TestListUserGuildsRouteAuthenticated(t *testing.T) {
 			{ID: "guild-1", Name: "Guild One", Owner: true},
 			{ID: "guild-2", Name: "Guild Two", Permissions: uint64(discordgo.PermissionManageGuild)},
 			{ID: "guild-3", Name: "Guild Three", Permissions: uint64(discordgo.PermissionSendMessages)},
+			{ID: "guild-4", Name: "Guild Four", Permissions: uint64(discordgo.PermissionModerateMembers)},
 		},
 		botGuilds: []quack.DiscordBotGuild{{ID: "guild-2", Name: "Guild Two"}},
 	})
@@ -310,6 +358,7 @@ func TestListUserGuildsRouteAuthenticated(t *testing.T) {
 			DiscordGuildID string `json:"discord_guild_id"`
 			Name           string `json:"name"`
 			CanManageGuild bool   `json:"can_manage_guild"`
+			CanModerate    bool   `json:"can_moderate"`
 			QuackInGuild   bool   `json:"quack_in_guild"`
 		} `json:"guilds"`
 	}
@@ -317,14 +366,17 @@ func TestListUserGuildsRouteAuthenticated(t *testing.T) {
 		t.Fatalf("decode guild list response: %v", err)
 	}
 
-	if len(body.Guilds) != 2 {
-		t.Fatalf("expected only manageable guilds, got %+v", body.Guilds)
+	if len(body.Guilds) != 3 {
+		t.Fatalf("expected current Quack-capable guilds, got %+v", body.Guilds)
 	}
 	if body.Guilds[0].DiscordGuildID != "guild-1" || !body.Guilds[0].CanManageGuild || body.Guilds[0].QuackInGuild {
 		t.Fatalf("unexpected first guild: %+v", body.Guilds[0])
 	}
 	if body.Guilds[1].DiscordGuildID != "guild-2" || !body.Guilds[1].QuackInGuild {
 		t.Fatalf("unexpected second guild: %+v", body.Guilds[1])
+	}
+	if body.Guilds[2].DiscordGuildID != "guild-4" || body.Guilds[2].CanManageGuild || !body.Guilds[2].CanModerate {
+		t.Fatalf("expected Moderate Members guild entry, got %+v", body.Guilds[2])
 	}
 }
 
@@ -427,6 +479,212 @@ func TestTemplateRoutesCreateUpdateDelete(t *testing.T) {
 	}
 }
 
+func TestTemplateRoutesRejectRetiredProductFields(t *testing.T) {
+	router, sessionID := newTemplateRouteHarness(t, uint64(discordgo.PermissionManageGuild))
+	payload := strings.Replace(templateRoutePayload("retired-field"), `"levels": [`, `"enabled": true, "levels": [`, 1)
+	request := httptest.NewRequest(http.MethodPost, "/guilds/guild-1/templates", bytes.NewBufferString(payload))
+	request.Header.Set("Authorization", "Bearer "+sessionID)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected retired field rejection status %d, got %d body=%s", http.StatusBadRequest, response.Code, response.Body.String())
+	}
+}
+
+func TestGuildSettingsRoutesReadWriteAcknowledgeAndAuditDenied(t *testing.T) {
+	managerRouter, managerSessionID, managerStore := newTemplateRouteHarnessWithStore(t, uint64(discordgo.PermissionManageGuild))
+	patch := httptest.NewRequest(http.MethodPatch, "/guilds/guild-1/settings", bytes.NewBufferString(`{
+		"audit_mirror_channel_discord_id":"100000000000000001",
+		"managed_evidence_channel_discord_id":"100000000000000002",
+		"notification_introduction":"Welcome",
+		"notification_footer":"Footer",
+		"tickets_enabled":true,
+		"general_logging_enabled":false,
+		"honeypot_enabled":true
+	}`))
+	patch.Header.Set("Authorization", "Bearer "+managerSessionID)
+	patch.Header.Set("Content-Type", "application/json")
+	patchResponse := httptest.NewRecorder()
+	managerRouter.ServeHTTP(patchResponse, patch)
+	if patchResponse.Code != http.StatusOK {
+		t.Fatalf("expected settings patch status %d, got %d body=%s", http.StatusOK, patchResponse.Code, patchResponse.Body.String())
+	}
+	malformed := httptest.NewRequest(http.MethodPatch, "/guilds/guild-1/settings", bytes.NewBufferString(`{"unknown_setting":true}`))
+	malformed.Header.Set("Authorization", "Bearer "+managerSessionID)
+	malformed.Header.Set("Content-Type", "application/json")
+	malformedResponse := httptest.NewRecorder()
+	managerRouter.ServeHTTP(malformedResponse, malformed)
+	if malformedResponse.Code != http.StatusBadRequest {
+		t.Fatalf("expected malformed settings status %d, got %d body=%s", http.StatusBadRequest, malformedResponse.Code, malformedResponse.Body.String())
+	}
+
+	get := httptest.NewRequest(http.MethodGet, "/guilds/guild-1/settings", nil)
+	get.Header.Set("Authorization", "Bearer "+managerSessionID)
+	getResponse := httptest.NewRecorder()
+	managerRouter.ServeHTTP(getResponse, get)
+	if getResponse.Code != http.StatusOK {
+		t.Fatalf("expected settings get status %d, got %d body=%s", http.StatusOK, getResponse.Code, getResponse.Body.String())
+	}
+	var body struct {
+		Settings quack.GuildSettingsResponse `json:"settings"`
+	}
+	if err := json.Unmarshal(getResponse.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode settings response: %v", err)
+	}
+	if body.Settings.AuditMirrorChannelDiscordID != "100000000000000001" || !body.Settings.TicketsEnabled || !body.Settings.HoneypotEnabled || !body.Settings.StarterPolicyReviewRequired {
+		t.Fatalf("unexpected settings response: %+v", body.Settings)
+	}
+
+	ack := httptest.NewRequest(http.MethodPost, "/guilds/guild-1/settings/starter-policy-notice/acknowledge", nil)
+	ack.Header.Set("Authorization", "Bearer "+managerSessionID)
+	ackResponse := httptest.NewRecorder()
+	managerRouter.ServeHTTP(ackResponse, ack)
+	if ackResponse.Code != http.StatusOK || strings.Contains(ackResponse.Body.String(), `"starter_policy_review_required":true`) {
+		t.Fatalf("starter notice acknowledgement failed: status=%d body=%s", ackResponse.Code, ackResponse.Body.String())
+	}
+
+	managerGuild, err := managerStore.GetGuildByDiscordID(context.Background(), "guild-1")
+	if err != nil || managerGuild == nil {
+		t.Fatalf("load manager guild: guild=%+v err=%v", managerGuild, err)
+	}
+	managerAudits, err := managerStore.ListAuditLogEntries(context.Background(), managerGuild.ID)
+	if err != nil {
+		t.Fatalf("list malformed settings audit: %v", err)
+	}
+	foundFailure := false
+	for _, audit := range managerAudits {
+		if audit.Action == "guild_settings.update" && audit.Result == model.AuditResultFailure {
+			foundFailure = true
+		}
+	}
+	if !foundFailure {
+		t.Fatalf("missing malformed payload failure audit: %+v", managerAudits)
+	}
+	starterSettings, err := managerStore.GetGuildSettings(context.Background(), managerGuild.ID)
+	if err != nil || starterSettings.StarterPolicyTemplateID == "" {
+		t.Fatalf("missing starter settings after API flow: settings=%+v err=%v", starterSettings, err)
+	}
+	starter, err := managerStore.GetCaseTemplateExpanded(context.Background(), managerGuild.ID, starterSettings.StarterPolicyTemplateID)
+	if err != nil || starter == nil || starter.Template.ArchivedAt != nil {
+		t.Fatalf("acknowledgement made starter inactive: starter=%+v err=%v", starter, err)
+	}
+
+	moderatorRouter, moderatorSessionID, moderatorStore := newTemplateRouteHarnessWithStore(t, uint64(discordgo.PermissionModerateMembers))
+	denied := httptest.NewRequest(http.MethodPatch, "/guilds/guild-1/settings", bytes.NewBufferString(`{"unknown_setting":true}`))
+	denied.Header.Set("Authorization", "Bearer "+moderatorSessionID)
+	denied.Header.Set("Content-Type", "application/json")
+	deniedResponse := httptest.NewRecorder()
+	moderatorRouter.ServeHTTP(deniedResponse, denied)
+	if deniedResponse.Code != http.StatusForbidden {
+		t.Fatalf("expected denied settings status %d, got %d body=%s", http.StatusForbidden, deniedResponse.Code, deniedResponse.Body.String())
+	}
+	moderatorGuild, _ := moderatorStore.GetGuildByDiscordID(context.Background(), "guild-1")
+	audits, err := moderatorStore.ListAuditLogEntries(context.Background(), moderatorGuild.ID)
+	if err != nil {
+		t.Fatalf("list denied settings audit: %v", err)
+	}
+	foundDenied := false
+	for _, audit := range audits {
+		if audit.Action == "authorization.denied" && audit.ResourceID == string(model.PermissionActionGuildSettingsWrite) && audit.Result == model.AuditResultDenied {
+			foundDenied = true
+		}
+	}
+	if !foundDenied {
+		t.Fatalf("missing denied settings audit: %+v", audits)
+	}
+}
+
+func TestTemplateRouteRejectsQuarantinedLegacyPolicyExplicitly(t *testing.T) {
+	router, sessionID, repositories := newTemplateRouteHarnessWithStore(t, uint64(discordgo.PermissionAdministrator))
+	// Recreate a pre-0410 quarantined fixture. The final live schema rejects
+	// these shapes at the database boundary, while upgraded installations may
+	// still need the compatibility response before operator adjudication.
+	for _, index := range []string{"uq_v5_template_default_level", "uq_v5_level_enforcement_action"} {
+		if err := repositories.DB().Exec("DROP INDEX " + index).Error; err != nil {
+			t.Fatalf("drop final constraint %s for compatibility fixture: %v", index, err)
+		}
+	}
+	guild, err := repositories.UpsertGuild(context.Background(), storage.UpsertGuildParams{
+		DiscordGuildID:     "guild-1",
+		Name:               "Guild",
+		OwnerDiscordUserID: "owner-1",
+	})
+	if err != nil {
+		t.Fatalf("upsert compatibility guild: %v", err)
+	}
+	created, err := repositories.CreateCaseTemplate(context.Background(), storage.CreateCaseTemplateParams{
+		Template: model.CaseTemplate{
+			GuildID:                guild.ID,
+			Slug:                   "legacy-policy",
+			Name:                   "Legacy policy",
+			ReasonTemplate:         "Preserved legacy policy",
+			CreatedByDiscordUserID: "admin-1",
+			UpdatedByDiscordUserID: "admin-1",
+		},
+		Levels: []storage.ExpandedCaseTemplateLevel{
+			{
+				Level: model.CaseTemplateLevel{Position: 1, Name: "Legacy default one", IsDefault: true},
+				Actions: []model.CaseTemplateLevelAction{
+					{ActionType: model.ActionTimeoutUser, ConfigJSON: `{"duration_seconds":3600}`},
+				},
+			},
+			{Level: model.CaseTemplateLevel{Position: 2, Name: "Legacy default two", IsDefault: true}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create preserved legacy policy: %v", err)
+	}
+	now := time.Now().UTC()
+	var firstLevel storage.CaseTemplateLevelRecord
+	if err := repositories.DB().Where("template_id = ? AND position = ?", created.Template.ID, 1).First(&firstLevel).Error; err != nil {
+		t.Fatalf("load first legacy level: %v", err)
+	}
+	secondAction := storage.CaseTemplateLevelActionRecord{
+		ULIDModelRecord:  storage.ULIDModelRecord{ID: "route-compat-action0000000", CreatedAt: now, UpdatedAt: now},
+		LevelID:          firstLevel.ID,
+		Position:         2,
+		ActionType:       model.ActionKickUser,
+		ConfigJSON:       `{}`,
+		IdempotencyScope: "case",
+		Enabled:          true,
+	}
+	if err := repositories.DB().Select("*").Create(&secondAction).Error; err != nil {
+		t.Fatalf("create preserved second action: %v", err)
+	}
+	if err := repositories.DB().Model(&storage.CaseTemplateRecord{}).Where("id = ?", created.Template.ID).UpdateColumn("archived_at", now).Error; err != nil {
+		t.Fatalf("archive quarantined template: %v", err)
+	}
+	reason := "level has multiple actions; template does not have exactly one default level"
+	if err := repositories.DB().Exec(
+		"INSERT INTO quack_v5_0002_template_compatibility (template_id, previous_archived_at, previous_deleted_at, reason, recorded_at) VALUES (?, ?, ?, ?, ?)",
+		created.Template.ID, nil, nil, reason, now,
+	).Error; err != nil {
+		t.Fatalf("record compatibility state: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/guilds/guild-1/templates/"+created.Template.ID, nil)
+	request.Header.Set("Authorization", "Bearer "+sessionID)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("expected compatibility conflict %d, got %d body=%s", http.StatusConflict, response.Code, response.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode compatibility response: %v", err)
+	}
+	if body["error"] != quack.ErrTemplateCompatibilityReviewRequired.Error() || body["template_id"] != created.Template.ID || body["compatibility_reason"] != reason {
+		t.Fatalf("unexpected compatibility response: %+v", body)
+	}
+	if _, exists := body["template"]; exists {
+		t.Fatalf("compatibility response exposed invalid template policy: %+v", body)
+	}
+	if _, exists := body["levels"]; exists {
+		t.Fatalf("compatibility response exposed invalid levels: %+v", body)
+	}
+}
+
 func TestCaseRouteRequiresAuth(t *testing.T) {
 	testutil.SetTestConfig(t)
 	gin.SetMode(gin.TestMode)
@@ -465,6 +723,9 @@ func TestCaseRouteCreate(t *testing.T) {
 			CaseNumber             uint64 `json:"case_number"`
 			TargetDiscordUserID    string `json:"target_discord_user_id"`
 			ModeratorDiscordUserID string `json:"moderator_discord_user_id"`
+			Reason                 string `json:"reason"`
+			Validity               string `json:"validity"`
+			Source                 string `json:"source"`
 			Actions                []struct {
 				ID       string `json:"id"`
 				Position int    `json:"position"`
@@ -475,11 +736,36 @@ func TestCaseRouteCreate(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode case response: %v", err)
 	}
-	if body.Case.ID == "" || body.Case.CaseNumber != 1 || body.Case.TargetDiscordUserID != "target-1" {
+	if body.Case.ID == "" || body.Case.CaseNumber != 1 || body.Case.TargetDiscordUserID != "target-1" || body.Case.Reason != "No spam" || body.Case.Validity != "valid" || body.Case.Source != "dashboard" {
 		t.Fatalf("unexpected case response: %+v", body.Case)
 	}
 	if len(body.Case.Actions) != 0 {
 		t.Fatalf("unexpected actions: %+v", body.Case.Actions)
+	}
+	var raw struct {
+		Case map[string]json.RawMessage `json:"case"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw case response: %v", err)
+	}
+	for _, retired := range []string{"severity", "weight", "status", "reason_override"} {
+		if _, exists := raw.Case[retired]; exists {
+			t.Fatalf("case response exposed retired field %q: %s", retired, response.Body.String())
+		}
+	}
+}
+
+func TestCaseRouteRejectsReasonOverride(t *testing.T) {
+	router, sessionID, templateID := newCaseRouteHarness(t, uint64(discordgo.PermissionModerateMembers))
+	payload := `{"template_id":"` + templateID + `","target_discord_user_id":"target-1","reason_override":"invented"}`
+	request := httptest.NewRequest(http.MethodPost, "/guilds/guild-1/cases", bytes.NewBufferString(payload))
+	request.Header.Set("Authorization", "Bearer "+sessionID)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected retired reason override rejection %d, got %d body=%s", http.StatusBadRequest, response.Code, response.Body.String())
 	}
 }
 
@@ -579,8 +865,8 @@ func TestAuditLogRoutePermissionsAndFilters(t *testing.T) {
 	modRequest.Header.Set("Authorization", "Bearer "+modSessionID)
 	modResponse := httptest.NewRecorder()
 	modRouter.ServeHTTP(modResponse, modRequest)
-	if modResponse.Code != http.StatusForbidden {
-		t.Fatalf("expected moderator audit status %d, got %d body=%s", http.StatusForbidden, modResponse.Code, modResponse.Body.String())
+	if modResponse.Code != http.StatusOK {
+		t.Fatalf("expected moderator audit status %d, got %d body=%s", http.StatusOK, modResponse.Code, modResponse.Body.String())
 	}
 
 	adminRouter, adminSessionID, templateID := newCaseRouteHarness(t, uint64(discordgo.PermissionAdministrator))
@@ -685,6 +971,27 @@ func (f routeFakeDiscordClient) BotGuild(ctx context.Context, discordGuildID str
 	return f.botGuild, nil
 }
 
+func (f routeFakeDiscordClient) GuildAuthorization(ctx context.Context, guildID, actorID, targetID string) (*quack.DiscordGuildAuthorization, error) {
+	if f.botGuild == nil {
+		return nil, quack.ErrBotNotInGuild
+	}
+	actor := quack.DiscordMemberAuthorization{DiscordUserID: actorID, Present: true, TopRolePosition: 10}
+	for _, guild := range f.userGuilds {
+		if guild.ID == guildID {
+			actor.PermissionBits = guild.Permissions
+			break
+		}
+	}
+	snapshot := &quack.DiscordGuildAuthorization{
+		Guild: *f.botGuild, Actor: actor,
+		Bot: quack.DiscordMemberAuthorization{DiscordUserID: "quack", Present: true, PermissionBits: ^uint64(0), TopRolePosition: 20, Bot: true},
+	}
+	if targetID != "" {
+		snapshot.Target = &quack.DiscordMemberAuthorization{DiscordUserID: targetID, Present: true, TopRolePosition: 1}
+	}
+	return snapshot, nil
+}
+
 func routeTestSession(discordUserID string) *model.AuthSession {
 	now := time.Now().UTC()
 	return &model.AuthSession{
@@ -701,6 +1008,13 @@ func routeTestSession(discordUserID string) *model.AuthSession {
 
 func newTemplateRouteHarness(t *testing.T, permissionBits uint64) (*gin.Engine, string) {
 	t.Helper()
+	router, sessionID, _ := newTemplateRouteHarnessWithStore(t, permissionBits)
+	return router, sessionID
+}
+
+// newTemplateRouteHarnessWithStore exposes the adapter only for route-level persistence boundary fixtures.
+func newTemplateRouteHarnessWithStore(t *testing.T, permissionBits uint64) (*gin.Engine, string, *storage.Store) {
+	t.Helper()
 
 	testutil.SetTestConfig(t)
 	gin.SetMode(gin.TestMode)
@@ -708,6 +1022,11 @@ func newTemplateRouteHarness(t *testing.T, permissionBits uint64) (*gin.Engine, 
 	store := testutil.NewSQLiteRedisStore(t)
 	if err := store.Migrate(); err != nil {
 		t.Fatalf("migrate schema: %v", err)
+	}
+	if _, err := store.BootstrapGuild(context.Background(), model.BootstrapGuildParams{
+		DiscordGuildID: "guild-1", Name: "Guild", OwnerDiscordUserID: "owner-1",
+	}); err != nil {
+		t.Fatalf("bootstrap route guild: %v", err)
 	}
 
 	services := quack.NewWithDiscordClient(store, routeFakeDiscordClient{
@@ -726,7 +1045,7 @@ func newTemplateRouteHarness(t *testing.T, permissionBits uint64) (*gin.Engine, 
 	router := gin.New()
 	SetupRoutes(router, services)
 
-	return router, session.ID
+	return router, session.ID, store
 }
 
 func newCaseRouteHarness(t *testing.T, permissionBits uint64) (*gin.Engine, string, string) {
@@ -755,14 +1074,12 @@ func newCaseRouteHarness(t *testing.T, permissionBits uint64) (*gin.Engine, stri
 			Name:                   "Spam",
 			Description:            "Spam template",
 			ReasonTemplate:         "No spam",
-			DefaultSeverity:        model.CaseSeverityMedium,
-			Enabled:                true,
 			CreatedByDiscordUserID: "admin-1",
 			UpdatedByDiscordUserID: "admin-1",
 		},
 		Levels: []storage.ExpandedCaseTemplateLevel{
 			{
-				Level: model.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true, Enabled: true},
+				Level: model.CaseTemplateLevel{Position: 1, Name: "Default", IsDefault: true},
 			},
 		},
 	})
@@ -800,8 +1117,7 @@ func templateRoutePayload(slug string) string {
 				"name": "Default",
 				"position": 1,
 				"is_default": true,
-				"enabled": true,
-				"actions": []
+					"actions": []
 			}
 		]
 	}`

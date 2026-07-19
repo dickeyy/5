@@ -14,7 +14,8 @@ import (
 )
 
 type fakeDiscordClient struct {
-	botGuild *quack.DiscordBotGuild
+	botGuild                *quack.DiscordBotGuild
+	liveActorPermissionBits *uint64
 }
 
 func (f fakeDiscordClient) UserGuilds(ctx context.Context, accessToken string) ([]quack.DiscordUserGuild, error) {
@@ -32,6 +33,20 @@ func (f fakeDiscordClient) BotGuild(ctx context.Context, discordGuildID string) 
 	return f.botGuild, nil
 }
 
+func (f fakeDiscordClient) GuildAuthorization(ctx context.Context, guildID, actorID, targetID string) (*quack.DiscordGuildAuthorization, error) {
+	permissionBits := uint64(discordgo.PermissionModerateMembers)
+	if f.liveActorPermissionBits != nil {
+		permissionBits = *f.liveActorPermissionBits
+	}
+	target := &quack.DiscordMemberAuthorization{DiscordUserID: targetID, Present: targetID != "", TopRolePosition: 1}
+	return &quack.DiscordGuildAuthorization{
+		Guild:  *f.botGuild,
+		Actor:  quack.DiscordMemberAuthorization{DiscordUserID: actorID, Present: true, PermissionBits: permissionBits, TopRolePosition: 10},
+		Bot:    quack.DiscordMemberAuthorization{DiscordUserID: "quack", Present: true, PermissionBits: ^uint64(0), TopRolePosition: 20, Bot: true},
+		Target: target,
+	}, nil
+}
+
 func TestCommandDefinitionDefinesCaseAdd(t *testing.T) {
 	command := CommandDefinition()
 	if command.Name != "case" || command.DMPermission == nil || *command.DMPermission {
@@ -40,16 +55,24 @@ func TestCommandDefinitionDefinesCaseAdd(t *testing.T) {
 	if command.DefaultMemberPermissions == nil || *command.DefaultMemberPermissions != int64(discordgo.PermissionModerateMembers) {
 		t.Fatalf("expected moderate members default permission, got %+v", command.DefaultMemberPermissions)
 	}
-	if len(command.Options) != 1 || command.Options[0].Name != "add" {
+	if len(command.Options) < 9 || command.Options[0].Name != "add" {
 		t.Fatalf("expected add subcommand, got %+v", command.Options)
 	}
 
 	add := command.Options[0]
-	if len(add.Options) != 3 {
-		t.Fatalf("expected template/user/reason options, got %+v", add.Options)
+	if len(add.Options) != 4 {
+		t.Fatalf("expected template/user/context/evidence options, got %+v", add.Options)
 	}
 	if !add.Options[0].Autocomplete {
 		t.Fatalf("expected template option to support autocomplete")
+	}
+	for position, option := range add.Options {
+		if position < 2 && !option.Required {
+			t.Fatalf("expected required options first, got %+v", add.Options)
+		}
+		if position >= 2 && option.Required {
+			t.Fatalf("required option follows optional options: %+v", add.Options)
+		}
 	}
 }
 
@@ -60,7 +83,7 @@ func TestHandleCaseInteractionCreatesCase(t *testing.T) {
 	result := HandleCaseInteraction(ui.Context{
 		Context:     ctx,
 		Services:    services,
-		Interaction: caseAddInteraction(templateID, "target-1", "manual reason", uint64(discordgo.PermissionModerateMembers)),
+		Interaction: caseAddInteraction(templateID, "target-1", uint64(discordgo.PermissionModerateMembers)),
 	})
 	response := result.Response
 	if response == nil {
@@ -69,8 +92,8 @@ func TestHandleCaseInteractionCreatesCase(t *testing.T) {
 	if response.Type != discordgo.InteractionResponseDeferredChannelMessageWithSource {
 		t.Fatalf("expected deferred success response, got %v", response.Type)
 	}
-	if response.Data != nil && response.Data.Flags&discordgo.MessageFlagsEphemeral != 0 {
-		t.Fatalf("expected public success response, got flags %d", response.Data.Flags)
+	if response.Data == nil || response.Data.Flags&discordgo.MessageFlagsEphemeral == 0 {
+		t.Fatalf("expected private acknowledgement before public success, got %+v", response.Data)
 	}
 	if result.Task == nil {
 		t.Fatalf("expected deferred case creation task")
@@ -79,24 +102,19 @@ func TestHandleCaseInteractionCreatesCase(t *testing.T) {
 	if err := result.Task(ctx, responder); err != nil {
 		t.Fatalf("run deferred task: %v", err)
 	}
-	if responder.edit.Content == nil {
-		t.Fatalf("expected task to clear original response content")
+	if !responder.deleted || len(responder.followup.Embeds) != 1 || responder.followup.Ephemeral {
+		t.Fatalf("expected public followup and deleted private acknowledgement, got followup=%+v deleted=%v", responder.followup, responder.deleted)
 	}
-	if responder.edit.Embeds == nil || len(*responder.edit.Embeds) != 1 {
-		t.Fatalf("expected task to edit original response with an embed, got %+v", responder.edit)
-	}
-	embed := (*responder.edit.Embeds)[0]
+	embed := responder.followup.Embeds[0]
 	if embed.Title != "Case #1 Created" {
 		t.Fatalf("unexpected embed title: %q", embed.Title)
 	}
 	fields := embedFields(embed)
 	for name, want := range map[string]string{
-		"Target":         "<@target-1>",
-		"Moderator":      "<@mod-1>",
-		"Template":       "Spam",
-		"Level":          "Default",
-		"Matching Cases": "1",
-		"Queued Actions": "1: send_dm",
+		"Target":        "<@target-1>",
+		"Template":      "Spam",
+		"Level":         "Default",
+		"Action Status": "No Discord action configured",
 	} {
 		if !strings.Contains(fields[name], want) {
 			t.Fatalf("expected embed field %q to contain %q, got %q", name, want, fields[name])
@@ -110,31 +128,43 @@ func TestHandleCaseInteractionCreatesCase(t *testing.T) {
 	if len(cases) != 1 {
 		t.Fatalf("expected one case, got %+v", cases)
 	}
-	if cases[0].Source != model.CaseSourceDiscordCommand || cases[0].TargetDiscordUserID != "target-1" {
+	if cases[0].Source != model.CaseSourceDiscord || cases[0].TargetDiscordUserID != "target-1" {
 		t.Fatalf("unexpected case: %+v", cases[0])
 	}
-	if cases[0].Reason != "manual reason" {
-		t.Fatalf("expected reason override, got %q", cases[0].Reason)
+	if cases[0].Reason != "Spam" {
+		t.Fatalf("expected immutable template reason, got %q", cases[0].Reason)
 	}
 }
 
-func TestHandleCaseInteractionDeniesMissingPermission(t *testing.T) {
+func TestHandleCaseInteractionDoesNotTrustStaleInteractionPermissionBits(t *testing.T) {
 	_, services, templateID := newCaseCommandHarness(t)
 
 	result := HandleCaseInteraction(ui.Context{
 		Context:     context.Background(),
 		Services:    services,
-		Interaction: caseAddInteraction(templateID, "target-1", "", 0),
+		Interaction: caseAddInteraction(templateID, "target-1", 0),
+	})
+	response := result.Response
+	if response == nil || response.Type != discordgo.InteractionResponseDeferredChannelMessageWithSource {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+	if result.Task == nil {
+		t.Fatalf("expected live Discord permission to authorize despite stale interaction bits")
+	}
+}
+
+func TestHandleCaseInteractionDeniesRevokedLivePermissionDespiteInteractionSnapshot(t *testing.T) {
+	_, services, templateID := newCaseCommandHarnessWithLivePermissions(t, 0)
+	result := HandleCaseInteraction(ui.Context{
+		Context: context.Background(), Services: services,
+		Interaction: caseAddInteraction(templateID, "target-1", ^uint64(0)),
 	})
 	response := result.Response
 	if response == nil || response.Data == nil || len(response.Data.Embeds) != 1 || !strings.Contains(response.Data.Embeds[0].Description, "do not have permission") {
-		t.Fatalf("unexpected response: %+v", response)
+		t.Fatalf("unexpected live permission denial: %+v", response)
 	}
-	if result.Task != nil {
-		t.Fatalf("expected permission denial to be immediate")
-	}
-	if response.Data.Flags&discordgo.MessageFlagsEphemeral == 0 {
-		t.Fatalf("expected ephemeral error response, got flags %d", response.Data.Flags)
+	if result.Task != nil || response.Data.Flags&discordgo.MessageFlagsEphemeral == 0 {
+		t.Fatalf("expected immediate private denial, result=%+v", result)
 	}
 }
 
@@ -161,17 +191,15 @@ func TestHandleTemplateAutocompleteReturnsUsableTemplates(t *testing.T) {
 	}
 }
 
-func TestHandleTemplateAutocompleteFiltersDisabledTemplates(t *testing.T) {
+func TestHandleTemplateAutocompleteFiltersArchivedTemplates(t *testing.T) {
 	_, services, _ := newCaseCommandHarness(t)
 	ctx := context.Background()
 	guildContext := caseCommandGuildContext(t, services)
-	enabled := false
-	createCaseCommandTemplate(t, services, guildContext, quack.TemplateInput{
+	template := createCaseCommandTemplate(t, services, guildContext, quack.TemplateInput{
 		Slug:           "ghost",
 		Name:           "Ghost",
 		Description:    "Hidden moderation workflow",
 		ReasonTemplate: "Hidden",
-		Enabled:        &enabled,
 		Levels: []quack.TemplateLevelInput{
 			{
 				Name:      "Default",
@@ -180,6 +208,9 @@ func TestHandleTemplateAutocompleteFiltersDisabledTemplates(t *testing.T) {
 			},
 		},
 	})
+	if _, err := services.Templates.Archive(ctx, guildContext, template.ID); err != nil {
+		t.Fatalf("archive template: %v", err)
+	}
 
 	result := HandleCaseInteraction(ui.Context{
 		Context:     ctx,
@@ -249,6 +280,11 @@ func (f *fakeResponder) Followup(message ui.Message) (*discordgo.Message, error)
 	return &discordgo.Message{ID: "followup-1"}, nil
 }
 
+func (f *fakeResponder) EditFollowup(messageID string, edit ui.Edit) (*discordgo.Message, error) {
+	f.updated = edit
+	return &discordgo.Message{ID: messageID}, nil
+}
+
 func (f *fakeResponder) DeleteOriginal() error {
 	f.deleted = true
 	return nil
@@ -260,6 +296,10 @@ func (f *fakeResponder) UpdateMessage(edit ui.Edit) (*discordgo.Message, error) 
 }
 
 func newCaseCommandHarness(t *testing.T) (*store.Store, *quack.Services, string) {
+	return newCaseCommandHarnessWithLivePermissions(t, uint64(discordgo.PermissionModerateMembers))
+}
+
+func newCaseCommandHarnessWithLivePermissions(t *testing.T, permissionBits uint64) (*store.Store, *quack.Services, string) {
 	t.Helper()
 
 	ctx := context.Background()
@@ -269,7 +309,7 @@ func newCaseCommandHarness(t *testing.T) (*store.Store, *quack.Services, string)
 	}
 
 	services := quack.NewWithDiscordClient(store, fakeDiscordClient{
-		botGuild: &quack.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "owner-1"},
+		botGuild: &quack.DiscordBotGuild{ID: "guild-1", Name: "Guild", OwnerID: "owner-1"}, liveActorPermissionBits: &permissionBits,
 	})
 	guildContext, err := services.Guilds.ResolveDiscordStaffContext(ctx, quack.DiscordStaffContextInput{
 		DiscordGuildID: "guild-1",
@@ -322,7 +362,7 @@ func caseCommandGuildContext(t *testing.T, services *quack.Services) *quack.Guil
 	return guildContext
 }
 
-func caseAddInteraction(templateID, targetID, reason string, permissions uint64) *discordgo.InteractionCreate {
+func caseAddInteraction(templateID, targetID string, permissions uint64) *discordgo.InteractionCreate {
 	options := []*discordgo.ApplicationCommandInteractionDataOption{
 		{
 			Name:  "template",
@@ -334,13 +374,6 @@ func caseAddInteraction(templateID, targetID, reason string, permissions uint64)
 			Type:  discordgo.ApplicationCommandOptionUser,
 			Value: targetID,
 		},
-	}
-	if reason != "" {
-		options = append(options, &discordgo.ApplicationCommandInteractionDataOption{
-			Name:  "reason",
-			Type:  discordgo.ApplicationCommandOptionString,
-			Value: reason,
-		})
 	}
 
 	return interaction(discordgo.InteractionApplicationCommand, permissions, []*discordgo.ApplicationCommandInteractionDataOption{

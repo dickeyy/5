@@ -33,6 +33,22 @@ func (s *Store) GetGuildByDiscordID(ctx context.Context, discordGuildID string) 
 	return &guild, nil
 }
 
+// GetGuildByID retrieves the durable guild identity used by case notifications.
+func (s *Store) GetGuildByID(ctx context.Context, guildID string) (*model.Guild, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("database not connected")
+	}
+	var guild model.Guild
+	result := s.db.WithContext(ctx).Where("id = ?", guildID).Limit(1).Find(&guild)
+	if result.Error != nil {
+		return nil, fmt.Errorf("get guild by id: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return nil, nil
+	}
+	return &guild, nil
+}
+
 // UpsertGuild encapsulates the upsert guild rule so callers share one consistent package implementation.
 func (s *Store) UpsertGuild(ctx context.Context, params UpsertGuildParams) (*model.Guild, error) {
 	if s == nil || s.db == nil {
