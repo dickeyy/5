@@ -1,8 +1,8 @@
 # Quack v5 Readiness Execution Plan
 
 Status: ACTIVE — PARALLEL WAVE P2 IN PROGRESS
-Owner: v5 orchestrator  
-Authoritative product definition: [`v5.md`](../../../v5.md)  
+Owner: v5 orchestrator
+Authoritative product definition: [`v5.md`](../../../v5.md)
 Supporting inventory: [`TODO.md`](../../../TODO.md), [`docs/v5-scope-drift.md`](../../v5-scope-drift.md)
 
 ## Objective
@@ -67,8 +67,8 @@ Legacy V5-004 through V5-026 entries below remain the detailed requirement and
 acceptance catalog. They are no longer one-PR scheduling units after the
 throughput reset; the macro-package ledger is authoritative.
 
-Planned orchestration branch: `orchestrator/v5-readiness`  
-Planned worktree root: `/tmp/quack-v5-worktrees`  
+Planned orchestration branch: `orchestrator/v5-readiness`
+Planned worktree root: `/tmp/quack-v5-worktrees`
 PR base for first slice: `orchestrator/v5-readiness`
 
 ## Requirement coverage map
