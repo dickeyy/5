@@ -14,13 +14,13 @@ are tracked in [`docs/v5-scope-drift.md`](docs/v5-scope-drift.md).
 
 ## Layout
 
-- `cmd/quack`: process entrypoint.
-- `internal/runtime`: dependency assembly and lifecycle.
-- `internal/quack`: domain models, ports, and application services.
-- `internal/store`: MySQL/GORM and Redis adapters.
-- `internal/httpapi`: dashboard-facing HTTP adapter.
-- `internal/discordbot`: Discord commands, interactions, and UI.
-- `internal/workqueue`: in-process workers backed by persisted action rows.
+- `apps/backend`: Go module for the API, Discord bot, workers, migrations, and
+  operator commands.
+- `apps/dashboard`: reserved dashboard application root; currently empty.
+- `contracts/http/openapi.yaml`: generated HTTP API contract.
+- `scripts/generate-openapi.sh`: pinned Swaggo contract generator.
+- `docs`: architecture, operations, product, and readiness documentation.
+- `go.work`: workspace definition for repository Go modules.
 
 ## Development
 
@@ -28,13 +28,19 @@ Copy `.env.example` to `.env`, start MySQL and Redis with
 `docker compose up -d`, then run:
 
 ```sh
-go run ./cmd/quack
+go run ./apps/backend/cmd/quack
 ```
 
 Run the validation suite with:
 
 ```sh
-go test ./...
-go vet ./...
-go build ./cmd/quack
+go test ./apps/backend/...
+go vet ./apps/backend/...
+go build ./apps/backend/cmd/quack
+```
+
+Regenerate the HTTP contract with:
+
+```sh
+./scripts/generate-openapi.sh
 ```

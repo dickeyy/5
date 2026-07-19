@@ -38,7 +38,7 @@ services:
     profiles:
       - app
     build:
-      context: .
+      context: ./apps/backend
     restart: unless-stopped
     depends_on:
       mysql:

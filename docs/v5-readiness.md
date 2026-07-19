@@ -39,7 +39,7 @@ EXECUTED**, never inferred from unit tests.
 | R12 | Tickets, general logging and honeypots remain isolated; honeypot alone applies a normal template; utilities do not shape core | QP-C/QP-F modules, QI-2 registrars/workers/migrations, module integration/isolation/privacy tests | PASS |
 | R13 | V4 historical readable import with no escalation/action/notification; module-owned migrations; isolated coexistence and direct-command cutover | QP-G at `17f938b`, logical 0400/0410 registered as physical 10/11, importer/CLI/rollback/restore/command-scope tests and docs | PASS with sanitized fixtures; operator real-data import NOT EXECUTED |
 | R14 | Every firm boundary: no cross-guild/template escalation, public automation API, moderator level/reason override, multi-action, severity/weight/window, notes, hard delete, Quack staff roles, Discord builder or audit/logging conflation | Canonical contracts, archive-only record, 0410 constraints, source/API policy scan, package isolation and security tests | PASS |
-| R15 | Release quality: migrations, real storage, full test/vet/build/race, E2E, security, clean install/upgrade/restore/coexistence/shutdown and real-guild checklist | Strict `scripts/v5-readiness.sh --final` PASS; `internal/readiness/v5_rehearsal_test.go`; [`v5-rehearsal.md`](v5-rehearsal.md); storage/ops runbooks | PASS local gates; real guild NOT EXECUTED, therefore release evidence incomplete |
+| R15 | Release quality: migrations, real storage, full test/vet/build/race, E2E, security, clean install/upgrade/restore/coexistence/shutdown and real-guild checklist | Strict `apps/backend/scripts/v5-readiness.sh --final` PASS; `apps/backend/internal/readiness/v5_rehearsal_test.go`; [`v5-rehearsal.md`](v5-rehearsal.md); storage/ops runbooks | PASS local gates; real guild NOT EXECUTED, therefore release evidence incomplete |
 
 ## Supporting inventory reconciliation
 
@@ -92,7 +92,7 @@ Passed evidence:
   review-fix SQLite/MySQL/vet/build.
 - Accepted QP-H: focused/race/full/vet/build/diff; review-fix targeted/race.
 - QP-I after QP-G integration: central 0400 then 0410 registry, store and
-  composition tests PASS; real MySQL `go test ./internal/store -count=1` PASS
+  composition tests PASS; real MySQL `go test ./apps/backend/internal/store -count=1` PASS
   in 27.175 seconds.
 - QP-H fairness follow-up at `44f18c9`: guild-rotating bounded selection,
   within-guild action priority, SQLite/MySQL targeted tests and race evidence
@@ -101,17 +101,17 @@ Passed evidence:
   readiness tests PASS after isolating the first pre-0410 route fixture.
 - Final combined strict gate PASS:
   `QUACK_TEST_MYSQL_DSN=... QUACK_TEST_REDIS_URL=...
-  GOCACHE=/tmp/quack-v5-qp-i-gocache ./scripts/v5-readiness.sh --final`.
+  GOCACHE=/tmp/quack-v5-qp-i-gocache ./apps/backend/scripts/v5-readiness.sh --final`.
   It passed focused readiness/quack/store/HTTP/Discord/module tests, targeted
-  race tests, repository-wide `go test ./...`, `go vet ./...`, builds for
+  race tests, repository-wide `go test ./apps/backend/...`, `go vet ./apps/backend/...`, builds for
   `quack`, `quack-migrate`, `quack-v4-import`, and `quack-storage-verify`, the
   full MySQL/Redis-enabled repository suite, the repository-native two-process
   Redis write/verify persistence probe, and `git diff --check`.
 - QP-I pre-review final static gates:
-  `go vet ./...` PASS, `go build -buildvcs=false ./...` PASS,
-  `bash -n scripts/v5-readiness.sh` PASS, `git diff --check` PASS.
-- QP-I Codex fixes: `go test ./internal/v4import
-  ./internal/httpapi/platform` PASS; the same packages under `go test -race`
+  `go vet ./apps/backend/...` PASS, `go build -buildvcs=false ./...` PASS,
+  `bash -n apps/backend/scripts/v5-readiness.sh` PASS, `git diff --check` PASS.
+- QP-I Codex fixes: `go test ./apps/backend/internal/v4import
+  ./apps/backend/internal/httpapi/platform` PASS; the same packages under `go test -race`
   PASS; targeted `go vet` and `git diff --check` PASS.
 - Tracked-file credential pattern scan and committed `.env` scan: PASS with no
   matches outside examples.

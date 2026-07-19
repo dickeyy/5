@@ -3,8 +3,8 @@
 The case pipeline connects versioned templates, structured member-visible
 context, immutable Discord evidence, live authorization, optional enforcement,
 and one case-level notification. Core orchestration lives in
-`internal/quack/cases.go`; atomic persistence lives in
-`internal/store/cases.go`.
+`apps/backend/internal/quack/cases.go`; atomic persistence lives in
+`apps/backend/internal/store/cases.go`.
 
 ## Entrypoints
 

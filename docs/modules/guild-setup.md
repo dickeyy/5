@@ -1,8 +1,8 @@
 # Guild Setup and Settings
 
 Discord gateway lifecycle events, not an arbitrary dashboard request, own the
-install boundary. `internal/discordbot/guild_lifecycle.go` registers before the
-gateway opens and delegates to `GuildService`; `internal/store/guild_settings.go`
+install boundary. `apps/backend/internal/discordbot/guild_lifecycle.go` registers before the
+gateway opens and delegates to `GuildService`; `apps/backend/internal/store/guild_settings.go`
 performs the atomic install transaction.
 
 ## Install and rejoin

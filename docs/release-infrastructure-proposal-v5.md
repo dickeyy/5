@@ -7,8 +7,8 @@ does not modify any listed release or deployment file.
 
 Add required jobs pinned to the repository's supported Go version:
 
-1. `gofmt`/`git diff --check`, `go vet ./...`, `go test ./...`, and build both
-   `./cmd/quack` and `./cmd/quack-migrate`.
+1. `gofmt`/`git diff --check`, `go vet ./apps/backend/...`, `go test ./apps/backend/...`, and build both
+   `./apps/backend/cmd/quack` and `./apps/backend/cmd/quack-migrate`.
 2. `go test -race` for HTTP, Discord interactions, queues, core case/action,
    evidence, appeals, and module integration.
 3. MySQL and Redis service jobs for migrations, JSON/index/FK/lock/transaction

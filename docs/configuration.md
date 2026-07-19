@@ -4,17 +4,17 @@
 
 The process expects:
 
-- MySQL, connected through `DATABASE_DSN` in `internal/store/connect_db.go`
-- Redis, connected through `REDIS_URL` in `internal/store/connect_redis.go`
-- Discord bot credentials and OAuth settings loaded in `internal/config/config.go`
+- MySQL, connected through `DATABASE_DSN` in `apps/backend/internal/store/connect_db.go`
+- Redis, connected through `REDIS_URL` in `apps/backend/internal/store/connect_redis.go`
+- Discord bot credentials and OAuth settings loaded in `apps/backend/internal/config/config.go`
 
 The startup path fails fast on missing critical storage env vars and on failed
-DB or Redis pings. See `internal/config/config.go`, `internal/store/connect_db.go`, and
-`internal/store/connect_redis.go`.
+DB or Redis pings. See `apps/backend/internal/config/config.go`, `apps/backend/internal/store/connect_db.go`, and
+`apps/backend/internal/store/connect_redis.go`.
 
 ## Environment Variables
 
-Configured in `internal/config/config.go`.
+Configured in `apps/backend/internal/config/config.go`.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
@@ -152,10 +152,10 @@ For non-dev environments, the non-prefixed names are used directly.
 
 Relevant files:
 
-- `internal/config/config.go`
+- `apps/backend/internal/config/config.go`
 - `structs/config.go`
 - `.env.example`
 - `compose.yaml`
-- `internal/httpapi/server.go`
-- `internal/store/connect_db.go`
-- `internal/store/connect_redis.go`
+- `apps/backend/internal/httpapi/server.go`
+- `apps/backend/internal/store/connect_db.go`
+- `apps/backend/internal/store/connect_redis.go`

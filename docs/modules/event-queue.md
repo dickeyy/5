@@ -1,6 +1,6 @@
 # Work Queue
 
-`internal/workqueue` is an injected in-process worker pool for case-action
+`apps/backend/internal/workqueue` is an injected in-process worker pool for case-action
 execution. It contains no datastore or configuration globals.
 
 ## Source of truth
@@ -27,7 +27,7 @@ This makes delayed retry behavior recover after process restarts.
 
 ## Lifecycle
 
-`internal/runtime` constructs the queue from `EVENT_QUEUE_SIZE` and
+`apps/backend/internal/runtime` constructs the queue from `EVENT_QUEUE_SIZE` and
 `EVENT_QUEUE_WORKERS`, injects it into the application services, and starts it
 with the action processor and repository due-work source.
 
@@ -44,7 +44,7 @@ submissions are rejected after shutdown begins.
 
 Relevant files:
 
-- `internal/workqueue/queue.go`
-- `internal/quack/actions.go`
-- `internal/store/cases.go`
-- `internal/runtime/runtime.go`
+- `apps/backend/internal/workqueue/queue.go`
+- `apps/backend/internal/quack/actions.go`
+- `apps/backend/internal/store/cases.go`
+- `apps/backend/internal/runtime/runtime.go`

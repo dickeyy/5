@@ -9,6 +9,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/backend
     steps:
       - uses: actions/checkout@v4
 
@@ -27,5 +30,5 @@ jobs:
         uses: codecov/codecov-action@v3
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          file: ./coverage.txt
+          file: ./apps/backend/coverage.txt
           flags: unittests

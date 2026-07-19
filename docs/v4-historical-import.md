@@ -10,7 +10,7 @@ Required fields are `format`, `source_id`, `guild_id`,
 `action_type` is one of `warning`, `timeout`, `kick`, or `ban`. Optional fields
 preserve the v4 case number, moderator identity/display fallback, Discord context
 URL, departed/missing target state, and an old action expiry. See
-`internal/v4import/testdata/historical_cases.jsonl` for representative rows.
+`apps/backend/internal/v4import/testdata/historical_cases.jsonl` for representative rows.
 
 ## Safe import procedure
 
@@ -20,7 +20,7 @@ URL, departed/missing target state, and an old action expiry. See
 3. Run a dry-run against an isolated restored v5 target:
 
    ```sh
-   DATABASE_DSN='operator supplied isolated DSN' go run ./cmd/quack-v4-import import \
+   DATABASE_DSN='operator supplied isolated DSN' go run ./apps/backend/cmd/quack-v4-import import \
      --dry-run --file ./guild.jsonl --source final-v4-export \
      --guild 01J... --actor 123...
    ```
@@ -45,7 +45,7 @@ warnings for manual review; they are never replayed.
 An untouched batch can be removed with:
 
 ```sh
-DATABASE_DSN='operator supplied isolated DSN' go run ./cmd/quack-v4-import rollback \
+DATABASE_DSN='operator supplied isolated DSN' go run ./apps/backend/cmd/quack-v4-import rollback \
   --guild 01J... --batch v4-... --actor 123...
 ```
 
@@ -59,7 +59,7 @@ and Discord command scopes during rehearsal. Before enabling both, compare the
 registered names:
 
 ```sh
-go run ./cmd/quack-v4-import check-scope --v4 ticket --v5 case
+go run ./apps/backend/cmd/quack-v4-import check-scope --v4 ticket --v5 case
 ```
 
 At cutover, disable v4 command synchronization and remove `/warn`, `/timeout`,
@@ -67,7 +67,7 @@ At cutover, disable v4 command synchronization and remove `/warn`, `/timeout`,
 post-migration check fails while any direct command remains:
 
 ```sh
-go run ./cmd/quack-v4-import check-scope \
+go run ./apps/backend/cmd/quack-v4-import check-scope \
   --v4 warn,timeout,kick,ban --v5 case --after-migration
 ```
 

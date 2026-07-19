@@ -30,23 +30,23 @@ the high-level mismatch without making the technical docs inaccurate.
 
 The live backend currently has four main runtime surfaces:
 
-- Discord bot startup, slash-command registration, and interaction dispatch in `cmd/quack/main.go`, `internal/discordbot/commands/`, and `internal/discordbot/interactions/`.
+- Discord bot startup, slash-command registration, and interaction dispatch in `apps/backend/cmd/quack/main.go`, `apps/backend/internal/discordbot/commands/`, and `apps/backend/internal/discordbot/interactions/`.
 - HTTP API routes for liveness/readiness/metrics, ops status, auth, guild settings,
   templates, cases/recovery, audit/statistics, appeals/member access, and optional
-  modules in `internal/httpapi/server.go` and `internal/httpapi/routes/`.
-- Case-action queue processing in `internal/workqueue/queue.go` and `internal/workqueue/queue.go`.
+  modules in `apps/backend/internal/httpapi/server.go` and `apps/backend/internal/httpapi/routes/`.
+- Case-action queue processing in `apps/backend/internal/workqueue/queue.go` and `apps/backend/internal/workqueue/queue.go`.
 - Operator-only v4 import, migration, and storage verification commands in
-  `cmd/quack-v4-import`, `cmd/quack-migrate`, and `cmd/quack-storage-verify`.
-- Existing local container packaging in `compose.yaml` and `Dockerfile`;
+  `apps/backend/cmd/quack-v4-import`, `apps/backend/cmd/quack-migrate`, and `apps/backend/cmd/quack-storage-verify`.
+- Existing local container packaging in `compose.yaml` and `apps/backend/Dockerfile`;
   proposed release-infrastructure changes remain explicitly unauthorized.
 
 Relevant files:
 
-- `cmd/quack/main.go`
-- `internal/httpapi/server.go`
-- `internal/httpapi/routes/router.go`
-- `internal/discordbot/commands/case.go`
-- `internal/discordbot/interactions/dispatcher.go`
-- `internal/discordbot/ui/message.go`
-- `internal/workqueue/queue.go`
+- `apps/backend/cmd/quack/main.go`
+- `apps/backend/internal/httpapi/server.go`
+- `apps/backend/internal/httpapi/routes/router.go`
+- `apps/backend/internal/discordbot/commands/case.go`
+- `apps/backend/internal/discordbot/interactions/dispatcher.go`
+- `apps/backend/internal/discordbot/ui/message.go`
+- `apps/backend/internal/workqueue/queue.go`
 - `compose.yaml`

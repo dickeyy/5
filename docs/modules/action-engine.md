@@ -1,6 +1,6 @@
 # Action Engine
 
-The action engine in `internal/quack/actions.go` executes the selected
+The action engine in `apps/backend/internal/quack/actions.go` executes the selected
 zero-or-one enforcement action, persists every attempt, exposes staff recovery,
 and delivers one post-outcome case notification.
 

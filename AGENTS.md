@@ -18,5 +18,6 @@
 ## Verification
 
 - Run `gofmt` on changed Go files.
-- Run the narrowest relevant tests, followed by `go test ./...` when the environment permits it.
+- Run backend Go commands from `apps/backend`.
+- Run the narrowest relevant tests, followed by `go test ./...` from `apps/backend` when the environment permits it.
 - Preserve unrelated user changes and avoid committing generated binaries or temporary files.

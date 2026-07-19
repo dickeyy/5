@@ -24,10 +24,10 @@ QP-C tickets/logging module heads on the accepted V5-003 anchor.
 ## QP-A merge resolution
 
 1. The accepted QP-A head is incorporated without rewriting any package head.
-2. `internal/quack/app.go` preserves QP-A core services; optional
+2. `apps/backend/internal/quack/app.go` preserves QP-A core services; optional
    modules stay process-composed and do not enter the moderation core.
 3. QP-A's Discord moderation client additions coexist with QI-1's ticket and
-   logging transport remains in `internal/moduleintegration`, so only command
+   logging transport remains in `apps/backend/internal/moduleintegration`, so only command
    component registration should require registry reconciliation.
 4. QP-A migration 0005 is followed by QI-1 physical migrations 0006
    and 0007 retaining logical identities 0100 and 0110. Filenames, embedded

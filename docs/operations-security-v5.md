@@ -123,15 +123,15 @@ Run without loading production `.env` files:
 
 ```sh
 gofmt -w <changed-go-files>
-go test ./internal/config ./internal/httpapi/... ./internal/discordbot/interactions ./internal/workqueue ./internal/moduleintegration
-go test -race ./internal/httpapi/... ./internal/discordbot/interactions ./internal/workqueue ./internal/moduleintegration
-go test ./...
-go vet ./...
-go build ./cmd/quack ./cmd/quack-migrate
+go test ./apps/backend/internal/config ./apps/backend/internal/httpapi/... ./apps/backend/internal/discordbot/interactions ./apps/backend/internal/workqueue ./apps/backend/internal/moduleintegration
+go test -race ./apps/backend/internal/httpapi/... ./apps/backend/internal/discordbot/interactions ./apps/backend/internal/workqueue ./apps/backend/internal/moduleintegration
+go test ./apps/backend/...
+go vet ./apps/backend/...
+go build ./apps/backend/cmd/quack ./apps/backend/cmd/quack-migrate
 git diff --check
 ```
 
-With a locally running process, use `scripts/v5-local-ops-smoke.sh`. Real guild
+With a locally running process, use `apps/backend/scripts/v5-local-ops-smoke.sh`. Real guild
 install/OAuth/command sync, production backup/restore, vulnerability/secret
 scanners, container/Compose, and deployment shutdown remain final rehearsal or
 infrastructure gates.

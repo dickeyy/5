@@ -7,9 +7,9 @@ never converted into a pass.
 
 ## Automated local gate
 
-Run `scripts/v5-readiness.sh --local` for the isolated composition, focused,
+Run `apps/backend/scripts/v5-readiness.sh --local` for the isolated composition, focused,
 race, repository-wide test, vet, and build gates. Run
-`scripts/v5-readiness.sh --final` with disposable MySQL and Redis targets for
+`apps/backend/scripts/v5-readiness.sh --final` with disposable MySQL and Redis targets for
 the external-storage gate. The final mode fails when either target is absent.
 
 ## Clean install and current-schema upgrade
@@ -17,7 +17,7 @@ the external-storage gate. The final mode fails when either target is absent.
 Use disposable storage only.
 
 1. Create an empty MySQL database and isolated Redis namespace.
-2. Run `go run ./cmd/quack-migrate up`; capture the command, commit, database
+2. Run `go run ./apps/backend/cmd/quack-migrate up`; capture the command, commit, database
    identity, migration ledger, start/end timestamps, and exit status.
 3. Start Quack with non-production Discord credentials, confirm liveness and
    readiness separately, then stop it through the documented graceful path.

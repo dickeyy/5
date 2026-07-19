@@ -81,7 +81,7 @@ readable historical records but never contribute to v5 escalation.
 - Required env vars are set: database, Redis, Discord token/app ID, OAuth client
   secret, OAuth callback, and queue sizing.
 - `OPS_STATUS_TOKEN` is set only where Quack developer ops access is needed.
-- `go test ./...` passes.
+- `go test ./apps/backend/...` passes.
 - `/livez` reports process liveness and `/readyz` reports dependency readiness.
 - `/status` reports database, Redis, and Discord connectivity.
 - `/ops/status` works with the ops key and fails without it.
@@ -97,9 +97,9 @@ readable historical records but never contribute to v5 escalation.
 
 Relevant files:
 
-- `internal/httpapi/middleware/request.go`
-- `internal/httpapi/routes/ops.go`
-- `internal/quack/actions.go`
-- `internal/quack/ops.go`
-- `internal/quack/trace.go`
-- `internal/store/ops.go`
+- `apps/backend/internal/httpapi/middleware/request.go`
+- `apps/backend/internal/httpapi/routes/ops.go`
+- `apps/backend/internal/quack/actions.go`
+- `apps/backend/internal/quack/ops.go`
+- `apps/backend/internal/quack/trace.go`
+- `apps/backend/internal/store/ops.go`

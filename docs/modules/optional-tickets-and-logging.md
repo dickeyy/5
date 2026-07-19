@@ -3,7 +3,7 @@
 This document is the module-specific product definition required by Quack v5.
 It refines the boundaries in `v5.md`; it does not extend the moderation core.
 Both modules are enabled and configured independently for each guild through
-`internal/modules.Registry`. Their configuration rows, routes, Discord adapters,
+`apps/backend/internal/modules.Registry`. Their configuration rows, routes, Discord adapters,
 imports, and runtime failures cannot create or mutate cases, actions, appeals,
 escalation history, or member moderation history.
 
@@ -150,7 +150,7 @@ The integration package must:
 6. run the transcript retention sweep and bounded event worker lifecycle; and
 7. preserve the rule that general-log deliveries never enter the audit table.
 
-`internal/moduleintegration` implements this contract in production. It reuses
+`apps/backend/internal/moduleintegration` implements this contract in production. It reuses
 the shared HTTP platform safety primitives, installs ticket components in the
 single command dispatcher, keeps gateway delivery off the moderation queue,
 drains accepted work during shutdown, and runs transcript cleanup without

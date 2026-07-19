@@ -7,7 +7,7 @@ jobs:
 - dispatching incoming Discord interactions to handlers
 - syncing local definitions to Discord application commands
 
-The core registry type lives in `internal/discordbot/commands/registry.go`.
+The core registry type lives in `apps/backend/internal/discordbot/commands/registry.go`.
 
 ## Registration Model
 
@@ -17,7 +17,7 @@ Each command contributes a `CommandSpec`:
 - `Handler`: function invoked for command and autocomplete interactions
 
 Commands register themselves during package init through `registerCommand(...)`.
-Today the default registry only includes `/case`, from `internal/discordbot/commands/case.go`.
+Today the default registry only includes `/case`, from `apps/backend/internal/discordbot/commands/case.go`.
 
 `Registry.Register` rejects:
 
@@ -46,7 +46,7 @@ Dispatch rules:
 
 The registry itself stays thin. Command-specific auth, option parsing, and app
 service calls belong in the individual command module, such as
-`internal/discordbot/commands/case.go`.
+`apps/backend/internal/discordbot/commands/case.go`.
 
 ## Sync Model
 
@@ -63,11 +63,11 @@ and calls `Sync(...)`.
 6. Updates remote commands when canonical hashes differ.
 7. Optionally prunes remote-only commands when `PruneEnabled` is true.
 
-The sync logic is in `internal/discordbot/commands/sync.go`.
+The sync logic is in `apps/backend/internal/discordbot/commands/sync.go`.
 
 ## Hashing And Cache Semantics
 
-`CommandFingerprint` in `internal/discordbot/commands/hash.go` canonicalizes the Discord
+`CommandFingerprint` in `apps/backend/internal/discordbot/commands/hash.go` canonicalizes the Discord
 command definition before hashing it with SHA-256.
 
 Normalization details that matter:
@@ -79,7 +79,7 @@ Normalization details that matter:
 
 The goal is to avoid churn from semantically equivalent Discord definitions.
 
-Redis cache behavior in `internal/discordbot/commands/cache.go`:
+Redis cache behavior in `apps/backend/internal/discordbot/commands/cache.go`:
 
 - key pattern: `discord:commands:<scope>:hashes`
 - field: command name
@@ -110,11 +110,11 @@ If the app ID is missing, startup fails when command registration runs.
 
 Relevant files:
 
-- `internal/discordbot/commands/registry.go`
-- `internal/discordbot/commands/case.go`
-- `internal/discordbot/commands/sync.go`
-- `internal/discordbot/commands/cache.go`
-- `internal/discordbot/commands/hash.go`
-- `internal/discordbot/commands/registry_test.go`
-- `internal/discordbot/commands/sync_test.go`
-- `internal/discordbot/commands/hash_test.go`
+- `apps/backend/internal/discordbot/commands/registry.go`
+- `apps/backend/internal/discordbot/commands/case.go`
+- `apps/backend/internal/discordbot/commands/sync.go`
+- `apps/backend/internal/discordbot/commands/cache.go`
+- `apps/backend/internal/discordbot/commands/hash.go`
+- `apps/backend/internal/discordbot/commands/registry_test.go`
+- `apps/backend/internal/discordbot/commands/sync_test.go`
+- `apps/backend/internal/discordbot/commands/hash_test.go`

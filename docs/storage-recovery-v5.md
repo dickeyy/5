@@ -11,7 +11,7 @@ backups, point-in-time recovery appropriate to the deployment, and a restore
 rehearsal before release. Capture a content-minimizing manifest before backup:
 
 ```sh
-DATABASE_DSN='source isolated DSN' go run ./cmd/quack-storage-verify mysql-capture \
+DATABASE_DSN='source isolated DSN' go run ./apps/backend/cmd/quack-storage-verify mysql-capture \
   > quack-recovery-manifest.json
 mysqldump --single-transaction --routines --triggers --hex-blob \
   --databases quack_v5 > quack-v5.sql
@@ -22,8 +22,8 @@ tools, run the pending forward migrations, then verify through stdin:
 
 ```sh
 mysql < quack-v5.sql
-DATABASE_DSN='restored isolated DSN' go run ./cmd/quack-migrate up
-DATABASE_DSN='restored isolated DSN' go run ./cmd/quack-storage-verify mysql-verify \
+DATABASE_DSN='restored isolated DSN' go run ./apps/backend/cmd/quack-migrate up
+DATABASE_DSN='restored isolated DSN' go run ./apps/backend/cmd/quack-storage-verify mysql-verify \
   < quack-recovery-manifest.json
 ```
 
@@ -60,10 +60,10 @@ failover, then verify and clean it up:
 
 ```sh
 REDIS_URL='isolated Redis URL' QUACK_RECOVERY_NAMESPACE='rehearsal-id' \
-  QUACK_RECOVERY_TOKEN='random token' go run ./cmd/quack-storage-verify redis-write
+  QUACK_RECOVERY_TOKEN='random token' go run ./apps/backend/cmd/quack-storage-verify redis-write
 
 REDIS_URL='isolated Redis URL' QUACK_RECOVERY_NAMESPACE='rehearsal-id' \
-  QUACK_RECOVERY_TOKEN='random token' go run ./cmd/quack-storage-verify redis-verify
+  QUACK_RECOVERY_TOKEN='random token' go run ./apps/backend/cmd/quack-storage-verify redis-verify
 ```
 
 The second command must use a newly opened client and deletes the probe after a

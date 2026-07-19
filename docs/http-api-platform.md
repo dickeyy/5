@@ -65,7 +65,7 @@ headers, cookies, session IDs, OAuth codes, or tokens.
 
 ## Rate-limit and idempotency primitives
 
-`internal/httpapi/platform` exposes fail-closed Redis primitives. Actor, guild,
+`apps/backend/internal/httpapi/platform` exposes fail-closed Redis primitives. Actor, guild,
 and caller keys are SHA-256 hashed before Redis storage. Redis unavailability
 returns `dependency_unavailable`; it never silently bypasses a limit or lease.
 

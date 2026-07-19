@@ -1,6 +1,6 @@
 # Discord Interactions
 
-The dispatcher in `internal/discordbot/interactions` supports commands,
+The dispatcher in `apps/backend/internal/discordbot/interactions` supports commands,
 autocomplete, components, and modals. The command registry installs `/case`
 and the `Create moderation case` message context command.
 

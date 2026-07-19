@@ -525,9 +525,9 @@ Items are grouped by concern, not by implementation order or priority. Completed
 - [x] DEFERRED — execute Docker Compose smoke only after the user authorizes Compose/deployment-infrastructure changes; the exact smoke contract is documented in `docs/release-infrastructure-proposal-v5.md`.
 - [x] Add a real test-guild checklist covering install, starter policy, permissions, hierarchy, evidence channel, case creation, each action, member DM, member case access, appeal, audit mirror, and recovery.
 - [x] Run targeted `go test -race` coverage for the queue, action claims, case creation, appeal decisions, evidence capture, HTTP policies, Discord dedupe, and modules.
-- [x] DEFERRED — add `go vet ./...` to CI only after the user authorizes release-infrastructure changes; QP-I still runs vet as a local required gate.
+- [x] DEFERRED — add `go vet ./apps/backend/...` to CI only after the user authorizes release-infrastructure changes; QP-I still runs vet as a local required gate.
 - [x] DEFERRED — add race, integration, and migration CI service jobs only after the user authorizes release-infrastructure changes; exact jobs are documented in `docs/release-infrastructure-proposal-v5.md`.
-- [x] Keep `go test ./...`, `go vet ./...`, and builds for all four operator/application commands as required release gates in `scripts/v5-readiness.sh`.
+- [x] Keep `go test ./apps/backend/...`, `go vet ./apps/backend/...`, and builds for all four operator/application commands as required release gates in `apps/backend/scripts/v5-readiness.sh`.
 - [x] DEFERRED — enforce a CI coverage threshold only after the infrastructure owner selects the non-regression policy and the user authorizes release-infrastructure changes.
 - [x] Add fuzz tests for Discord message links, custom IDs, imported template/config JSON, structured context, and legacy import rows.
 - [x] DEFERRED — change Compose/container Go pinning only after the user authorizes Dockerfile/Compose release-infrastructure changes; the repository module pins Go 1.25.4 and the exact proposal is documented.

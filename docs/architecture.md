@@ -2,8 +2,8 @@
 
 ## Runtime
 
-Quack is one Go process started by `cmd/quack/main.go`. The composition root in
-`internal/runtime` loads immutable configuration, opens MySQL and Redis,
+Quack is one Go process started by `apps/backend/cmd/quack/main.go`. The composition root in
+`apps/backend/internal/runtime` loads immutable configuration, opens MySQL and Redis,
 migrates the schema, creates the Discord adapter, application services, durable
 work scheduler, and HTTP adapter, then shuts them down in reverse order.
 
@@ -20,17 +20,17 @@ guild.
 
 ## Boundaries
 
-- `internal/quack` contains transport-independent use cases, domain models,
+- `apps/backend/internal/quack` contains transport-independent use cases, domain models,
   repository ports, Discord gateway ports, and queue ports.
-- `internal/store` implements repository ports with GORM/MySQL and Redis.
+- `apps/backend/internal/store` implements repository ports with GORM/MySQL and Redis.
   GORM-tagged migration records remain private to this adapter.
-- `internal/httpapi` translates HTTP requests, authentication, cookies, and
+- `apps/backend/internal/httpapi` translates HTTP requests, authentication, cookies, and
   response DTOs into application calls.
-- `internal/discordbot` translates Discord interactions into the same
+- `apps/backend/internal/discordbot` translates Discord interactions into the same
   application calls and owns Discord response rendering and command sync.
-- `internal/workqueue` schedules persisted case actions for application
+- `apps/backend/internal/workqueue` schedules persisted case actions for application
   processing.
-- `internal/config` owns environment parsing without mutable global state.
+- `apps/backend/internal/config` owns environment parsing without mutable global state.
 
 Dependencies point inward: adapters may import the application core, while the
 core imports no Gin, DiscordGo, GORM, or Redis packages.
