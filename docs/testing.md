@@ -24,8 +24,10 @@ SQLite-backed tests are intended to catch:
 
 They are not a replacement for MySQL coverage. Any behavior that depends on
 MySQL-specific SQL, indexes, locking, JSON semantics, unsigned integers, or
-transaction isolation should be covered later with a real MySQL-backed
-integration test.
+transaction isolation uses a real MySQL-backed integration test when
+`QUACK_TEST_MYSQL_DSN` is configured. Migration integration tests create and
+drop their own uniquely named database rather than altering the database named
+by that DSN.
 
 ## Current Coverage Pressure Points
 

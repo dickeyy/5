@@ -80,6 +80,15 @@ Run the test suite:
 go test ./...
 ```
 
+Apply only database migrations without starting the other adapters:
+
+```sh
+go run ./cmd/quack-migrate up
+```
+
+See [`migrations.md`](migrations.md) before any production forward or rollback
+operation.
+
 When you need a stable local cache path on macOS, this repo has previously been
 run with:
 

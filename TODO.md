@@ -443,11 +443,11 @@ Items are grouped by concern, not by implementation order or priority. Completed
 
 ## Database and Storage Reliability
 
-- [ ] Replace production reliance on startup-only `AutoMigrate` with versioned, reviewable database migrations.
-- [ ] Keep startup migration compatibility for local development only if it remains useful.
+- [x] Replace production reliance on startup-only `AutoMigrate` with versioned, reviewable database migrations.
+- [x] Remove startup `AutoMigrate` instead of retaining a separate local-development schema path.
 - [ ] Add forward and rollback migration procedures for every v5 model realignment.
-- [ ] Test migrations against a copy of the current v5 schema and representative stored data.
-- [ ] Preserve table names, IDs, case numbers, snapshots, and audit history through schema changes.
+- [x] Test the migration foundation against the current pre-ledger v5 schema and representative stored data.
+- [x] Preserve table names, IDs, case numbers, snapshots, action attempts, events, and audit history through the migration foundation.
 - [ ] Add database constraints for one default level per template where feasible.
 - [ ] Add database constraints for zero or one enforcement action per level where feasible.
 - [ ] Add database constraints for one appeal per case.
