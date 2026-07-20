@@ -517,8 +517,8 @@ func assertTemplateDeletedState(t *testing.T, db *gorm.DB, templateID string, de
 	if err := db.Unscoped().Where("id = ?", templateID).First(&record).Error; err != nil {
 		t.Fatalf("load template %s: %v", templateID, err)
 	}
-	if record.DeletedAt.Valid != deleted {
-		t.Fatalf("template %s deleted=%v, want %v", templateID, record.DeletedAt.Valid, deleted)
+	if (record.DeletedAt != nil) != deleted {
+		t.Fatalf("template %s deleted=%v, want %v", templateID, record.DeletedAt != nil, deleted)
 	}
 }
 

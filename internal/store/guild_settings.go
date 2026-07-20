@@ -283,7 +283,7 @@ func (s *Store) DeactivateGuild(ctx context.Context, discordGuildID string, audi
 // ensureStarterPolicy creates the exact editable v5 starter template or returns its existing identity on repeated bootstrap.
 func ensureStarterPolicy(tx *gorm.DB, guildID string, now time.Time) (*model.ExpandedCaseTemplate, bool, error) {
 	var existing CaseTemplateRecord
-	query := tx.Unscoped().Where("guild_id = ? AND slug = ?", guildID, starterPolicySlug).Limit(1).Find(&existing)
+	query := tx.Where("guild_id = ? AND slug = ?", guildID, starterPolicySlug).Limit(1).Find(&existing)
 	if query.Error != nil {
 		return nil, false, fmt.Errorf("find starter policy: %w", query.Error)
 	}
