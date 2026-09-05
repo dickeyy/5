@@ -142,6 +142,7 @@ type discordFake struct {
 	channelCalls    int
 	archiveAttempts int
 	failArchive     int
+	permissionError error
 }
 
 func (f *discordFake) CreatePrivateTicketChannel(context.Context, string, string, tickets.Settings) (string, error) {
@@ -150,7 +151,40 @@ func (f *discordFake) CreatePrivateTicketChannel(context.Context, string, string
 }
 func (f *discordFake) EnsureTicketPermissions(context.Context, string, string, string, []string) error {
 	f.permissionCalls++
-	return nil
+	return f.permissionError
+}
+
+// TestDiscordOpeningLimitsPrecedeProvisioning covers repeated button clicks
+// and failed private ACL setup without creating unbounded orphan channels.
+func TestDiscordOpeningLimitsPrecedeProvisioning(t *testing.T) {
+	_, service, _ := setup(t)
+	client := &discordFake{}
+	adapter := tickets.NewDiscordAdapter(service, client)
+	actor := tickets.Actor{GuildID: "guild-a", DiscordUserID: "member"}
+	if _, err := adapter.Open(context.Background(), actor); err != nil {
+		t.Fatal(err)
+	}
+	for range 5 {
+		if _, err := adapter.Open(context.Background(), actor); !errors.Is(err, tickets.ErrDuplicateOpen) {
+			t.Fatalf("duplicate opening: %v", err)
+		}
+	}
+	if client.channelCalls != 1 {
+		t.Fatalf("duplicate created %d channels", client.channelCalls)
+	}
+	actor.DiscordUserID = "failed-member"
+	client.permissionError = errors.New("private ACL unavailable")
+	for range 3 {
+		if _, err := adapter.Open(context.Background(), actor); err == nil {
+			t.Fatal("expected ACL rejection")
+		}
+	}
+	if _, err := adapter.Open(context.Background(), actor); !errors.Is(err, tickets.ErrRateLimited) {
+		t.Fatalf("failed provisioning bypassed daily allowance: %v", err)
+	}
+	if client.channelCalls != 4 || len(client.archived) != 3 {
+		t.Fatalf("unexpected provisional cleanup: %+v", client)
+	}
 }
 func (f *discordFake) SendTicketReply(_ context.Context, _ string, body string) error {
 	f.replies = append(f.replies, body)
@@ -158,6 +192,10 @@ func (f *discordFake) SendTicketReply(_ context.Context, _ string, body string) 
 }
 func (f *discordFake) CaptureTicketTranscript(context.Context, string) (string, error) {
 	return "captured", nil
+}
+func (f *discordFake) DeleteProvisionalTicketChannel(_ context.Context, id string) error {
+	f.archived = append(f.archived, id)
+	return nil
 }
 func (f *discordFake) ArchiveTicketChannel(_ context.Context, id string) error {
 	f.archiveAttempts++
@@ -237,5 +275,27 @@ func TestComponentRegistrarAndControls(t *testing.T) {
 	}
 	if len(tickets.EntryComponents()) != 1 || len(tickets.TicketComponents("ticket-id")) != 1 {
 		t.Fatal("missing ticket controls")
+	}
+}
+
+func TestPrivateThreadSettingDefaultsAndRoundTrips(t *testing.T) {
+	if !tickets.Defaults().UsePrivateThreads {
+		t.Fatal("new ticket settings should default to private threads")
+	}
+	_, service, _ := setup(t)
+	actor := tickets.Actor{GuildID: "guild-a", DiscordUserID: "admin", CanManage: true}
+	for _, useThreads := range []bool{true, false} {
+		settings := tickets.Defaults()
+		settings.EntryChannelDiscordID = "entry"
+		settings.StaffRoleDiscordIDs = []string{"staff-role"}
+		settings.UsePrivateThreads = useThreads
+		saved, err := service.UpdateSettings(context.Background(), actor, true, settings)
+		if err != nil || saved.UsePrivateThreads != useThreads {
+			t.Fatalf("save thread setting: %+v %v", saved, err)
+		}
+		loaded, _, err := service.Settings(context.Background(), actor)
+		if err != nil || loaded.UsePrivateThreads != useThreads {
+			t.Fatalf("read thread setting: %+v %v", loaded, err)
+		}
 	}
 }

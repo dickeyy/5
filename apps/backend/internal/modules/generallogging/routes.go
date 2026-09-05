@@ -2,8 +2,9 @@ package generallogging
 
 import (
 	"errors"
-	"github.com/gin-gonic/gin"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
 )
 
 // ActorResolver resolves authenticated requests into current Manage Guild authority.

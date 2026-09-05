@@ -50,12 +50,13 @@ var (
 
 // Settings fixes the module's Discord, privacy, retention, and abuse-control policy for one guild.
 type Settings struct {
-	EntryChannelDiscordID   string   `json:"entry_channel_discord_id"`
-	StaffRoleDiscordIDs     []string `json:"staff_role_discord_ids"`
-	UsePrivateThreads       bool     `json:"use_private_threads"`
-	TranscriptRetentionDays int      `json:"transcript_retention_days"`
-	DailyOpenLimit          int      `json:"daily_open_limit"`
-	ReopenWindowHours       int      `json:"reopen_window_hours"`
+	EntryChannelDiscordID string   `json:"entry_channel_discord_id"`
+	StaffRoleDiscordIDs   []string `json:"staff_role_discord_ids"`
+	// UsePrivateThreads creates tickets under the entry channel when enabled.
+	UsePrivateThreads       bool `json:"use_private_threads"`
+	TranscriptRetentionDays int  `json:"transcript_retention_days"`
+	DailyOpenLimit          int  `json:"daily_open_limit"`
+	ReopenWindowHours       int  `json:"reopen_window_hours"`
 }
 
 // Defaults returns privacy-preserving settings for a newly enabled guild.

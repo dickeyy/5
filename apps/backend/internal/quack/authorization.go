@@ -257,7 +257,7 @@ func (s *GuildService) auditAuthorizationDenialWithMetadata(ctx context.Context,
 	if actorID == "" && guildContext.Staff != nil {
 		actorID = guildContext.Staff.DiscordUserID
 	}
-	return s.store.CreateAuditLogEntry(ctx, &model.AuditLogEntry{
+	return recordAudit(ctx, s.store, &model.AuditLogEntry{
 		GuildID: guildContext.Guild.ID, ActorDiscordUserID: actorID,
 		ActorPermissionBits: guildContext.PermissionBits, Source: source,
 		Action: "authorization.denied", ResourceType: "permission", ResourceID: string(capability),

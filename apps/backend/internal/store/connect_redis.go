@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"time"
 
 	r "github.com/redis/go-redis/v9"
 )
@@ -14,7 +15,10 @@ func OpenRedis(rawURL string) (*r.Client, error) {
 		return nil, fmt.Errorf("parse Redis URL: %w", err)
 	}
 	client := r.NewClient(options)
-	if _, err := client.Ping(context.Background()).Result(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := client.Ping(ctx).Result(); err != nil {
+		_ = client.Close()
 		return nil, fmt.Errorf("ping Redis: %w", err)
 	}
 	return client, nil

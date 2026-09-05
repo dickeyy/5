@@ -3,6 +3,9 @@ package honeypot
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"sync"
 )
 
@@ -77,7 +80,7 @@ func NewRuntime(ctx context.Context, adapter *DiscordAdapter, capacity, workers 
 		go func() {
 			defer runtime.wg.Done()
 			for message := range runtime.events {
-				_, _ = adapter.HandleMessage(ctx, message)
+				runtime.process(ctx, message)
 			}
 		}()
 	}
@@ -108,12 +111,24 @@ func (r *Runtime) Close() {
 		return
 	}
 	r.mu.Lock()
-	if r.closed {
-		r.mu.Unlock()
-		return
+	if !r.closed {
+		r.closed = true
+		close(r.events)
 	}
-	r.closed = true
-	close(r.events)
 	r.mu.Unlock()
 	r.wg.Wait()
+}
+
+// process contains adapter failures within one job so a bad event cannot stop
+// moderation or take down unrelated workers. Message contents are never logged.
+func (r *Runtime) process(ctx context.Context, event Message) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			slog.ErrorContext(ctx, "Honeypot worker panicked", "guild_id", event.GuildID,
+				"panic_type", fmt.Sprintf("%T", recovered), "stack", string(debug.Stack()))
+		}
+	}()
+	if _, err := r.adapter.HandleMessage(ctx, event); err != nil {
+		slog.ErrorContext(ctx, "Honeypot event failed", "guild_id", event.GuildID, "error_type", fmt.Sprintf("%T", err))
+	}
 }

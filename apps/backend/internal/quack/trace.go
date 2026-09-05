@@ -6,7 +6,7 @@ import (
 	"github.com/quackdiscord/bot/internal/quack/idutil"
 )
 
-// NewTraceID constructs trace id with required dependencies explicit so callers control lifecycle and substitution.
+// NewTraceID creates a sortable random identifier for tracing across HTTP, Discord, and workers.
 func NewTraceID() string {
 	return idutil.NewTraceID()
 }

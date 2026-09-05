@@ -21,17 +21,19 @@ type StatisticsInput struct {
 	To   string
 }
 
-type statisticsRepository interface {
+// StatisticsRepository derives operational statistics from immutable history.
+type StatisticsRepository interface {
+	CreateAuditLogEntry(context.Context, *model.AuditLogEntry) error
 	DeriveStaffStatistics(context.Context, model.StaffStatisticsParams) (*model.StaffStatistics, error)
 }
 
 // StaffStatisticsService derives guild-scoped operational counts without persisting aggregates or rankings.
 type StaffStatisticsService struct {
-	store Repository
+	store StatisticsRepository
 }
 
 // NewStaffStatisticsService constructs the derived statistics capability over the existing source-of-truth repository.
-func NewStaffStatisticsService(store Repository) *StaffStatisticsService {
+func NewStaffStatisticsService(store StatisticsRepository) *StaffStatisticsService {
 	return &StaffStatisticsService{store: store}
 }
 
@@ -48,11 +50,7 @@ func (s *StaffStatisticsService) Get(ctx context.Context, guildContext *GuildSta
 	if err != nil {
 		return nil, err
 	}
-	repository, ok := s.store.(statisticsRepository)
-	if !ok {
-		return nil, errors.New("statistics repository is not configured")
-	}
-	result, err := repository.DeriveStaffStatistics(ctx, model.StaffStatisticsParams{GuildID: guildContext.Guild.ID, From: from, To: to})
+	result, err := s.store.DeriveStaffStatistics(ctx, model.StaffStatisticsParams{GuildID: guildContext.Guild.ID, From: from, To: to})
 	if err != nil {
 		s.auditRead(ctx, guildContext, model.AuditResultFailure, "query_failed")
 		return nil, err
@@ -65,7 +63,7 @@ func (s *StaffStatisticsService) Get(ctx context.Context, guildContext *GuildSta
 
 func statisticsRange(input StatisticsInput, now time.Time) (time.Time, time.Time, error) {
 	to := now.UTC()
-	from := to.AddDate(0, -1, 0)
+	var from time.Time
 	var err error
 	if strings.TrimSpace(input.To) != "" {
 		to, err = time.Parse(time.RFC3339, strings.TrimSpace(input.To))
@@ -73,6 +71,7 @@ func statisticsRange(input StatisticsInput, now time.Time) (time.Time, time.Time
 			return time.Time{}, time.Time{}, fmt.Errorf("%w: to must use RFC3339", ErrStatisticsValidation)
 		}
 	}
+	from = to.AddDate(0, -1, 0)
 	if strings.TrimSpace(input.From) != "" {
 		from, err = time.Parse(time.RFC3339, strings.TrimSpace(input.From))
 		if err != nil {
@@ -97,5 +96,5 @@ func (s *StaffStatisticsService) auditRead(ctx context.Context, guildContext *Gu
 		bits = guildContext.PermissionBits
 	}
 	requestID, correlationID := TraceIDsFromContext(ctx)
-	return s.store.CreateAuditLogEntry(ctx, &model.AuditLogEntry{GuildID: guildContext.Guild.ID, ActorDiscordUserID: actorID, ActorPermissionBits: bits, Source: model.AuditSourceAPI, Action: string(model.AuditActionStatisticsRead), ResourceType: "statistics", ResourceID: "guild", Result: result, FailureReason: failure, RequestID: requestID, CorrelationID: correlationID, MetadataJSON: "{}"})
+	return recordAudit(ctx, s.store, &model.AuditLogEntry{GuildID: guildContext.Guild.ID, ActorDiscordUserID: actorID, ActorPermissionBits: bits, Source: model.AuditSourceAPI, Action: string(model.AuditActionStatisticsRead), ResourceType: "statistics", ResourceID: "guild", Result: result, FailureReason: failure, RequestID: requestID, CorrelationID: correlationID, MetadataJSON: "{}"})
 }

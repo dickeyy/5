@@ -2,17 +2,19 @@ package interactions
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 
+	"log/slog"
+
 	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/internal/discordbot/ui"
 	"github.com/quackdiscord/bot/internal/quack"
 	"github.com/quackdiscord/bot/internal/quack/model"
-	"github.com/rs/zerolog/log"
 )
 
 // CommandLookup groups the command lookup state used to keep this package's responsibilities explicit.
@@ -113,6 +115,7 @@ func (d *Dispatcher) handleModal(session *discordgo.Session, interaction *discor
 
 // execute processes execute according to persisted state and retry policy.
 func (d *Dispatcher) execute(session *discordgo.Session, interaction *discordgo.InteractionCreate, name string, handler ui.Handler) {
+	started := time.Now()
 	if interaction != nil && !d.interactionDeduper().Claim(interaction.ID) {
 		return
 	}
@@ -122,14 +125,19 @@ func (d *Dispatcher) execute(session *discordgo.Session, interaction *discordgo.
 		return
 	}
 	if err := d.respond(interaction, result.Response); err != nil {
-		log.Error().Err(err).Str("interaction", name).Msg("failed to respond to Discord interaction")
+		attrs := discordErrorAttrs(err)
+		attrs = append(attrs, "interaction", name, "interaction_type", int(interaction.Type), "response_type", int(result.Response.Type), "elapsed_ms", time.Since(started).Milliseconds())
+		if created, timestampErr := discordgo.SnowflakeTimestamp(interaction.ID); timestampErr == nil {
+			attrs = append(attrs, "interaction_age_ms", time.Since(created).Milliseconds())
+		}
+		slog.ErrorContext(ctx, "failed to respond to Discord interaction", attrs...)
 		return
 	}
 	if result.Task == nil {
 		return
 	}
 
-	go d.runTask(ctx, interaction, name, result.Task)
+	go d.runTask(ctx, interaction, name, result.Task, result.Response.Type)
 }
 
 func (d *Dispatcher) interactionDeduper() *InteractionDeduper {
@@ -145,13 +153,7 @@ func (d *Dispatcher) interactionDeduper() *InteractionDeduper {
 func (d *Dispatcher) safeHandle(ctx context.Context, session *discordgo.Session, interaction *discordgo.InteractionCreate, name string, handler ui.Handler) (result ui.HandlerResult) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			log.Error().
-				Str("interaction", name).
-				Str("request_id", quack.RequestIDFromContext(ctx)).
-				Str("correlation_id", quack.CorrelationIDFromContext(ctx)).
-				Interface("panic", recovered).
-				Bytes("stack", debug.Stack()).
-				Msg("Discord interaction handler panicked")
+			slog.Error("Discord interaction handler panicked", "interaction", name, "request_id", quack.RequestIDFromContext(ctx), "correlation_id", quack.CorrelationIDFromContext(ctx), "panic_type", fmt.Sprintf("%T", recovered), "stack", debug.Stack())
 			result = ui.Immediate(ui.Error("Quack could not handle that interaction."))
 		}
 	}()
@@ -164,27 +166,16 @@ func (d *Dispatcher) safeHandle(ctx context.Context, session *discordgo.Session,
 }
 
 // runTask encapsulates the run task rule so callers share one consistent package implementation.
-func (d *Dispatcher) runTask(ctx context.Context, interaction *discordgo.InteractionCreate, name string, task ui.Task) {
+func (d *Dispatcher) runTask(ctx context.Context, interaction *discordgo.InteractionCreate, name string, task ui.Task, responseType discordgo.InteractionResponseType) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			log.Error().
-				Str("interaction", name).
-				Str("request_id", quack.RequestIDFromContext(ctx)).
-				Str("correlation_id", quack.CorrelationIDFromContext(ctx)).
-				Interface("panic", recovered).
-				Bytes("stack", debug.Stack()).
-				Msg("Discord interaction task panicked")
-			_, _ = d.responder(interaction).EditOriginal(ui.ErrorEdit("Quack could not finish that interaction."))
+			slog.Error("Discord interaction task panicked", "interaction", name, "request_id", quack.RequestIDFromContext(ctx), "correlation_id", quack.CorrelationIDFromContext(ctx), "panic_type", fmt.Sprintf("%T", recovered), "stack", debug.Stack())
+			d.taskError(interaction, responseType)
 		}
 	}()
 	if err := task(ctx, d.responder(interaction)); err != nil {
-		log.Error().
-			Err(err).
-			Str("interaction", name).
-			Str("request_id", quack.RequestIDFromContext(ctx)).
-			Str("correlation_id", quack.CorrelationIDFromContext(ctx)).
-			Msg("Discord interaction task failed")
-		_, _ = d.responder(interaction).EditOriginal(ui.ErrorEdit("Quack could not finish that interaction."))
+		slog.Error("Discord interaction task failed", "error_type", fmt.Sprintf("%T", err), "interaction", name, "request_id", quack.RequestIDFromContext(ctx), "correlation_id", quack.CorrelationIDFromContext(ctx))
+		d.taskError(interaction, responseType)
 	}
 }
 
@@ -276,4 +267,32 @@ func (c sessionClient) InteractionResponseDelete(interaction *discordgo.Interact
 // Key encapsulates the key rule so callers share one consistent package implementation.
 func Key(namespace, action string) string {
 	return strings.TrimSpace(namespace) + ":" + strings.TrimSpace(action)
+}
+
+// taskError preserves a shared component message when an action fails, reporting
+// the error only to the person who clicked it. Private defers remain private.
+func (d *Dispatcher) taskError(interaction *discordgo.InteractionCreate, responseType discordgo.InteractionResponseType) {
+	const message = "Quack could not finish that interaction."
+	responder := d.responder(interaction)
+	if responseType == discordgo.InteractionResponseDeferredMessageUpdate {
+		_, _ = responder.Followup(ui.EmbedMessage(ui.ErrorEmbed(message), true))
+		return
+	}
+	_, _ = responder.EditOriginal(ui.ErrorEdit(message))
+}
+
+// discordErrorAttrs retains Discord's numeric rejection details without logging
+// request URLs, interaction tokens, response bodies, or submitted case content.
+func discordErrorAttrs(err error) []any {
+	attrs := []any{"error_type", fmt.Sprintf("%T", err)}
+	var restErr *discordgo.RESTError
+	if errors.As(err, &restErr) {
+		if restErr.Response != nil {
+			attrs = append(attrs, "http_status", restErr.Response.StatusCode)
+		}
+		if restErr.Message != nil {
+			attrs = append(attrs, "discord_code", restErr.Message.Code)
+		}
+	}
+	return attrs
 }

@@ -136,3 +136,63 @@ func TestQueueRecoversHandlerPanic(t *testing.T) {
 		t.Fatalf("unexpected panic stats: %+v", stats)
 	}
 }
+
+func TestQueueCoalescesPendingWork(t *testing.T) {
+	q := New(1, 1)
+	started, release := make(chan struct{}), make(chan struct{})
+	q.Start(context.Background(), func(context.Context, string) error {
+		close(started)
+		<-release
+		return nil
+	}, nil)
+	q.Submit(context.Background(), "case-1")
+	<-started
+	for range 100 {
+		if !q.Submit(context.Background(), "case-1") {
+			t.Fatal("pending work should be accepted without another slot")
+		}
+	}
+	close(release)
+	q.Stop()
+	if stats := q.Stats(); stats.EnqueuedTotal != 1 || stats.ProcessedTotal != 1 {
+		t.Fatalf("duplicate work was queued: %+v", stats)
+	}
+}
+
+func TestQueueCannotRestartAfterStop(t *testing.T) {
+	q := New(1, 1)
+	handler := func(context.Context, string) error { return nil }
+	q.Start(context.Background(), handler, nil)
+	q.Stop()
+	q.Start(context.Background(), handler, nil)
+	if q.IsActive() || q.Submit(context.Background(), "case-1") {
+		t.Fatal("a stopped queue must remain closed")
+	}
+	q.Stop()
+}
+
+func TestConcurrentStopWaitsForWorkers(t *testing.T) {
+	q := New(1, 1)
+	started := make(chan struct{})
+	q.Start(context.Background(), func(ctx context.Context, _ string) error {
+		close(started)
+		<-ctx.Done()
+		return ctx.Err()
+	}, nil)
+	q.Submit(context.Background(), "case-1")
+	<-started
+	// The first caller starts a graceful drain. The second must wait for that
+	// same drain, and its deadline must cancel the in-flight dependency.
+	stopped := make(chan struct{})
+	go func() { q.Stop(); close(stopped) }()
+	deadline, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := q.StopContext(deadline); err == nil {
+		t.Fatal("shutdown returned before the active handler completed")
+	}
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("concurrent shutdown did not release the first caller")
+	}
+}

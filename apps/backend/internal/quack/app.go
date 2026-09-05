@@ -37,6 +37,9 @@ func NewWithConfigDependencies(cfg config.Config, store Repository, discord Disc
 	services := &Services{Config: cfg, Store: store}
 	services.Guilds = NewGuildService(store, discord)
 	services.Settings = NewGuildSettingsService(store)
+	if channels, ok := actions.(StaffChannelValidator); ok {
+		services.Settings.WithStaffChannelValidator(channels)
+	}
 	services.Templates = NewTemplateService(store)
 	services.Cases = NewCaseService(store, scheduler)
 	if evidenceClient, ok := actions.(DiscordEvidenceClient); ok {

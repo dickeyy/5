@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/quackdiscord/bot/internal/httpapi/apierror"
+
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/internal/httpapi/middleware"
 	"github.com/quackdiscord/bot/internal/quack"
@@ -36,6 +38,7 @@ func getGuildSettings(c *gin.Context, services *quack.Services) {
 // @Accept json
 // @Produce json
 // @Param discordGuildID path string true "Discord guild ID"
+// @Param Idempotency-Key header string true "Retry-safe request key"
 // @Param settings body quack.GuildSettingsInput true "Partial guild settings"
 // @Security CookieAuth
 // @Success 200 {object} map[string]interface{}
@@ -62,6 +65,7 @@ func updateGuildSettings(c *gin.Context, services *quack.Services) {
 // @Tags Guild settings
 // @Produce json
 // @Param discordGuildID path string true "Discord guild ID"
+// @Param Idempotency-Key header string true "Retry-safe request key"
 // @Security CookieAuth
 // @Success 200 {object} map[string]interface{}
 // @Failure 403 {object} map[string]interface{}
@@ -96,12 +100,12 @@ func bindGuildSettingsInput(c *gin.Context, input *quack.GuildSettingsInput) err
 func writeGuildSettingsError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, quack.ErrGuildSettingsValidation):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		apierror.Write(c, http.StatusBadRequest, apierror.CodeValidation, err.Error())
 	case errors.Is(err, quack.ErrGuildSettingsPermissionDenied):
-		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		apierror.Write(c, http.StatusForbidden, apierror.CodeAuthorization, err.Error())
 	case errors.Is(err, quack.ErrGuildSettingsNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		apierror.Write(c, http.StatusNotFound, apierror.CodeNotFound, err.Error())
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "guild settings operation failed"})
+		apierror.Write(c, http.StatusInternalServerError, apierror.CodeInternal, "guild settings operation failed")
 	}
 }

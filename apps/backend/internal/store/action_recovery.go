@@ -161,7 +161,9 @@ func (s *Store) QueueCaseReversal(ctx context.Context, params model.QueueCaseRev
 			}
 		}
 		var maxPosition int
-		_ = tx.Model(&model.CaseActionExecution{}).Where("case_id = ?", params.CaseID).Select("COALESCE(MAX(position), -1)").Scan(&maxPosition).Error
+		if err := tx.Model(&model.CaseActionExecution{}).Where("case_id = ?", params.CaseID).Select("COALESCE(MAX(position), -1)").Scan(&maxPosition).Error; err != nil {
+			return fmt.Errorf("find reversal position: %w", err)
+		}
 		originalID := original.ID
 		reversal = model.CaseActionExecution{CaseID: params.CaseID, Position: maxPosition + 1, ActionType: params.ActionType, Status: model.ActionExecutionPending, IdempotencyKey: fmt.Sprintf("case:%s:reversal:%s:%s", params.CaseID, original.ID, params.ActionType), ConfigSnapshotJSON: "{}", SafeForRetry: false, Irreversible: true, ReversalOfExecutionID: &originalID, ReversalAppealID: params.AppealID}
 		var existing model.CaseActionExecution

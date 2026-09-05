@@ -52,3 +52,16 @@ func TestRedisInteractionDeduperSurvivesRestartAndFailsClosed(t *testing.T) {
 		t.Fatal("expected Redis fixture to be unavailable")
 	}
 }
+
+func TestInteractionCapacityCannotEvictLiveClaims(t *testing.T) {
+	deduper := interactions.NewInteractionDeduper(time.Minute, 1)
+	if !deduper.Claim("first") {
+		t.Fatal("initial claim rejected")
+	}
+	if deduper.Claim("second") {
+		t.Fatal("capacity must fail closed until a claim expires")
+	}
+	if deduper.Claim("first") {
+		t.Fatal("capacity pressure forgot a live interaction")
+	}
+}

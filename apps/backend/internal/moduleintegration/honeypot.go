@@ -106,7 +106,7 @@ func (v honeypotChannelValidator) ValidateHoneypotChannel(ctx context.Context, g
 	if err != nil {
 		return err
 	}
-	channel, err := v.session.Channel(strings.TrimSpace(channelID))
+	channel, err := v.session.Channel(strings.TrimSpace(channelID), discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 	if err != nil || channel == nil || channel.GuildID != discordGuildID {
 		return honeypot.ErrChannelUnavailable
 	}

@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"time"
 
 	"github.com/quackdiscord/bot/internal/config"
 	"github.com/quackdiscord/bot/internal/discordbot"
 	"github.com/quackdiscord/bot/internal/discordbot/commands"
 	"github.com/quackdiscord/bot/internal/httpapi"
+	"github.com/quackdiscord/bot/internal/logging"
 	"github.com/quackdiscord/bot/internal/moduleintegration"
 	"github.com/quackdiscord/bot/internal/quack"
 	"github.com/quackdiscord/bot/internal/store"
@@ -18,10 +21,19 @@ import (
 
 // Run assembles every adapter around the application core, starts the process, and shuts dependencies down in reverse order.
 func Run(ctx context.Context) (runErr error) {
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("validate startup configuration: %w", err)
 	}
+	logger, err := logging.New(os.Stderr, cfg.Environment == "dev", cfg.Observability.LogLevel)
+	if err != nil {
+		return err
+	}
+	slog.SetDefault(logger.With("service", cfg.Observability.ServiceName))
+	slog.InfoContext(ctx, "Starting Quack", "environment", cfg.Environment)
 	if _, err := httpapi.NewPlatformRegistrar(cfg); err != nil {
 		return fmt.Errorf("validate HTTP security configuration: %w", err)
 	}
@@ -45,6 +57,7 @@ func Run(ctx context.Context) (runErr error) {
 	if err := repositories.Migrate(); err != nil {
 		return fmt.Errorf("migrate storage: %w", err)
 	}
+	slog.InfoContext(ctx, "Storage ready")
 
 	bot, err := discordbot.New(cfg.Discord.Token)
 	if err != nil {
@@ -54,6 +67,7 @@ func Run(ctx context.Context) (runErr error) {
 	var moduleRuntime *moduleintegration.Runtime
 	queueStarted := false
 	defer func() {
+		slog.Info("Stopping Quack")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.API.ShutdownTimeoutSeconds)*time.Second)
 		defer cancel()
 		var shutdownErrors []error
@@ -65,6 +79,9 @@ func Run(ctx context.Context) (runErr error) {
 		}
 		shutdownErrors = append(shutdownErrors, closeDiscord(shutdownCtx, bot))
 		runErr = errors.Join(runErr, errors.Join(shutdownErrors...))
+		if runErr == nil {
+			slog.Info("Quack stopped cleanly")
+		}
 	}()
 	services := quack.NewWithConfigDependencies(cfg, repositories, bot, bot, queue)
 	moduleRuntime, err = moduleintegration.New(ctx, repositories, bot.Session, services, bot)
@@ -91,6 +108,7 @@ func Run(ctx context.Context) (runErr error) {
 
 	queue.Start(ctx, services.Actions.ProcessCaseActions, repositories)
 	queueStarted = true
+	slog.InfoContext(ctx, "Action workers started", "workers", cfg.EventQueue.Workers, "capacity", cfg.EventQueue.Size)
 
 	return httpapi.Run(ctx, cfg, services, moduleRuntime, bot)
 }

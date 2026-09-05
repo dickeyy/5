@@ -318,3 +318,37 @@ func validTemplateInput(slug string) quack.TemplateInput {
 		},
 	}
 }
+
+// deniedTemplateStore records denial evidence but panics through its embedded
+// nil port if an unauthorized call reaches policy persistence.
+type deniedTemplateStore struct{ quack.TemplateRepository }
+
+func (deniedTemplateStore) CreateAuditLogEntry(context.Context, *model.AuditLogEntry) error {
+	return nil
+}
+
+func TestTemplateWritesRequireManagerAtServiceBoundary(t *testing.T) {
+	service := quack.NewTemplateService(deniedTemplateStore{})
+	staff := &quack.GuildStaffContext{Guild: &model.Guild{ULIDModel: model.ULIDModel{ID: "guild"}}, Staff: &model.StaffMember{DiscordUserID: "moderator"}, Permissions: map[model.PermissionAction]bool{model.PermissionActionCaseTemplateRead: true}}
+	operations := map[string]func() error{
+		"create": func() error { _, err := service.Create(context.Background(), staff, quack.TemplateInput{}); return err },
+		"update": func() error {
+			_, err := service.Update(context.Background(), staff, "template", quack.TemplateInput{})
+			return err
+		},
+		"archive": func() error { _, err := service.Archive(context.Background(), staff, "template"); return err },
+		"restore": func() error { _, err := service.Restore(context.Background(), staff, "template"); return err },
+		"export":  func() error { _, err := service.Export(context.Background(), staff, "template"); return err },
+		"import": func() error {
+			_, err := service.Import(context.Background(), staff, quack.TemplateImportInput{Confirm: true})
+			return err
+		},
+	}
+	for name, operation := range operations {
+		t.Run(name, func(t *testing.T) {
+			if err := operation(); !errors.Is(err, quack.ErrTemplatePermissionDenied) {
+				t.Fatalf("expected permission denial: %v", err)
+			}
+		})
+	}
+}

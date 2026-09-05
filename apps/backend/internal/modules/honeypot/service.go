@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/quackdiscord/bot/internal/modules"
@@ -219,6 +220,12 @@ func (s *Service) status(ctx context.Context, guildID string, settings Settings,
 }
 
 func (s *Service) audit(ctx context.Context, guildID, actorID, action, resourceType, result string, cause error, resourceID string) {
+	level := slog.LevelInfo
+	if result != "success" {
+		level = slog.LevelWarn
+	}
+	slog.Log(ctx, level, "Module operation completed", "module", "honeypot", "guild_id", guildID, "action", action, "result", result)
+
 	if s.auditor == nil {
 		return
 	}
@@ -226,7 +233,9 @@ func (s *Service) audit(ctx context.Context, guildID, actorID, action, resourceT
 	if cause != nil {
 		failure = cause.Error()
 	}
-	_ = s.auditor.RecordModuleAudit(ctx, modules.AuditEvent{GuildID: guildID, ActorDiscordUserID: actorID, Action: action, ResourceType: resourceType, ResourceID: resourceID, Result: result, FailureReason: failure, MetadataJSON: "{}"})
+	if auditErr := s.auditor.RecordModuleAudit(ctx, modules.AuditEvent{GuildID: guildID, ActorDiscordUserID: actorID, Action: action, ResourceType: resourceType, ResourceID: resourceID, Result: result, FailureReason: failure, MetadataJSON: "{}"}); auditErr != nil {
+		slog.ErrorContext(ctx, "Module audit could not be recorded", "module", "honeypot", "guild_id", guildID, "action", action)
+	}
 }
 
 func normalizeSettings(settings Settings) Settings {

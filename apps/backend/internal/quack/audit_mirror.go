@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -38,14 +39,19 @@ type AuditMirrorSender interface {
 	SendAuditMirror(context.Context, AuditMirrorMessage) error
 }
 
-type auditMirrorRepository interface {
+// AuditMirrorRepository supplies immutable events and the managed destination.
+type AuditMirrorRepository interface {
+	GetGuildSettings(context.Context, string) (*model.GuildSettings, error)
+	GetGuildByID(context.Context, string) (*model.Guild, error)
+	CreateAuditLogEntry(context.Context, *model.AuditLogEntry) error
+	ClearGuildChannelReferences(context.Context, string, string, *model.AuditLogEntry) (*model.GuildSettings, error)
 	ListPendingAuditMirrorEntries(context.Context, int) ([]model.AuditLogEntry, error)
 }
 
 // AuditMirrorWorker polls immutable audit history and mirrors important events
 // out of band so Discord availability never blocks the originating operation.
 type AuditMirrorWorker struct {
-	store    Repository
+	store    AuditMirrorRepository
 	sender   AuditMirrorSender
 	interval time.Duration
 	batch    int
@@ -53,7 +59,7 @@ type AuditMirrorWorker struct {
 }
 
 // NewAuditMirrorWorker constructs the optional audit mirror worker.
-func NewAuditMirrorWorker(store Repository, sender AuditMirrorSender, interval time.Duration) *AuditMirrorWorker {
+func NewAuditMirrorWorker(store AuditMirrorRepository, sender AuditMirrorSender, interval time.Duration) *AuditMirrorWorker {
 	if interval <= 0 {
 		interval = 5 * time.Second
 	}
@@ -68,7 +74,9 @@ func (w *AuditMirrorWorker) Run(ctx context.Context) {
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
 	for {
-		_ = w.PollOnce(ctx)
+		if err := w.PollOnce(ctx); err != nil && ctx.Err() == nil {
+			slog.ErrorContext(ctx, "Audit mirror poll failed", "error", err)
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -82,22 +90,22 @@ func (w *AuditMirrorWorker) PollOnce(ctx context.Context) error {
 	if w == nil || w.store == nil {
 		return errors.New("audit mirror worker is not configured")
 	}
-	repository, ok := w.store.(auditMirrorRepository)
-	if !ok {
-		return errors.New("audit mirror repository is not configured")
-	}
 	w.pollMu.Lock()
 	defer w.pollMu.Unlock()
-	entries, err := repository.ListPendingAuditMirrorEntries(ctx, w.batch)
+	entries, err := w.store.ListPendingAuditMirrorEntries(ctx, w.batch)
 	if err != nil {
 		return err
 	}
+	var failures []error
 	for i := range entries {
-		if err := w.process(ctx, entries[i]); err != nil && ctx.Err() != nil {
-			return ctx.Err()
+		if err := w.process(ctx, entries[i]); err != nil {
+			failures = append(failures, err)
+			if ctx.Err() != nil {
+				break
+			}
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 func (w *AuditMirrorWorker) process(ctx context.Context, entry model.AuditLogEntry) error {
@@ -131,7 +139,7 @@ func (w *AuditMirrorWorker) process(ctx context.Context, entry model.AuditLogEnt
 }
 
 func (w *AuditMirrorWorker) recordOutcome(ctx context.Context, original model.AuditLogEntry, action model.AuditAction, result model.AuditResult, failure string, extra map[string]any) error {
-	return w.store.CreateAuditLogEntry(ctx, &model.AuditLogEntry{GuildID: original.GuildID, ActorDiscordUserID: "quack-system", Source: model.AuditSourceSystem, Action: string(action), ResourceType: "audit_entry", ResourceID: original.ID, Result: result, FailureReason: failure, RequestID: original.RequestID, CorrelationID: original.CorrelationID, MetadataJSON: auditMirrorMetadata(original.ID, extra)})
+	return recordAudit(ctx, w.store, &model.AuditLogEntry{GuildID: original.GuildID, ActorDiscordUserID: "quack-system", Source: model.AuditSourceSystem, Action: string(action), ResourceType: "audit_entry", ResourceID: original.ID, Result: result, FailureReason: failure, RequestID: original.RequestID, CorrelationID: original.CorrelationID, MetadataJSON: auditMirrorMetadata(original.ID, extra)})
 }
 
 func auditMirrorMetadata(originalID string, extra map[string]any) string {

@@ -29,7 +29,7 @@ func CaseDetailMessage(detail *quack.CaseDetailResponse) ui.Message {
 	if detail.TemplateSnapshot != nil {
 		state := "Not eligible"
 		if detail.TemplateSnapshot.Template.Appealable {
-			state = "Eligible; see the registered appeal review view"
+			state = "Eligible"
 		}
 		embed.AddField("Appeal", state, true)
 	}
@@ -47,7 +47,7 @@ func CaseDetailMessage(detail *quack.CaseDetailResponse) ui.Message {
 		embed.AddField("History", history, false)
 	}
 	components := caseDetailComponents(detail)
-	return ui.Message{Embeds: []*discordgo.MessageEmbed{embed.Build()}, Components: components, Ephemeral: true}
+	return ui.Message{Embeds: []*discordgo.MessageEmbed{embed.Build()}, Components: components, Ephemeral: false}
 }
 
 // CaseListMessage renders one stable case page and its navigation controls.
@@ -87,7 +87,7 @@ func CaseListMessage(list *quack.CaseListResponse, page int, targetID string) ui
 		title = "Case History for <@" + targetID + ">"
 	}
 	embed := ui.NewInfoEmbed(title, strings.Join(rows, "\n")).SetFooter(fmt.Sprintf("Page %d/%d · %d total", page, totalPages, total)).Build()
-	return ui.Message{Embeds: []*discordgo.MessageEmbed{embed}, Components: components, Ephemeral: true}
+	return ui.Message{Embeds: []*discordgo.MessageEmbed{embed}, Components: components, Ephemeral: false}
 }
 
 // FailedActionMessage renders the active recovery queue with real retry, dismiss, and void controls.
@@ -99,7 +99,7 @@ func FailedActionMessage(result *model.FailedCaseActionResult, page int) ui.Mess
 	components := []discordgo.MessageComponent{}
 	if result != nil {
 		for index, item := range result.Executions {
-			rows = append(rows, fmt.Sprintf("`%s` · %s · %s", item.ID, item.ActionType, safeFailure(item.LastErrorCode)))
+			rows = append(rows, fmt.Sprintf("`%s` · %s · %s", item.ID, item.ActionType.Label(), safeFailure(item.LastErrorCode)))
 			if index == 0 {
 				retryID := ui.MustCustomID(ui.CustomID{Namespace: "case", Action: "retry", Version: "v1", Payload: item.ID})
 				dismissID := ui.MustCustomID(ui.CustomID{Namespace: "case", Action: "dismiss", Version: "v1", Payload: item.ID})
@@ -122,7 +122,7 @@ func FailedActionMessage(result *model.FailedCaseActionResult, page int) ui.Mess
 	pagination, _ := ui.Pagination("case", "failures", fmt.Sprintf("%d", page), page, totalPages)
 	components = append(components, pagination...)
 	embed := ui.NewErrorEmbed(strings.Join(rows, "\n")).SetTitle("Failed Actions").SetFooter(fmt.Sprintf("Page %d/%d · %d active", page, totalPages, total)).Build()
-	return ui.Message{Embeds: []*discordgo.MessageEmbed{embed}, Components: components, Ephemeral: true}
+	return ui.Message{Embeds: []*discordgo.MessageEmbed{embed}, Components: components, Ephemeral: false}
 }
 
 func caseDetailComponents(detail *quack.CaseDetailResponse) []discordgo.MessageComponent {
@@ -151,7 +151,7 @@ func staffActionSummary(actions []quack.CaseActionDetailResponse) string {
 	}
 	rows := make([]string, 0, len(actions))
 	for _, action := range actions {
-		row := fmt.Sprintf("%s · %s · %d attempt(s)", action.ActionType, action.Status, action.AttemptCount)
+		row := fmt.Sprintf("%s · %s · %d attempt(s)", action.ActionType.Label(), action.Status.Label(), action.AttemptCount)
 		if action.LastErrorCode != "" {
 			row += " · " + safeFailure(action.LastErrorCode)
 		}

@@ -1,6 +1,7 @@
 package generallogging
 
 import (
+	"container/list"
 	"sync"
 	"time"
 )
@@ -20,9 +21,11 @@ type MessageCache struct {
 	limits       map[string]int
 	defaultLimit int
 }
+
+// guildCache combines a FIFO list with indexed nodes for constant-time deletes.
 type guildCache struct {
-	order    []string
-	messages map[string]CachedMessage
+	order    list.List
+	messages map[string]*list.Element
 }
 
 // NewMessageCache constructs a bounded cache and normalizes unsafe defaults.
@@ -50,13 +53,14 @@ func (c *MessageCache) Put(message CachedMessage) {
 	defer c.mu.Unlock()
 	g := c.guilds[message.GuildID]
 	if g == nil {
-		g = &guildCache{messages: map[string]CachedMessage{}}
+		g = &guildCache{messages: make(map[string]*list.Element)}
 		c.guilds[message.GuildID] = g
 	}
-	if _, ok := g.messages[message.MessageDiscordID]; !ok {
-		g.order = append(g.order, message.MessageDiscordID)
+	if element, ok := g.messages[message.MessageDiscordID]; ok {
+		element.Value = cloneMessage(message)
+	} else {
+		g.messages[message.MessageDiscordID] = g.order.PushBack(cloneMessage(message))
 	}
-	g.messages[message.MessageDiscordID] = cloneMessage(message)
 	c.evict(message.GuildID)
 }
 
@@ -68,8 +72,11 @@ func (c *MessageCache) Get(guildID, messageID string) (CachedMessage, bool) {
 	if g == nil {
 		return CachedMessage{}, false
 	}
-	message, ok := g.messages[messageID]
-	return cloneMessage(message), ok
+	element, ok := g.messages[messageID]
+	if !ok {
+		return CachedMessage{}, false
+	}
+	return cloneMessage(element.Value.(CachedMessage)), true
 }
 
 // Delete removes and returns one cached message.
@@ -80,18 +87,13 @@ func (c *MessageCache) Delete(guildID, messageID string) (CachedMessage, bool) {
 	if g == nil {
 		return CachedMessage{}, false
 	}
-	message, ok := g.messages[messageID]
+	element, ok := g.messages[messageID]
 	if !ok {
 		return CachedMessage{}, false
 	}
 	delete(g.messages, messageID)
-	for i, id := range g.order {
-		if id == messageID {
-			g.order = append(g.order[:i], g.order[i+1:]...)
-			break
-		}
-	}
-	return cloneMessage(message), true
+	g.order.Remove(element)
+	return cloneMessage(element.Value.(CachedMessage)), true
 }
 
 // Len returns one guild's current bounded cache size.
@@ -103,6 +105,8 @@ func (c *MessageCache) Len(guildID string) int {
 	}
 	return len(c.guilds[guildID].messages)
 }
+
+// evict removes oldest entries while the caller holds the cache mutex.
 func (c *MessageCache) evict(guildID string) {
 	g := c.guilds[guildID]
 	if g == nil {
@@ -112,12 +116,14 @@ func (c *MessageCache) evict(guildID string) {
 	if limit == 0 {
 		limit = c.defaultLimit
 	}
-	for len(g.order) > limit {
-		id := g.order[0]
-		g.order = g.order[1:]
-		delete(g.messages, id)
+	for g.order.Len() > limit {
+		oldest := g.order.Front()
+		delete(g.messages, oldest.Value.(CachedMessage).MessageDiscordID)
+		g.order.Remove(oldest)
 	}
 }
+
+// cloneMessage prevents cached slices from being mutated by gateway callers.
 func cloneMessage(m CachedMessage) CachedMessage {
 	m.Attachments = append([]AttachmentMetadata(nil), m.Attachments...)
 	m.EmbedTypes = append([]string(nil), m.EmbedTypes...)

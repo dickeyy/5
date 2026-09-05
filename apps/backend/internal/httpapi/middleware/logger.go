@@ -1,33 +1,31 @@
 package middleware
 
 import (
+	"log/slog"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/internal/quack"
-	"github.com/rs/zerolog/log"
 )
 
-// Logger encapsulates the logger rule so callers share one consistent package implementation.
+// Logger records one structured result per request. Route patterns exclude
+// user-supplied paths and query parameters, including OAuth credentials.
 func Logger(c *gin.Context) {
 	start := time.Now()
-	path := c.Request.URL.Path
-
 	c.Next()
-
-	event := log.Info()
+	level := slog.LevelInfo
 	if c.Writer.Status() >= 500 {
-		event = log.Error()
+		level = slog.LevelError
 	} else if c.Writer.Status() >= 400 {
-		event = log.Warn()
+		level = slog.LevelWarn
 	}
-
-	event.
-		Str("request_id", quack.RequestIDFromContext(c.Request.Context())).
-		Str("correlation_id", quack.CorrelationIDFromContext(c.Request.Context())).
-		Str("method", c.Request.Method).
-		Str("path", path).
-		Int("status", c.Writer.Status()).
-		Dur("latency", time.Since(start)).
-		Msg("Request completed")
+	path := c.FullPath()
+	if path == "" {
+		path = "unmatched"
+	}
+	slog.Log(c.Request.Context(), level, "HTTP request completed",
+		"request_id", quack.RequestIDFromContext(c.Request.Context()),
+		"correlation_id", quack.CorrelationIDFromContext(c.Request.Context()),
+		"method", c.Request.Method, "route", path,
+		"status", c.Writer.Status(), "duration", time.Since(start))
 }

@@ -60,8 +60,8 @@ func appealReversalHandler(services *quack.Services, appeals *quack.AppealServic
 				_, _ = responder.EditOriginal(ui.ErrorEdit("The reversal could not be authorized or queued."))
 				return nil
 			}
-			message := ui.EmbedMessage(ui.SuccessEmbed("Reversal Queued", "The confirmed reversal passed live permission and hierarchy checks."), true)
-			_, err = responder.EditOriginal(ui.EditMessage(message))
+			message := ui.Content("**Reversal Queued**\n"+"The confirmed reversal passed live permission and hierarchy checks.", false)
+			_, err = ui.Publish(responder, message)
 			return err
 		})
 	}

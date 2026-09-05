@@ -21,6 +21,9 @@ func (b *Bot) SendAuditMirror(ctx context.Context, message quack.AuditMirrorMess
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if err := b.ValidateStaffChannel(ctx, message.DiscordGuildID, message.ChannelDiscordID); err != nil {
+		return fmt.Errorf("%w: private destination validation failed", quack.ErrAuditMirrorChannelUnavailable)
+	}
 	fields := []*discordgo.MessageEmbedField{
 		{Name: "Result", Value: string(message.Result), Inline: true},
 		{Name: "Resource", Value: fmt.Sprintf("%s · `%s`", message.ResourceType, message.ResourceID), Inline: true},
@@ -36,7 +39,7 @@ func (b *Bot) SendAuditMirror(ctx context.Context, message quack.AuditMirrorMess
 		trace = strings.TrimSpace(message.RequestID)
 	}
 	embed := &discordgo.MessageEmbed{Title: truncateAuditMirrorText(message.Action, 256), Description: "Quack moderation audit event", Fields: fields, Color: auditMirrorColor(string(message.Result)), Timestamp: message.OccurredAt.UTC().Format(time.RFC3339), Footer: &discordgo.MessageEmbedFooter{Text: "Audit " + message.AuditEntryID + " · Trace " + trace}}
-	_, err := b.Session.ChannelMessageSendComplex(message.ChannelDiscordID, &discordgo.MessageSend{Embed: embed, AllowedMentions: &discordgo.MessageAllowedMentions{}})
+	_, err := b.Session.ChannelMessageSendComplex(message.ChannelDiscordID, &discordgo.MessageSend{Embed: embed, AllowedMentions: &discordgo.MessageAllowedMentions{}}, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 	if err == nil {
 		return nil
 	}

@@ -40,8 +40,8 @@ func (p *PlatformRegistrar) Register(r *gin.Engine) error {
 	}
 	r.Use(middleware.RequestContext)
 	r.Use(middleware.ErrorEnvelope)
-	r.Use(gin.Recovery())
 	r.Use(middleware.Logger)
+	r.Use(middleware.Recovery)
 	r.Use(middleware.SecurityHeaders)
 	r.Use(middleware.CORS(p.cfg.API.CORSAllowedOrigins))
 	r.Use(middleware.BodyLimit(p.cfg.API.MaxBodyBytes))

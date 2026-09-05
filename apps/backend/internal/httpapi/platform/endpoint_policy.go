@@ -13,7 +13,7 @@ import (
 	"github.com/quackdiscord/bot/internal/httpapi/middleware"
 )
 
-// EndpointPolicy applies the documented route-class rate and replay contract
+// EndpointPolicy applies route-class rates and stages replay behind live authorization
 // to every dashboard-facing guild/member endpoint. Feature registrars may keep
 // narrower protection; distinct classes prevent cross-feature interference.
 func EndpointPolicy(primitives Primitives, cfg config.Config) gin.HandlerFunc {
@@ -39,7 +39,8 @@ func EndpointPolicy(primitives Primitives, cfg config.Config) gin.HandlerFunc {
 			protect := primitives.Idempotency.Protect("dashboard-write:"+class, time.Duration(cfg.RateLimits.IdempotencyTTLHours)*time.Hour, func(c *gin.Context) string {
 				return endpointWriteSubject(c, cfg.Auth.SessionCookieName)
 			})
-			protect(c)
+			c.Set(middleware.ContextAuthorizedWriteKey, protect)
+			c.Next()
 			return
 		}
 		c.Next()
@@ -144,7 +145,7 @@ func endpointSubject(c *gin.Context, cookieName string) string {
 
 // endpointWriteSubject prevents replay across methods and route templates.
 func endpointWriteSubject(c *gin.Context, cookieName string) string {
-	return endpointSubject(c, cookieName) + ":" + c.Request.Method + ":" + c.FullPath()
+	return endpointSubject(c, cookieName) + ":" + c.Request.Method + ":" + c.Request.URL.EscapedPath()
 }
 
 // isEndpointWrite identifies browser and adapter mutations, including PUT.

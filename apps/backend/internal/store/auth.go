@@ -104,7 +104,8 @@ func (s *Store) SaveSession(ctx context.Context, session *model.AuthSession, ttl
 		pipe.Set(ctx, authSessionKeyPrefix+session.ID, body, ttl)
 		userKey := authUserKeyPrefix + session.DiscordUserID
 		pipe.SAdd(ctx, userKey, session.ID)
-		pipe.Expire(ctx, userKey, ttl)
+		pipe.ExpireNX(ctx, userKey, ttl)
+		pipe.ExpireGT(ctx, userKey, ttl)
 		return nil
 	})
 	if err != nil {
@@ -174,17 +175,33 @@ func (s *Store) RevokeUserSessions(ctx context.Context, discordUserID string) er
 	return nil
 }
 
-// RefreshSessionTTL extends an active session without rewriting its payload.
-func (s *Store) RefreshSessionTTL(ctx context.Context, sessionID string, ttl time.Duration) error {
+// refreshSessionScript updates only a still-live session, atomically with its revocation index.
+var refreshSessionScript = r.NewScript(`
+if redis.call("EXISTS", KEYS[1]) == 0 then return 0 end
+redis.call("SET", KEYS[1], ARGV[1], "PX", ARGV[2])
+redis.call("SADD", KEYS[2], ARGV[3])
+local ttl = redis.call("PTTL", KEYS[2])
+if ttl < tonumber(ARGV[2]) then redis.call("PEXPIRE", KEYS[2], ARGV[2]) end
+return 1
+`)
+
+// RefreshSession extends a live session without recreating one revoked by concurrent logout.
+func (s *Store) RefreshSession(ctx context.Context, session *model.AuthSession, ttl time.Duration) (bool, error) {
 	if s == nil || s.redis == nil {
-		return errors.New("redis not connected")
+		return false, errors.New("redis not connected")
 	}
-
-	if err := s.redis.Expire(ctx, authSessionKeyPrefix+sessionID, ttl).Err(); err != nil {
-		return fmt.Errorf("refresh auth session ttl: %w", err)
+	if session == nil || session.ID == "" || session.DiscordUserID == "" || ttl <= 0 {
+		return false, errors.New("valid auth session and TTL are required")
 	}
-
-	return nil
+	body, err := json.Marshal(authSessionRecordFromModel(session))
+	if err != nil {
+		return false, fmt.Errorf("marshal auth session: %w", err)
+	}
+	result, err := refreshSessionScript.Run(ctx, s.redis, []string{authSessionKeyPrefix + session.ID, authUserKeyPrefix + session.DiscordUserID}, body, ttl.Milliseconds(), session.ID).Int()
+	if err != nil {
+		return false, fmt.Errorf("refresh auth session: %w", err)
+	}
+	return result == 1, nil
 }
 
 // authSessionRecordFromModel maps a domain session into its private Redis representation.

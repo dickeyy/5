@@ -24,7 +24,19 @@ var (
 
 // GuildSettingsService owns authorized guild configuration, one-time notice acknowledgement, and immutable audit evidence.
 type GuildSettingsService struct {
-	store Repository
+	store    SettingsRepository
+	channels StaffChannelValidator
+}
+
+// StaffChannelValidator validates live Discord ownership and privacy of outbound staff destinations.
+type StaffChannelValidator interface {
+	ValidateStaffChannel(context.Context, string, string) error
+}
+
+// WithStaffChannelValidator installs the live outbound destination boundary.
+func (s *GuildSettingsService) WithStaffChannelValidator(channels StaffChannelValidator) *GuildSettingsService {
+	s.channels = channels
+	return s
 }
 
 // GuildSettingsInput is a partial settings update; omitted fields retain their current values.
@@ -54,8 +66,8 @@ type GuildSettingsResponse struct {
 	StarterPolicyNoticeAcknowledgedAt *time.Time `json:"starter_policy_notice_acknowledged_at,omitempty"`
 }
 
-// NewGuildSettingsService constructs the settings boundary with explicit persistence ownership.
-func NewGuildSettingsService(store Repository) *GuildSettingsService {
+// NewGuildSettingsService binds guild configuration to audited persistence.
+func NewGuildSettingsService(store SettingsRepository) *GuildSettingsService {
 	return &GuildSettingsService{store: store}
 }
 
@@ -110,6 +122,14 @@ func (s *GuildSettingsService) Update(ctx context.Context, guildContext *GuildSt
 		return nil, err
 	}
 
+	if input.AuditMirrorChannelDiscordID != nil && settings.AuditMirrorChannelDiscordID != "" {
+		if s.channels == nil {
+			return nil, fmt.Errorf("%w: channel validation unavailable", ErrGuildSettingsValidation)
+		}
+		if err := s.channels.ValidateStaffChannel(ctx, guildContext.Guild.DiscordGuildID, settings.AuditMirrorChannelDiscordID); err != nil {
+			return nil, fmt.Errorf("%w: audit channel must be private and belong to this guild", ErrGuildSettingsValidation)
+		}
+	}
 	updated, err := s.store.UpdateGuildSettings(ctx, model.UpdateGuildSettingsParams{
 		Settings: *settings,
 		Audit:    s.auditEntry(ctx, guildContext, "guild_settings.update", model.AuditResultSuccess, ""),
@@ -188,12 +208,9 @@ func applyGuildSettingsInput(settings *model.GuildSettings, input GuildSettingsI
 		settings.AuditMirrorChannelDiscordID = value
 	}
 	if input.ManagedEvidenceChannelDiscordID != nil {
-		value, err := normalizeDiscordChannelReference(*input.ManagedEvidenceChannelDiscordID)
-		if err != nil {
-			return err
-		}
-		settings.ManagedEvidenceChannelDiscordID = value
+		return fmt.Errorf("%w: managed evidence channel is maintained by Quack", ErrGuildSettingsValidation)
 	}
+
 	if input.NotificationIntroduction != nil {
 		value := strings.TrimSpace(*input.NotificationIntroduction)
 		if len(value) > maxGuildNotificationBrandingLength {
@@ -242,7 +259,7 @@ func (s *GuildSettingsService) audit(ctx context.Context, guildContext *GuildSta
 	if entry == nil {
 		return nil
 	}
-	return s.store.CreateAuditLogEntry(ctx, entry)
+	return recordAudit(ctx, s.store, entry)
 }
 
 // auditEntry constructs a settings audit row with request tracing and current Discord permission evidence.

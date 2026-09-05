@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/quackdiscord/bot/internal/httpapi/apierror"
+
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/internal/httpapi/middleware"
 	"github.com/quackdiscord/bot/internal/quack"
@@ -27,16 +29,16 @@ const opsKeyHeader = "X-Quack-Ops-Key"
 func globalOpsStatus(c *gin.Context, services *quack.Services) {
 	if !validOpsKey(c, services) {
 		if strings.TrimSpace(services.Config.API.OpsStatusToken) == "" {
-			c.JSON(http.StatusNotFound, gin.H{"error": "ops status is disabled"})
+			apierror.Write(c, http.StatusNotFound, apierror.CodeNotFound, "ops status is disabled")
 			return
 		}
-		c.JSON(http.StatusForbidden, gin.H{"error": "invalid ops key"})
+		apierror.Write(c, http.StatusForbidden, apierror.CodeAuthorization, "invalid ops key")
 		return
 	}
 
 	status, err := services.Ops.GlobalStatus(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "ops status failed"})
+		apierror.Write(c, http.StatusInternalServerError, apierror.CodeInternal, "ops status failed")
 		return
 	}
 	c.JSON(http.StatusOK, status)
@@ -62,7 +64,7 @@ func guildOpsStatus(c *gin.Context, services *quack.Services) {
 
 	status, err := services.Ops.GuildStatus(c.Request.Context(), guildID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "ops status failed"})
+		apierror.Write(c, http.StatusInternalServerError, apierror.CodeInternal, "ops status failed")
 		return
 	}
 	health, healthErr := services.Guilds.OperationalGuildHealth(c.Request.Context(), c.Param("discordGuildID"))
@@ -76,18 +78,18 @@ func guildOpsStatus(c *gin.Context, services *quack.Services) {
 func guildOpsAuthorized(c *gin.Context, services *quack.Services) (string, bool) {
 	discordGuildID := strings.TrimSpace(c.Param("discordGuildID"))
 	if discordGuildID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "missing discord guild id"})
+		apierror.Write(c, http.StatusBadRequest, apierror.CodeValidation, "missing discord guild id")
 		return "", false
 	}
 
 	if validOpsKey(c, services) {
 		guild, err := services.Store.GetGuildByDiscordID(c.Request.Context(), discordGuildID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "guild lookup failed"})
+			apierror.Write(c, http.StatusInternalServerError, apierror.CodeInternal, "guild lookup failed")
 			return "", false
 		}
 		if guild == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "guild not found"})
+			apierror.Write(c, http.StatusNotFound, apierror.CodeNotFound, "guild not found")
 			return "", false
 		}
 		return guild.ID, true
@@ -95,7 +97,7 @@ func guildOpsAuthorized(c *gin.Context, services *quack.Services) (string, bool)
 
 	sessionID := middleware.ExtractSessionID(c, services.Config.Auth.SessionCookieName)
 	if sessionID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth session"})
+		apierror.Write(c, http.StatusUnauthorized, apierror.CodeAuthentication, "missing auth session")
 		return "", false
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
@@ -103,15 +105,15 @@ func guildOpsAuthorized(c *gin.Context, services *quack.Services) (string, bool)
 
 	session, err := services.Store.GetSession(ctx, sessionID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load auth session"})
+		apierror.Write(c, http.StatusInternalServerError, apierror.CodeInternal, "failed to load auth session")
 		return "", false
 	}
 	if session == nil || session.DiscordUserID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid auth session"})
+		apierror.Write(c, http.StatusUnauthorized, apierror.CodeAuthentication, "invalid auth session")
 		return "", false
 	}
 	if !session.SessionExpiresAt.IsZero() && time.Now().UTC().After(session.SessionExpiresAt) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "auth session expired"})
+		apierror.Write(c, http.StatusUnauthorized, apierror.CodeAuthentication, "auth session expired")
 		return "", false
 	}
 
@@ -125,7 +127,7 @@ func guildOpsAuthorized(c *gin.Context, services *quack.Services) (string, bool)
 		return "", false
 	}
 	if !guildContext.IsAdmin {
-		c.JSON(http.StatusForbidden, gin.H{"error": "guild administrator access required"})
+		apierror.Write(c, http.StatusForbidden, apierror.CodeAuthorization, "guild administrator access required")
 		return "", false
 	}
 	return guildContext.Guild.ID, true

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"sort"
 	"strings"
@@ -300,6 +301,12 @@ func (s *Service) recordFailure(guildID string, err error) {
 	s.status[guildID] = status
 }
 func (s *Service) audit(ctx context.Context, actor Actor, action, result string, err error) {
+	level := slog.LevelInfo
+	if result != "success" {
+		level = slog.LevelWarn
+	}
+	slog.Log(ctx, level, "Module operation completed", "module", "generallogging", "guild_id", actor.GuildID, "action", action, "result", result)
+
 	if s.auditor == nil {
 		return
 	}
@@ -307,5 +314,7 @@ func (s *Service) audit(ctx context.Context, actor Actor, action, result string,
 	if err != nil {
 		reason = err.Error()
 	}
-	_ = s.auditor.RecordModuleAudit(ctx, modules.AuditEvent{GuildID: actor.GuildID, ActorDiscordUserID: actor.DiscordUserID, Action: action, ResourceType: "general_logging_settings", Result: result, FailureReason: reason, MetadataJSON: "{}"})
+	if auditErr := s.auditor.RecordModuleAudit(ctx, modules.AuditEvent{GuildID: actor.GuildID, ActorDiscordUserID: actor.DiscordUserID, Action: action, ResourceType: "general_logging_settings", Result: result, FailureReason: reason, MetadataJSON: "{}"}); auditErr != nil {
+		slog.ErrorContext(ctx, "Module audit could not be recorded", "module", "generallogging", "guild_id", actor.GuildID, "action", action)
+	}
 }

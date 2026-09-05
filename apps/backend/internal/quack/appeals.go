@@ -5,9 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
+	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/quackdiscord/bot/internal/quack/model"
 )
@@ -46,119 +45,9 @@ type AppealService struct {
 	store AppealRepository
 }
 
-// AppealSettingsResponse returns the effective future form, including Quack's default when no override exists.
-type AppealSettingsResponse struct {
-	GuildID   string                 `json:"guild_id"`
-	Questions []model.AppealQuestion `json:"questions"`
-	Default   bool                   `json:"default"`
-}
-
-// AppealSubmissionInput carries answers to the effective snapshotted form.
-type AppealSubmissionInput struct {
-	Answers []model.AppealAnswer `json:"answers"`
-}
-
-// AppealInformationInput carries a member's immutable response to a staff request.
-type AppealInformationInput struct {
-	Body string `json:"body"`
-}
-
-// AppealDecisionInput carries the required public-safe reason for one staff transition.
-type AppealDecisionInput struct {
-	Reason string `json:"reason"`
-}
-
-// AppealEventResponse is one timeline entry; member projections omit staff identity.
-type AppealEventResponse struct {
-	ID                 string                `json:"id"`
-	Type               model.AppealEventType `json:"type"`
-	ActorType          string                `json:"actor_type"`
-	ActorDiscordUserID string                `json:"actor_discord_user_id,omitempty"`
-	Body               string                `json:"body"`
-	CreatedAt          time.Time             `json:"created_at"`
-}
-
-// AppealReversalOffer describes a separately confirmed reversal without executing it.
-type AppealReversalOffer struct {
-	OriginalExecutionID string           `json:"original_execution_id"`
-	ActionType          model.ActionType `json:"action_type"`
-}
-
-// AppealResponse is the complete case-linked appeal projection.
-type AppealResponse struct {
-	ID                      string                 `json:"id"`
-	GuildID                 string                 `json:"guild_id"`
-	CaseID                  string                 `json:"case_id"`
-	TargetDiscordUserID     string                 `json:"target_discord_user_id"`
-	Status                  model.AppealStatus     `json:"status"`
-	Questions               []model.AppealQuestion `json:"questions"`
-	Answers                 []model.AppealAnswer   `json:"answers"`
-	DecisionReason          string                 `json:"decision_reason,omitempty"`
-	ReviewedByDiscordUserID string                 `json:"reviewed_by_discord_user_id,omitempty"`
-	Events                  []AppealEventResponse  `json:"events"`
-	ReversalOffers          []AppealReversalOffer  `json:"reversal_offers,omitempty"`
-	CreatedAt               time.Time              `json:"created_at"`
-	UpdatedAt               time.Time              `json:"updated_at"`
-}
-
-// AppealListResponse returns stable staff queue pagination.
-type AppealListResponse struct {
-	Appeals []AppealResponse `json:"appeals"`
-	Total   int64            `json:"total"`
-	Limit   int              `json:"limit"`
-	Offset  int              `json:"offset"`
-}
-
 // NewAppealService constructs the package service without central runtime ownership.
 func NewAppealService(store AppealRepository) *AppealService {
 	return &AppealService{store: store}
-}
-
-// DefaultAppealQuestions returns Quack's stable, simple default form.
-func DefaultAppealQuestions() []model.AppealQuestion {
-	return []model.AppealQuestion{
-		{ID: "reason", Prompt: "Why should this case be reconsidered?", Type: model.AppealQuestionLongText, Required: true, Position: 0},
-		{ID: "context", Prompt: "Is there any additional context staff should review?", Type: model.AppealQuestionLongText, Required: false, Position: 1},
-	}
-}
-
-// GetSettings returns the configured or default appeal form for one guild.
-func (s *AppealService) GetSettings(ctx context.Context, guildID string) (*AppealSettingsResponse, error) {
-	if s == nil || s.store == nil || strings.TrimSpace(guildID) == "" {
-		return nil, appealValidation("guild is required")
-	}
-	settings, err := s.store.GetGuildAppealSettings(ctx, strings.TrimSpace(guildID))
-	if err != nil {
-		return nil, err
-	}
-	if settings == nil {
-		return &AppealSettingsResponse{GuildID: guildID, Questions: DefaultAppealQuestions(), Default: true}, nil
-	}
-	questions, err := decodeQuestions(settings.QuestionsJSON)
-	if err != nil {
-		return nil, err
-	}
-	return &AppealSettingsResponse{GuildID: settings.GuildID, Questions: questions}, nil
-}
-
-// UpdateSettings validates and replaces only the form snapshotted by future appeals.
-func (s *AppealService) UpdateSettings(ctx context.Context, guildContext *GuildStaffContext, questions []model.AppealQuestion) (*AppealSettingsResponse, error) {
-	if guildContext == nil || guildContext.Guild == nil || guildContext.Staff == nil || !guildContext.Can(model.PermissionActionGuildSettingsWrite) {
-		return nil, ErrAppealPermissionDenied
-	}
-	normalized, err := validateQuestions(questions)
-	if err != nil {
-		return nil, err
-	}
-	body, _ := json.Marshal(normalized)
-	settings, err := s.store.UpdateGuildAppealSettings(ctx, model.UpdateGuildAppealSettingsParams{
-		Settings: model.GuildAppealSettings{GuildID: guildContext.Guild.ID, QuestionsJSON: string(body), UpdatedByDiscordUserID: guildContext.Staff.DiscordUserID},
-		Audit:    appealAudit(ctx, guildContext.Guild.ID, guildContext.Staff.DiscordUserID, guildContext.PermissionBits, "appeal.settings.update", "guild_appeal_settings", "", model.AuditResultSuccess),
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &AppealSettingsResponse{GuildID: settings.GuildID, Questions: normalized}, nil
 }
 
 // Submit creates the only appeal for an eligible case owned by the authenticated identity.
@@ -212,6 +101,7 @@ func (s *AppealService) Submit(ctx context.Context, caseID, memberDiscordUserID 
 	if err != nil {
 		return nil, err
 	}
+	slog.InfoContext(ctx, "Appeal submitted", "guild_id", created.GuildID, "case_id", created.CaseID, "appeal_id", created.ID)
 	return s.response(ctx, created, true)
 }
 
@@ -273,7 +163,7 @@ func (s *AppealService) GetStaff(ctx context.Context, guildContext *GuildStaffCo
 	if item == nil || item.GuildID != guildContext.Guild.ID {
 		return nil, ErrAppealNotFound
 	}
-	if err := s.store.CreateAuditLogEntry(ctx, pointerAudit(appealAudit(ctx, item.GuildID, guildContext.Staff.DiscordUserID, guildContext.PermissionBits, "appeal.read", "appeal", item.ID, model.AuditResultSuccess))); err != nil {
+	if err := recordAudit(ctx, s.store, pointerAudit(appealAudit(ctx, item.GuildID, guildContext.Staff.DiscordUserID, guildContext.PermissionBits, "appeal.read", "appeal", item.ID, model.AuditResultSuccess))); err != nil {
 		return nil, err
 	}
 	return s.response(ctx, item, false)
@@ -299,7 +189,7 @@ func (s *AppealService) ListStaff(ctx context.Context, guildContext *GuildStaffC
 		}
 		responses = append(responses, *response)
 	}
-	if err := s.store.CreateAuditLogEntry(ctx, pointerAudit(appealAudit(ctx, guildContext.Guild.ID, guildContext.Staff.DiscordUserID, guildContext.PermissionBits, "appeal.queue.read", "appeal", "list", model.AuditResultSuccess))); err != nil {
+	if err := recordAudit(ctx, s.store, pointerAudit(appealAudit(ctx, guildContext.Guild.ID, guildContext.Staff.DiscordUserID, guildContext.PermissionBits, "appeal.queue.read", "appeal", "list", model.AuditResultSuccess))); err != nil {
 		return nil, err
 	}
 	return &AppealListResponse{Appeals: responses, Total: result.Total, Limit: limit, Offset: offset}, nil
@@ -363,166 +253,8 @@ func (s *AppealService) transition(ctx context.Context, guildContext *GuildStaff
 	if err != nil {
 		return nil, err
 	}
+	slog.InfoContext(ctx, "Appeal decision recorded", "guild_id", updated.GuildID, "appeal_id", updated.ID, "status", updated.Status)
 	return s.response(ctx, updated, false)
-}
-
-func (s *AppealService) response(ctx context.Context, item *model.Appeal, member bool) (*AppealResponse, error) {
-	questions, err := decodeQuestions(item.QuestionSnapshotJSON)
-	if err != nil {
-		return nil, err
-	}
-	var answers []model.AppealAnswer
-	if err := json.Unmarshal([]byte(item.AnswersJSON), &answers); err != nil {
-		return nil, fmt.Errorf("decode appeal answers: %w", err)
-	}
-	events, err := s.store.ListAppealEvents(ctx, item.ID)
-	if err != nil {
-		return nil, err
-	}
-	responseEvents := make([]AppealEventResponse, 0, len(events))
-	for _, event := range events {
-		actorID := event.ActorDiscordUserID
-		if member && event.ActorType == "staff" {
-			actorID = ""
-		}
-		responseEvents = append(responseEvents, AppealEventResponse{ID: event.ID, Type: model.AppealEventType(event.EventType), ActorType: event.ActorType, ActorDiscordUserID: actorID, Body: event.Body, CreatedAt: event.CreatedAt})
-	}
-	reviewedBy := item.ReviewedByDiscordUserID
-	if member {
-		reviewedBy = ""
-	}
-	caseID := ""
-	if item.CaseID != nil {
-		caseID = *item.CaseID
-	}
-	response := &AppealResponse{ID: item.ID, GuildID: item.GuildID, CaseID: caseID, TargetDiscordUserID: item.TargetDiscordUserID, Status: item.Status, Questions: questions, Answers: answers, DecisionReason: item.DecisionReason, ReviewedByDiscordUserID: reviewedBy, Events: responseEvents, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
-	if !member && item.Status == model.AppealStatusAccepted && caseID != "" {
-		actions, actionErr := s.store.ListCaseActionExecutions(ctx, caseID)
-		if actionErr != nil {
-			return nil, actionErr
-		}
-		for _, action := range actions {
-			if action.Status != model.ActionExecutionSucceeded || action.ReversalOfExecutionID != nil {
-				continue
-			}
-			switch action.ActionType {
-			case model.ActionTimeoutUser:
-				response.ReversalOffers = append(response.ReversalOffers, AppealReversalOffer{OriginalExecutionID: action.ID, ActionType: model.ActionRemoveTimeout})
-			case model.ActionBanUser:
-				response.ReversalOffers = append(response.ReversalOffers, AppealReversalOffer{OriginalExecutionID: action.ID, ActionType: model.ActionUnbanUser})
-			}
-		}
-	}
-	return response, nil
-}
-
-func validateQuestions(questions []model.AppealQuestion) ([]model.AppealQuestion, error) {
-	if len(questions) == 0 || len(questions) > 10 {
-		return nil, appealValidation("appeal form must contain between 1 and 10 questions")
-	}
-	normalized := append([]model.AppealQuestion(nil), questions...)
-	sort.SliceStable(normalized, func(i, j int) bool { return normalized[i].Position < normalized[j].Position })
-	seen := map[string]bool{}
-	for index := range normalized {
-		question := &normalized[index]
-		question.ID = strings.TrimSpace(question.ID)
-		question.Prompt = strings.TrimSpace(question.Prompt)
-		if question.ID == "" || len(question.ID) > 64 || question.Prompt == "" || len([]rune(question.Prompt)) > 300 || seen[question.ID] || question.Position != index {
-			return nil, appealValidation("appeal questions require unique ids and contiguous ordering")
-		}
-		seen[question.ID] = true
-		switch question.Type {
-		case model.AppealQuestionShortText, model.AppealQuestionLongText, model.AppealQuestionBoolean:
-		default:
-			return nil, appealValidation("appeal question type is unsupported")
-		}
-	}
-	return normalized, nil
-}
-
-func validateAnswers(questions []model.AppealQuestion, answers []model.AppealAnswer) ([]model.AppealAnswer, error) {
-	byID := map[string]model.AppealAnswer{}
-	for _, answer := range answers {
-		answer.QuestionID = strings.TrimSpace(answer.QuestionID)
-		if answer.QuestionID == "" || byID[answer.QuestionID].QuestionID != "" {
-			return nil, appealValidation("answers must have unique question ids")
-		}
-		byID[answer.QuestionID] = answer
-	}
-	normalized := make([]model.AppealAnswer, 0, len(questions))
-	for _, question := range questions {
-		answer, present := byID[question.ID]
-		if !present {
-			if question.Required {
-				return nil, appealValidation("required appeal answer is missing")
-			}
-			continue
-		}
-		switch question.Type {
-		case model.AppealQuestionBoolean:
-			if _, ok := answer.Value.(bool); !ok {
-				return nil, appealValidation("boolean appeal answer is invalid")
-			}
-		default:
-			value, ok := answer.Value.(string)
-			if !ok || len([]rune(strings.TrimSpace(value))) > 4000 || (question.Required && strings.TrimSpace(value) == "") {
-				return nil, appealValidation("text appeal answer is invalid")
-			}
-			answer.Value = strings.TrimSpace(value)
-		}
-		normalized = append(normalized, answer)
-		delete(byID, question.ID)
-	}
-	if len(byID) != 0 {
-		return nil, appealValidation("answer references an unknown question")
-	}
-	return normalized, nil
-}
-
-func decodeQuestions(body string) ([]model.AppealQuestion, error) {
-	var questions []model.AppealQuestion
-	if err := json.Unmarshal([]byte(body), &questions); err != nil {
-		return nil, fmt.Errorf("decode appeal questions: %w", err)
-	}
-	return validateQuestions(questions)
-}
-
-func caseSnapshotAppealable(body string) bool {
-	var snapshot struct {
-		Template struct {
-			Appealable bool `json:"appealable"`
-		} `json:"template"`
-	}
-	return json.Unmarshal([]byte(body), &snapshot) == nil && snapshot.Template.Appealable
-}
-
-func validAppealState(status model.AppealStatus) bool {
-	switch status {
-	case model.AppealStatusPending, model.AppealStatusNeedsInformation, model.AppealStatusAccepted, model.AppealStatusRejected, model.AppealStatusClosed:
-		return true
-	default:
-		return false
-	}
-}
-
-func requireAppealReview(guildContext *GuildStaffContext) error {
-	if guildContext == nil || guildContext.Guild == nil || guildContext.Staff == nil || !guildContext.Can(model.PermissionActionAppealReview) {
-		return ErrAppealPermissionDenied
-	}
-	return nil
-}
-
-func memberNotificationBody(status model.AppealStatus, reason string) string {
-	switch status {
-	case model.AppealStatusNeedsInformation:
-		return "Staff requested more information on your appeal: " + reason
-	case model.AppealStatusAccepted:
-		return "Your appeal was accepted: " + reason
-	case model.AppealStatusRejected:
-		return "Your appeal was rejected: " + reason
-	default:
-		return "Your appeal was closed: " + reason
-	}
 }
 
 func appealValidation(message string) error {
@@ -538,5 +270,5 @@ func pointerAudit(entry model.AuditLogEntry) *model.AuditLogEntry { return &entr
 
 func (s *AppealService) auditMember(ctx context.Context, guildID, actorID, action, resourceID string, result model.AuditResult) error {
 	entry := appealAudit(ctx, guildID, actorID, 0, action, "appeal", resourceID, result)
-	return s.store.CreateAuditLogEntry(ctx, &entry)
+	return recordAudit(ctx, s.store, &entry)
 }

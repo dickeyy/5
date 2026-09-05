@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/quackdiscord/bot/internal/modules/generallogging"
 	"github.com/quackdiscord/bot/internal/modules/tickets"
 )
 
@@ -26,8 +25,7 @@ type ticketDiscordClient struct {
 	resolver guildResolver
 }
 
-// CreatePrivateTicketChannel provisions either a private thread under the
-// configured entry channel or a private text channel with explicit ACLs.
+// CreatePrivateTicketChannel provisions the configured private thread or text channel.
 func (c ticketDiscordClient) CreatePrivateTicketChannel(ctx context.Context, guildID, ownerID string, settings tickets.Settings) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -36,7 +34,7 @@ func (c ticketDiscordClient) CreatePrivateTicketChannel(ctx context.Context, gui
 	if err != nil {
 		return "", err
 	}
-	entryChannel, err := c.session.Channel(settings.EntryChannelDiscordID)
+	entryChannel, err := c.session.Channel(settings.EntryChannelDiscordID, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 	if err != nil {
 		return "", err
 	}
@@ -48,18 +46,15 @@ func (c ticketDiscordClient) CreatePrivateTicketChannel(ctx context.Context, gui
 		thread, err := c.session.ThreadStartComplex(settings.EntryChannelDiscordID, &discordgo.ThreadStart{
 			Name: name, Type: discordgo.ChannelTypeGuildPrivateThread,
 			AutoArchiveDuration: 1440, Invitable: false,
-		})
+		}, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 		if err != nil {
 			return "", err
 		}
-		if err := c.session.ThreadMemberAdd(thread.ID, ownerID); err != nil {
-			_, _ = c.session.ChannelDelete(thread.ID)
-			return "", err
-		}
+		// The adapter validates owner and staff membership before committing the ticket.
 		return thread.ID, nil
 	}
 
-	botID, err := c.botUserID()
+	botID, err := c.botUserID(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -67,7 +62,7 @@ func (c ticketDiscordClient) CreatePrivateTicketChannel(ctx context.Context, gui
 	channel, err := c.session.GuildChannelCreateComplex(discordGuildID, discordgo.GuildChannelCreateData{
 		Name: name, Type: discordgo.ChannelTypeGuildText,
 		ParentID: entryChannel.ParentID, PermissionOverwrites: overwrites,
-	})
+	}, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 	if err != nil {
 		return "", err
 	}
@@ -84,26 +79,29 @@ func (c ticketDiscordClient) EnsureTicketPermissions(ctx context.Context, channe
 	if err != nil {
 		return err
 	}
-	channel, err := c.session.Channel(channelID)
+	channel, err := c.session.Channel(channelID, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 	if err != nil {
 		return err
+	}
+	if channel.GuildID != discordGuildID {
+		return errors.New("ticket channel belongs to another guild")
 	}
 	if channel.IsThread() {
 		if channel.Type != discordgo.ChannelTypeGuildPrivateThread {
 			return errors.New("ticket thread is not private")
 		}
-		if err := c.session.ThreadMemberAdd(channelID, ownerID); err != nil {
+		if err := c.session.ThreadMemberAdd(channelID, ownerID, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false)); err != nil {
 			return err
 		}
-		return c.addTicketStaffMembers(ctx, discordGuildID, channelID, staffRoleIDs)
+		return c.syncTicketThreadMembers(ctx, discordGuildID, channelID, ownerID, staffRoleIDs)
 	}
-	botID, err := c.botUserID()
+	botID, err := c.botUserID(ctx)
 	if err != nil {
 		return err
 	}
 	updated, err := c.session.ChannelEditComplex(channelID, &discordgo.ChannelEdit{
 		PermissionOverwrites: ticketPermissionOverwrites(discordGuildID, ownerID, botID, staffRoleIDs),
-	})
+	}, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 	if err != nil {
 		return err
 	}
@@ -111,11 +109,11 @@ func (c ticketDiscordClient) EnsureTicketPermissions(ctx context.Context, channe
 }
 
 // botUserID returns the current application identity needed for explicit ACLs.
-func (c ticketDiscordClient) botUserID() (string, error) {
+func (c ticketDiscordClient) botUserID(ctx context.Context) (string, error) {
 	if c.session.State != nil && c.session.State.User != nil && c.session.State.User.ID != "" {
 		return c.session.State.User.ID, nil
 	}
-	user, err := c.session.User("@me")
+	user, err := c.session.User("@me", discordgo.WithContext(ctx))
 	if err != nil {
 		return "", err
 	}
@@ -125,51 +123,11 @@ func (c ticketDiscordClient) botUserID() (string, error) {
 	return user.ID, nil
 }
 
-// addTicketStaffMembers grants configured staff-role members explicit private
-// thread membership because Discord threads cannot accept role overwrites.
-func (c ticketDiscordClient) addTicketStaffMembers(ctx context.Context, guildID, threadID string, staffRoleIDs []string) error {
-	roles := make(map[string]struct{}, len(staffRoleIDs))
-	for _, roleID := range staffRoleIDs {
-		if roleID = strings.TrimSpace(roleID); roleID != "" {
-			roles[roleID] = struct{}{}
-		}
-	}
-	after := ""
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		members, err := c.session.GuildMembers(guildID, after, 1000)
-		if err != nil {
-			return err
-		}
-		for _, member := range members {
-			if member == nil || member.User == nil || !hasConfiguredRole(member.Roles, roles) {
-				continue
-			}
-			if err := c.session.ThreadMemberAdd(threadID, member.User.ID); err != nil {
-				return err
-			}
-		}
-		if len(members) < 1000 {
-			return nil
-		}
-		last := members[len(members)-1]
-		if last == nil || last.User == nil || last.User.ID == "" {
-			return errors.New("Discord returned an invalid guild-member page")
-		}
-		after = last.User.ID
-	}
-}
-
-// hasConfiguredRole reports whether one current member belongs to ticket staff.
-func hasConfiguredRole(memberRoles []string, configured map[string]struct{}) bool {
-	for _, roleID := range memberRoles {
-		if _, ok := configured[roleID]; ok {
-			return true
-		}
-	}
-	return false
+// DeleteProvisionalTicketChannel removes only a freshly provisioned resource
+// whose permissions failed before its ticket was committed.
+func (c ticketDiscordClient) DeleteProvisionalTicketChannel(ctx context.Context, channelID string) error {
+	_, err := c.session.ChannelDelete(channelID, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
+	return err
 }
 
 // SendTicketReply sends one mention-suppressed message inside the private ticket.
@@ -179,7 +137,7 @@ func (c ticketDiscordClient) SendTicketReply(ctx context.Context, channelID, bod
 	}
 	_, err := c.session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
 		Content: body, AllowedMentions: &discordgo.MessageAllowedMentions{},
-	})
+	}, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 	return err
 }
 
@@ -192,7 +150,7 @@ func (c ticketDiscordClient) CaptureTicketTranscript(ctx context.Context, channe
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-		page, err := c.session.ChannelMessages(channelID, 100, before, "", "")
+		page, err := c.session.ChannelMessages(channelID, 100, before, "", "", discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 		if err != nil {
 			return "", err
 		}
@@ -223,14 +181,14 @@ func (c ticketDiscordClient) ArchiveTicketChannel(ctx context.Context, channelID
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	channel, err := c.session.Channel(channelID)
+	channel, err := c.session.Channel(channelID, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 	if err != nil {
 		return err
 	}
 	if channel.IsThread() {
 		archived := true
 		locked := true
-		_, err = c.session.ChannelEditComplex(channelID, &discordgo.ChannelEdit{Archived: &archived, Locked: &locked})
+		_, err = c.session.ChannelEditComplex(channelID, &discordgo.ChannelEdit{Archived: &archived, Locked: &locked}, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 		return err
 	}
 	overwrites := make([]*discordgo.PermissionOverwrite, 0, len(channel.PermissionOverwrites))
@@ -246,94 +204,8 @@ func (c ticketDiscordClient) ArchiveTicketChannel(ctx context.Context, channelID
 	if !strings.HasPrefix(name, "closed-") {
 		name = "closed-" + name
 	}
-	_, err = c.session.ChannelEditComplex(channelID, &discordgo.ChannelEdit{Name: name, PermissionOverwrites: overwrites})
+	_, err = c.session.ChannelEditComplex(channelID, &discordgo.ChannelEdit{Name: name, PermissionOverwrites: overwrites}, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 	return err
-}
-
-// loggingDiscordClient sends already-redacted payloads only to channels whose
-// everyone role is denied visibility.
-type loggingDiscordClient struct {
-	session  *discordgo.Session
-	resolver guildResolver
-}
-
-// SendStaffLog delivers one mention-suppressed message to a validated channel.
-func (c loggingDiscordClient) SendStaffLog(ctx context.Context, guildID, channelID, payload string) error {
-	if err := c.ValidateStaffOnlyChannel(ctx, guildID, channelID); err != nil {
-		return err
-	}
-	_, err := c.session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
-		Content: payload, AllowedMentions: &discordgo.MessageAllowedMentions{},
-	})
-	return err
-}
-
-// ValidateStaffOnlyChannel rejects missing, cross-guild, or publicly visible destinations.
-func (c loggingDiscordClient) ValidateStaffOnlyChannel(ctx context.Context, guildID, channelID string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	discordGuildID, err := c.resolver.discordID(ctx, guildID)
-	if err != nil {
-		return err
-	}
-	channel, err := c.session.Channel(channelID)
-	if err != nil {
-		return err
-	}
-	if channel.GuildID != discordGuildID {
-		return errors.New("logging destination belongs to another guild")
-	}
-	return c.validateLoggingACL(channel)
-}
-
-// validateLoggingACL permits visibility only through current staff-capable
-// roles (plus the bot itself) and requires the bot to send successfully.
-func (c loggingDiscordClient) validateLoggingACL(channel *discordgo.Channel) error {
-	if err := validateStaffOnlyACL(channel, channel.GuildID, nil); err != nil {
-		return err
-	}
-	roles, err := c.session.GuildRoles(channel.GuildID)
-	if err != nil {
-		return err
-	}
-	staffRoles := make(map[string]bool, len(roles))
-	for _, role := range roles {
-		if role == nil {
-			continue
-		}
-		staffRoles[role.ID] = role.Permissions&(discordgo.PermissionAdministrator|discordgo.PermissionManageServer|discordgo.PermissionModerateMembers) != 0
-	}
-	botID := ""
-	if c.session.State != nil && c.session.State.User != nil {
-		botID = c.session.State.User.ID
-	}
-	for _, overwrite := range channel.PermissionOverwrites {
-		if overwrite.Allow&discordgo.PermissionViewChannel == 0 {
-			continue
-		}
-		switch overwrite.Type {
-		case discordgo.PermissionOverwriteTypeRole:
-			if overwrite.ID != channel.GuildID && !staffRoles[overwrite.ID] {
-				return errors.New("logging destination grants a non-staff role visibility")
-			}
-		case discordgo.PermissionOverwriteTypeMember:
-			if overwrite.ID != botID {
-				return errors.New("logging destination grants a non-bot member visibility")
-			}
-		}
-	}
-	if botID == "" {
-		return errors.New("Discord bot identity is unavailable")
-	}
-	permissions, err := c.session.UserChannelPermissions(botID, channel.ID)
-	if err != nil {
-		return err
-	}
-	if permissions&discordgo.PermissionViewChannel == 0 || permissions&discordgo.PermissionSendMessages == 0 {
-		return errors.New("Discord bot cannot deliver to logging destination")
-	}
-	return nil
 }
 
 // ticketNameSuffix keeps Discord channel names bounded and non-sensitive.
@@ -347,77 +219,3 @@ func ticketNameSuffix(ownerID string) string {
 	}
 	return ownerID
 }
-
-// ticketPermissionOverwrites constructs the exact private text-channel ACL.
-func ticketPermissionOverwrites(guildID, ownerID, botID string, staffRoleIDs []string) []*discordgo.PermissionOverwrite {
-	overwrites := []*discordgo.PermissionOverwrite{
-		{ID: guildID, Type: discordgo.PermissionOverwriteTypeRole, Deny: discordgo.PermissionViewChannel},
-		{ID: ownerID, Type: discordgo.PermissionOverwriteTypeMember, Allow: ticketChannelPermissions},
-		{ID: botID, Type: discordgo.PermissionOverwriteTypeMember, Allow: ticketChannelPermissions | discordgo.PermissionManageChannels},
-	}
-	for _, roleID := range staffRoleIDs {
-		if roleID = strings.TrimSpace(roleID); roleID != "" {
-			overwrites = append(overwrites, &discordgo.PermissionOverwrite{ID: roleID, Type: discordgo.PermissionOverwriteTypeRole, Allow: ticketChannelPermissions})
-		}
-	}
-	return overwrites
-}
-
-// validateStaffOnlyACL requires an explicit everyone denial and, when supplied,
-// explicit visibility for every configured staff role.
-func validateStaffOnlyACL(channel *discordgo.Channel, guildID string, staffRoleIDs []string) error {
-	if channel == nil || channel.GuildID != guildID {
-		return errors.New("channel is outside the configured guild")
-	}
-	deniedEveryone := false
-	allowedRoles := map[string]bool{}
-	for _, overwrite := range channel.PermissionOverwrites {
-		if overwrite.ID == guildID && overwrite.Type == discordgo.PermissionOverwriteTypeRole {
-			if overwrite.Allow&discordgo.PermissionViewChannel != 0 {
-				return errors.New("channel explicitly grants everyone visibility")
-			}
-			if overwrite.Deny&discordgo.PermissionViewChannel != 0 {
-				deniedEveryone = true
-			}
-		}
-		if overwrite.Type == discordgo.PermissionOverwriteTypeRole && overwrite.Allow&discordgo.PermissionViewChannel != 0 {
-			allowedRoles[overwrite.ID] = true
-		}
-	}
-	if !deniedEveryone {
-		return errors.New("channel is not staff-only")
-	}
-	for _, roleID := range staffRoleIDs {
-		if !allowedRoles[roleID] {
-			return fmt.Errorf("staff role %s cannot view ticket channel", roleID)
-		}
-	}
-	return nil
-}
-
-// validateTicketACL additionally requires explicit owner visibility.
-func validateTicketACL(channel *discordgo.Channel, guildID, ownerID, botID string, staffRoleIDs []string) error {
-	if err := validateStaffOnlyACL(channel, guildID, staffRoleIDs); err != nil {
-		return err
-	}
-	ownerVisible := false
-	botVisible := false
-	for _, overwrite := range channel.PermissionOverwrites {
-		if overwrite.ID == ownerID && overwrite.Type == discordgo.PermissionOverwriteTypeMember && overwrite.Allow&discordgo.PermissionViewChannel != 0 {
-			ownerVisible = true
-		}
-		if overwrite.ID == botID && overwrite.Type == discordgo.PermissionOverwriteTypeMember && overwrite.Allow&discordgo.PermissionViewChannel != 0 {
-			botVisible = true
-		}
-	}
-	if !ownerVisible {
-		return errors.New("ticket owner cannot view private channel")
-	}
-	if !botVisible {
-		return errors.New("Discord bot cannot view private channel")
-	}
-	return nil
-}
-
-var _ tickets.DiscordClient = ticketDiscordClient{}
-var _ generallogging.DeliveryClient = loggingDiscordClient{}

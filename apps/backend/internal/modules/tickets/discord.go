@@ -3,6 +3,8 @@ package tickets
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"time"
 )
 
 // DiscordClient is the narrow private-channel transport owned by the ticket adapter.
@@ -12,6 +14,7 @@ type DiscordClient interface {
 	SendTicketReply(context.Context, string, string) error
 	CaptureTicketTranscript(context.Context, string) (string, error)
 	ArchiveTicketChannel(context.Context, string) error
+	DeleteProvisionalTicketChannel(context.Context, string) error
 }
 
 // DiscordAdapter translates Discord entry/components into ticket service operations.
@@ -27,6 +30,8 @@ func NewDiscordAdapter(service *Service, client DiscordClient) *DiscordAdapter {
 
 // Open provisions a private thread/channel and creates the matching backend ticket.
 func (a *DiscordAdapter) Open(ctx context.Context, actor Actor) (*Ticket, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
 	settings, enabled, err := a.service.loadSettings(ctx, actor.GuildID)
 	if err != nil {
 		return nil, err
@@ -34,19 +39,35 @@ func (a *DiscordAdapter) Open(ctx context.Context, actor Actor) (*Ticket, error)
 	if !enabled {
 		return nil, ErrDisabled
 	}
+	token, err := a.service.store.reserveOpening(ctx, actor, settings.DailyOpenLimit, a.service.now())
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cleanupCancel()
+		if err := a.service.store.releaseOpening(cleanupCtx, actor, token); err != nil {
+			slog.ErrorContext(cleanupCtx, "Ticket opening reservation cleanup failed", "guild_id", actor.GuildID, "ticket_id", token)
+		}
+	}()
 	channelID, err := a.client.CreatePrivateTicketChannel(ctx, actor.GuildID, actor.DiscordUserID, settings)
 	if err != nil {
 		return nil, err
 	}
 	if err := a.client.EnsureTicketPermissions(ctx, channelID, actor.DiscordUserID, actor.GuildID, settings.StaffRoleDiscordIDs); err != nil {
-		_ = a.client.ArchiveTicketChannel(ctx, channelID)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cleanupCancel()
+		_ = a.client.DeleteProvisionalTicketChannel(cleanupCtx, channelID)
 		return nil, err
 	}
-	ticket, err := a.service.Open(ctx, actor, channelID)
+	ticket, err := a.service.store.finishOpening(ctx, actor, token, channelID, a.service.now())
 	if err != nil {
-		_ = a.client.ArchiveTicketChannel(ctx, channelID)
+		// A failed commit acknowledgement may conceal a committed ticket. Keep
+		// its private channel instead of deleting a potentially accepted ticket.
+		a.service.audit(ctx, actor, "ticket.open", token, "failure", err)
 		return nil, err
 	}
+	a.service.audit(ctx, actor, "ticket.open", ticket.ID, "success", nil)
 	return ticket, nil
 }
 

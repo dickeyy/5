@@ -14,7 +14,7 @@ import (
 func TestActionLeaseFencingAndCrashRecovery(t *testing.T) {
 	ctx := context.Background()
 	repository, guildID := templateTestStore(t)
-	created, err := repository.CreateCase(ctx, storage.CreateCaseParams{Case: caseModel(guildID, nil), Event: caseEvent(), ActionExecutions: []model.CaseActionExecution{{ActionType: model.ActionTimeoutUser, ConfigSnapshotJSON: `{"duration_seconds":60}`}}})
+	created, err := repository.CreateCase(ctx, storage.CreateCaseParams{Case: caseModel(guildID, nil), Event: caseEvent(), ActionExecutions: []model.CaseActionExecution{{ActionType: model.ActionTimeoutUser, SafeForRetry: true, MaxRetries: 1, ConfigSnapshotJSON: `{"duration_seconds":60}`}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,5 +141,42 @@ func TestNotificationClaimRecoversBeforeSendButNeverRepeatsAmbiguousSend(t *test
 	third, err := repository.ClaimCaseNotification(ctx, model.ClaimCaseNotificationParams{CaseID: created.Case.ID, WorkerID: "worker-3"})
 	if err != nil || third != nil {
 		t.Fatalf("ambiguous send was automatically repeated: %+v err=%v", third, err)
+	}
+}
+
+func TestExpiredUnsafeActionRequiresReview(t *testing.T) {
+	for _, action := range []model.CaseActionExecution{
+		{ActionType: model.ActionBanUser, SafeForRetry: true, Irreversible: true, MaxRetries: 3},
+		{ActionType: model.ActionKickUser, MaxRetries: 3},
+		{ActionType: model.ActionTimeoutUser, SafeForRetry: true, MaxRetries: 0},
+	} {
+		t.Run(string(action.ActionType), func(t *testing.T) {
+			ctx := context.Background()
+			repository, guildID := templateTestStore(t)
+			action.ConfigSnapshotJSON = `{}`
+			created, err := repository.CreateCase(ctx, storage.CreateCaseParams{Case: caseModel(guildID, nil), Event: caseEvent(), ActionExecutions: []model.CaseActionExecution{action}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, err := repository.ClaimNextCaseAction(ctx, storage.ClaimCaseActionParams{CaseID: created.Case.ID, WorkerID: "old"})
+			if err != nil || first == nil {
+				t.Fatalf("claim: %+v %v", first, err)
+			}
+			if err := repository.DB().Model(&model.CaseActionExecution{}).Where("id = ?", first.Execution.ID).Update("lease_expires_at", time.Now().Add(-time.Minute)).Error; err != nil {
+				t.Fatal(err)
+			}
+			second, err := repository.ClaimNextCaseAction(ctx, storage.ClaimCaseActionParams{CaseID: created.Case.ID, WorkerID: "new"})
+			if err != nil || second != nil {
+				t.Fatalf("unsafe repeat: %+v %v", second, err)
+			}
+			current, err := repository.GetCaseActionExecution(ctx, guildID, first.Execution.ID)
+			if err != nil || current.Status != model.ActionExecutionFailed || current.AttemptCount != 1 || current.LeaseToken != "" {
+				t.Fatalf("review state: %+v %v", current, err)
+			}
+			err = repository.CompleteCaseAction(ctx, storage.CompleteCaseActionParams{ExecutionID: first.Execution.ID, LeaseToken: first.Execution.LeaseToken, AttemptNumber: 1, WorkerID: "old", AttemptStatus: model.ActionAttemptSucceeded, ExecutionStatus: model.ActionExecutionSucceeded})
+			if err == nil {
+				t.Fatal("expired worker overwrote review state")
+			}
+		})
 	}
 }

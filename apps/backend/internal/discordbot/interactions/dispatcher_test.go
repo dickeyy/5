@@ -168,6 +168,9 @@ func (f *fakeClient) InteractionResponseEdit(interaction *discordgo.Interaction,
 
 func (f *fakeClient) FollowupMessageCreate(interaction *discordgo.Interaction, wait bool, params *discordgo.WebhookParams) (*discordgo.Message, error) {
 	f.followups = append(f.followups, params)
+	if f.done != nil {
+		f.done <- struct{}{}
+	}
 	return &discordgo.Message{ID: "followup-1"}, nil
 }
 
@@ -221,4 +224,22 @@ func modalInteraction(customID string) *discordgo.InteractionCreate {
 			CustomID: customID,
 		},
 	}}
+}
+
+// TestComponentTaskErrorPreservesSharedMessage prevents private action failures
+// from replacing the permanent case view for everyone in the channel.
+func TestComponentTaskErrorPreservesSharedMessage(t *testing.T) {
+	client := &fakeClient{done: make(chan struct{}, 1)}
+	registry := interactions.NewComponentRegistry()
+	if err := registry.RegisterComponent("case", "list_next", func(ui.Context) ui.HandlerResult {
+		return ui.Async(ui.DeferUpdate(), func(context.Context, ui.Responder) error { return errors.New("permission denied") })
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher := &interactions.Dispatcher{Client: client, Components: registry}
+	dispatcher.Handle(nil, componentInteraction("case:list_next:v1:1"))
+	client.wait(t)
+	if len(client.edits) != 0 || len(client.followups) != 1 || client.followups[0].Flags&discordgo.MessageFlagsEphemeral == 0 {
+		t.Fatalf("expected private error without editing shared result: %+v", client)
+	}
 }

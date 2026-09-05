@@ -102,3 +102,35 @@ func authStoreHarness(t *testing.T) (*miniredis.Miniredis, *Store) {
 	t.Cleanup(func() { _ = client.Close() })
 	return server, New(nil, client)
 }
+
+func TestSessionRefreshCannotResurrectRevocation(t *testing.T) {
+	for _, all := range []bool{false, true} {
+		_, adapter := authStoreHarness(t)
+		ctx := context.Background()
+		session := &model.AuthSession{ID: "session", DiscordUserID: "user"}
+		if err := adapter.SaveSession(ctx, session, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := adapter.GetSession(ctx, session.ID)
+		if err != nil || loaded == nil {
+			t.Fatal("session was not created")
+		}
+		if ok, err := adapter.RefreshSession(ctx, loaded, time.Hour); err != nil || !ok {
+			t.Fatalf("live refresh: %v", err)
+		}
+		if all {
+			err = adapter.RevokeUserSessions(ctx, session.DiscordUserID)
+		} else {
+			err = adapter.DeleteSession(ctx, session.ID)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok, err := adapter.RefreshSession(ctx, loaded, time.Hour); err != nil || ok {
+			t.Fatalf("revoked session refreshed: ok=%v err=%v", ok, err)
+		}
+		if got, err := adapter.GetSession(ctx, session.ID); err != nil || got != nil {
+			t.Fatalf("session resurrected: %v", err)
+		}
+	}
+}

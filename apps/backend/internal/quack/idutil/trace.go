@@ -14,7 +14,7 @@ const (
 	correlationIDContextKey traceContextKey = "correlation_id"
 )
 
-// NewTraceID constructs trace id with required dependencies explicit so callers control lifecycle and substitution.
+// NewTraceID creates a sortable random identifier for tracing across HTTP, Discord, and workers.
 func NewTraceID() string {
 	id, err := NewULID()
 	if err != nil {
@@ -70,7 +70,7 @@ func TraceIDsFromContext(ctx context.Context) (string, string) {
 	return requestID, correlationID
 }
 
-// NormalizeTraceID encapsulates the normalize trace id rule so callers share one consistent package implementation.
+// NormalizeTraceID accepts bounded letters, digits, and safe separators for trace propagation.
 func NormalizeTraceID(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" || len(value) > 128 {

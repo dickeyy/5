@@ -6,15 +6,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	"log/slog"
+
 	"github.com/quackdiscord/bot/internal/quack"
 	"github.com/quackdiscord/bot/internal/quack/idutil"
-	"github.com/rs/zerolog/log"
 )
 
 // Handler handles one unit of work through the package's transport-neutral callback contract.
 type Handler func(context.Context, string) error
 
-// DueSource identifies the supported due source values stored and exchanged by Quack.
+// DueSource discovers persisted actions whose initial attempt or retry is due.
 type DueSource interface {
 	ListExecutableCaseIDs(context.Context, int) ([]string, error)
 }
@@ -28,6 +29,9 @@ type Queue struct {
 	mu         sync.RWMutex
 	wg         sync.WaitGroup
 	active     bool
+	started    bool
+	pending    map[string]struct{}
+	done       chan struct{}
 	handler    Handler
 	source     DueSource
 	cancelPoll context.CancelFunc
@@ -56,21 +60,26 @@ func New(size, workers int) *Queue {
 		workers:   workers,
 		pollEvery: time.Second,
 		batchSize: 100,
+		pending:   make(map[string]struct{}),
+		done:      make(chan struct{}),
 	}
 }
 
-// Start begins queue workers and durable polling exactly once.
+// Start begins workers and polling once. A stopped queue cannot be restarted.
+// Workers retain context values but drain independently of parent cancellation;
+// the owner must call StopContext to bound shutdown.
 func (q *Queue) Start(ctx context.Context, handler Handler, source DueSource) {
 	q.mu.Lock()
-	if q.active {
+	if q.started {
 		q.mu.Unlock()
 		return
 	}
 	q.active = true
+	q.started = true
 	q.handler = handler
 	q.source = source
-	workerCtx, cancelWork := context.WithCancel(context.Background())
-	pollCtx, cancelPoll := context.WithCancel(workerCtx)
+	workerCtx, cancelWork := context.WithCancel(context.WithoutCancel(ctx))
+	pollCtx, cancelPoll := context.WithCancel(ctx)
 	q.cancelPoll = cancelPoll
 	q.cancelWork = cancelWork
 	q.workerCtx = workerCtx
@@ -88,11 +97,14 @@ func (q *Queue) Submit(ctx context.Context, caseID string) bool {
 	if q == nil || caseID == "" {
 		return false
 	}
-	q.mu.RLock()
-	defer q.mu.RUnlock()
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	if !q.active {
 		atomic.AddUint64(&q.stats.DroppedTotal, 1)
 		return false
+	}
+	if _, exists := q.pending[caseID]; exists {
+		return true
 	}
 	requestID := idutil.RequestIDFromContext(ctx)
 	if requestID == "" {
@@ -104,6 +116,7 @@ func (q *Queue) Submit(ctx context.Context, caseID string) bool {
 	}
 	select {
 	case q.jobs <- job{caseID: caseID, requestID: requestID, correlationID: correlationID}:
+		q.pending[caseID] = struct{}{}
 		atomic.AddUint64(&q.stats.EnqueuedTotal, 1)
 		return true
 	default:
@@ -139,7 +152,7 @@ func (q *Queue) enqueueDue(ctx context.Context) {
 	}
 	caseIDs, err := source.ListExecutableCaseIDs(ctx, batchSize)
 	if err != nil {
-		log.Error().Err(err).Msg("Failed to discover executable case actions")
+		slog.Error("Failed to discover executable case actions", "error", err)
 		return
 	}
 	for _, caseID := range caseIDs {
@@ -158,10 +171,13 @@ func (q *Queue) worker() {
 // process restores trace context, invokes the configured case handler, and updates queue metrics while containing handler panics inside the worker.
 func (q *Queue) process(next job) {
 	defer func() {
+		q.mu.Lock()
+		delete(q.pending, next.caseID)
+		q.mu.Unlock()
 		if recovered := recover(); recovered != nil {
 			atomic.AddUint64(&q.stats.PanickedTotal, 1)
 			atomic.AddUint64(&q.stats.FailedTotal, 1)
-			log.Error().Interface("panic", recovered).Str("case_id", next.caseID).Str("request_id", next.requestID).Str("correlation_id", next.correlationID).Msg("Case action job panicked")
+			slog.Error("Case action job panicked", "panic", recovered, "case_id", next.caseID, "request_id", next.requestID, "correlation_id", next.correlationID)
 		}
 	}()
 	q.mu.RLock()
@@ -180,7 +196,7 @@ func (q *Queue) process(next job) {
 	ctx := idutil.ContextWithTrace(workerCtx, next.requestID, next.correlationID)
 	if err := handler(ctx, next.caseID); err != nil {
 		atomic.AddUint64(&q.stats.FailedTotal, 1)
-		log.Error().Err(err).Str("case_id", next.caseID).Str("request_id", next.requestID).Str("correlation_id", next.correlationID).Msg("Case action job failed")
+		slog.Error("Case action job failed", "error", err, "case_id", next.caseID, "request_id", next.requestID, "correlation_id", next.correlationID)
 		return
 	}
 	atomic.AddUint64(&q.stats.ProcessedTotal, 1)
@@ -203,36 +219,27 @@ func (q *Queue) StopContext(ctx context.Context) error {
 		return nil
 	}
 	q.mu.Lock()
-	if !q.active {
+	if !q.started {
 		q.mu.Unlock()
 		return nil
 	}
-	q.active = false
-	cancelPoll := q.cancelPoll
-	q.cancelPoll = nil
 	cancelWork := q.cancelWork
-	q.cancelWork = nil
-	q.mu.Unlock()
-
-	if cancelPoll != nil {
-		cancelPoll()
-	}
-	close(q.jobs)
-	done := make(chan struct{})
-	go func() {
-		q.wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		if cancelWork != nil {
+	if q.active {
+		q.active = false
+		q.cancelPoll()
+		close(q.jobs)
+		go func() {
+			q.wg.Wait()
 			cancelWork()
-		}
+			close(q.done)
+		}()
+	}
+	q.mu.Unlock()
+	select {
+	case <-q.done:
 		return nil
 	case <-ctx.Done():
-		if cancelWork != nil {
-			cancelWork()
-		}
+		cancelWork()
 		return ctx.Err()
 	}
 }

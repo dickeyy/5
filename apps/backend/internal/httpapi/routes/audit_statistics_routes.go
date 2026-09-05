@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/quackdiscord/bot/internal/httpapi/apierror"
+
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/internal/httpapi/middleware"
 	"github.com/quackdiscord/bot/internal/quack"
@@ -43,10 +45,10 @@ func getStatistics(c *gin.Context, statistics *quack.StaffStatisticsService) {
 func writeStatisticsError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, quack.ErrStatisticsValidation):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		apierror.Write(c, http.StatusBadRequest, apierror.CodeValidation, err.Error())
 	case errors.Is(err, quack.ErrStatisticsPermissionDenied):
-		c.JSON(http.StatusForbidden, gin.H{"error": "statistics access denied"})
+		apierror.Write(c, http.StatusForbidden, apierror.CodeAuthorization, "statistics access denied")
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "statistics operation failed"})
+		apierror.Write(c, http.StatusInternalServerError, apierror.CodeInternal, "statistics operation failed")
 	}
 }

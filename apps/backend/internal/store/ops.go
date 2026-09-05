@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/quackdiscord/bot/internal/quack/model"
 	"gorm.io/gorm"
 )

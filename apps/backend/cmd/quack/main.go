@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/lmittmann/tint"
 	quackruntime "github.com/quackdiscord/bot/internal/runtime"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 )
 
 // @title Quack HTTP API
@@ -28,10 +28,11 @@ import (
 
 // main runs Quack and converts process signals into a graceful application shutdown.
 func main() {
-	log.Logger = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr}).With().Timestamp().Caller().Logger()
+	slog.SetDefault(slog.New(tint.NewTextHandler(os.Stderr, nil)))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := quackruntime.Run(ctx); err != nil {
-		log.Fatal().Err(err).Msg("Quack stopped")
+		slog.Error("Quack stopped", "error", err)
+		os.Exit(1)
 	}
 }

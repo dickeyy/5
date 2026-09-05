@@ -19,7 +19,7 @@ var (
 
 // AuditService provides authorized, filtered access to immutable moderation audit entries.
 type AuditService struct {
-	store Repository
+	store AuditRepository
 }
 
 // AuditListInput groups the validated inputs needed for audit list input.
@@ -68,8 +68,8 @@ type AuditEntryResponse struct {
 	Metadata            any               `json:"metadata"`
 }
 
-// NewAuditService constructs audit service with required dependencies explicit so callers control lifecycle and substitution.
-func NewAuditService(store Repository) *AuditService {
+// NewAuditService binds authorized audit searches to append-only history.
+func NewAuditService(store AuditRepository) *AuditService {
 	return &AuditService{store: store}
 }
 
@@ -201,7 +201,7 @@ func (s *AuditService) recordRead(ctx context.Context, guildContext *GuildStaffC
 	if !validAuditSource(readSource) || readSource == "" {
 		readSource = model.AuditSourceAPI
 	}
-	return s.store.CreateAuditLogEntry(ctx, &model.AuditLogEntry{GuildID: guildContext.Guild.ID, ActorDiscordUserID: actorID, ActorPermissionBits: permissionBits, Source: readSource, Action: string(model.AuditActionAuditRead), ResourceType: "audit_log", ResourceID: "list", Result: result, FailureReason: failure, RequestID: requestID, CorrelationID: correlationID, MetadataJSON: string(metadata)})
+	return recordAudit(ctx, s.store, &model.AuditLogEntry{GuildID: guildContext.Guild.ID, ActorDiscordUserID: actorID, ActorPermissionBits: permissionBits, Source: readSource, Action: string(model.AuditActionAuditRead), ResourceType: "audit_log", ResourceID: "list", Result: result, FailureReason: failure, RequestID: requestID, CorrelationID: correlationID, MetadataJSON: string(metadata)})
 }
 
 func normalizeAuditTime(value string) (string, error) {

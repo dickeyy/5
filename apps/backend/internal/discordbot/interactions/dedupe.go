@@ -1,7 +1,9 @@
 package interactions
 
 import (
+	"container/list"
 	"context"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -11,7 +13,8 @@ import (
 // InteractionDeduper atomically claims Discord interaction IDs for a bounded time window.
 type InteractionDeduper struct {
 	mu      sync.Mutex
-	seen    map[string]time.Time
+	seen    map[string]*list.Element
+	order   list.List
 	ttl     time.Duration
 	maxSize int
 	now     func() time.Time
@@ -28,7 +31,7 @@ func NewInteractionDeduper(ttl time.Duration, maxSize int) *InteractionDeduper {
 	if maxSize <= 0 {
 		maxSize = 10000
 	}
-	return &InteractionDeduper{seen: map[string]time.Time{}, ttl: ttl, maxSize: maxSize, now: time.Now}
+	return &InteractionDeduper{seen: make(map[string]*list.Element), ttl: ttl, maxSize: maxSize, now: time.Now}
 }
 
 // NewRedisInteractionDeduper constructs a restart-durable duplicate boundary.
@@ -50,31 +53,35 @@ func (d *InteractionDeduper) Claim(id string) bool {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		claimed, err := d.redis.SetNX(ctx, d.prefix+id, "claimed", d.ttl).Result()
+		if err != nil {
+			slog.ErrorContext(ctx, "Discord interaction claim unavailable", "error", err)
+		}
 		return err == nil && claimed
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	now := d.now().UTC()
-	if expires, ok := d.seen[id]; ok && expires.After(now) {
+	// Claims share one TTL, so insertion order is also expiration order.
+	for front := d.order.Front(); front != nil; front = d.order.Front() {
+		claim := front.Value.(interactionClaim)
+		if claim.expires.After(now) {
+			break
+		}
+		delete(d.seen, claim.id)
+		d.order.Remove(front)
+	}
+	if _, exists := d.seen[id]; exists {
 		return false
 	}
 	if len(d.seen) >= d.maxSize {
-		for key, expires := range d.seen {
-			if !expires.After(now) {
-				delete(d.seen, key)
-			}
-		}
-		if len(d.seen) >= d.maxSize {
-			var oldestKey string
-			var oldest time.Time
-			for key, expires := range d.seen {
-				if oldestKey == "" || expires.Before(oldest) {
-					oldestKey, oldest = key, expires
-				}
-			}
-			delete(d.seen, oldestKey)
-		}
+		return false
 	}
-	d.seen[id] = now.Add(d.ttl)
+	d.seen[id] = d.order.PushBack(interactionClaim{id: id, expires: now.Add(d.ttl)})
 	return true
+}
+
+// interactionClaim retains an accepted interaction until its replay window ends.
+type interactionClaim struct {
+	id      string
+	expires time.Time
 }

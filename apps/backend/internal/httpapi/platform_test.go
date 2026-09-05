@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"log/slog"
+
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/internal/config"
 	"github.com/quackdiscord/bot/internal/httpapi/apierror"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 )
 
 func TestPlatformRegistrarRejectsUnsafeProductionConfig(t *testing.T) {
@@ -174,9 +174,9 @@ func TestLoggerRedactsQueryCredentialsAndHeaders(t *testing.T) {
 		t.Fatalf("new registrar: %v", err)
 	}
 	var output bytes.Buffer
-	previous := log.Logger
-	log.Logger = zerolog.New(&output)
-	t.Cleanup(func() { log.Logger = previous })
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
 	router := gin.New()
 	if err := registrar.Register(router); err != nil {
 		t.Fatalf("register platform: %v", err)
@@ -243,5 +243,36 @@ func assertStructuredError(t *testing.T, response *httptest.ResponseRecorder, st
 	}
 	if body.Error.Code != code || body.Error.Message == "" || body.Error.RequestID == "" || body.Error.CorrelationID == "" {
 		t.Fatalf("unexpected structured error: %+v", body.Error)
+	}
+}
+
+func TestRecoveryRedactsRequestAndPanicContents(t *testing.T) {
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	registrar, err := NewPlatformRegistrar(config.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	if err := registrar.Register(router); err != nil {
+		t.Fatal(err)
+	}
+	router.GET("/panic", func(c *gin.Context) { panic("private moderation content") })
+	request := httptest.NewRequest(http.MethodGet, "/panic?token=query-secret", nil)
+	request.Header.Set("Cookie", "session=cookie-secret")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("status: %d", response.Code)
+	}
+	for _, secret := range []string{"private moderation content", "query-secret", "cookie-secret"} {
+		if strings.Contains(output.String(), secret) || strings.Contains(response.Body.String(), secret) {
+			t.Fatalf("leaked %s", secret)
+		}
+	}
+	if !strings.Contains(output.String(), "HTTP request completed") {
+		t.Fatal("panic request was not logged")
 	}
 }

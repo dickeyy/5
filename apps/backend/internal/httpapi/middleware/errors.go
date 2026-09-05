@@ -62,6 +62,7 @@ func ErrorEnvelope(c *gin.Context) {
 	original := c.Writer
 	buffered := &bufferedResponseWriter{ResponseWriter: original}
 	c.Writer = buffered
+	defer func() { c.Writer = original }()
 	c.Next()
 
 	status := buffered.Status()

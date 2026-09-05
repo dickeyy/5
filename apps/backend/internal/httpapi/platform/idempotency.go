@@ -19,6 +19,7 @@ const maxIdempotencyResponseBytes = 64 << 10
 type IdempotencyState string
 
 const (
+	IdempotencyConflict   IdempotencyState = "conflict"
 	IdempotencyAcquired   IdempotencyState = "acquired"
 	IdempotencyInProgress IdempotencyState = "in_progress"
 	IdempotencyComplete   IdempotencyState = "complete"
@@ -42,9 +43,10 @@ type IdempotencyStore struct {
 // beginIdempotencyScript atomically returns an existing state or creates one fenced lease.
 var beginIdempotencyScript = redis.NewScript(`
 if redis.call("EXISTS", KEYS[1]) == 1 then
+  if (redis.call("HGET", KEYS[1], "fingerprint") or "") ~= ARGV[3] then return {"conflict", "", "0", "", redis.call("PTTL", KEYS[1])} end
   return {redis.call("HGET", KEYS[1], "state"), "", redis.call("HGET", KEYS[1], "status") or "0", redis.call("HGET", KEYS[1], "body") or "", redis.call("PTTL", KEYS[1])}
 end
-redis.call("HSET", KEYS[1], "state", "in_progress", "token", ARGV[1], "status", "0", "body", "")
+redis.call("HSET", KEYS[1], "state", "in_progress", "token", ARGV[1], "status", "0", "body", "", "fingerprint", ARGV[3])
 redis.call("PEXPIRE", KEYS[1], ARGV[2])
 return {"acquired", ARGV[1], "0", "", redis.call("PTTL", KEYS[1])}
 `)
@@ -77,7 +79,7 @@ func NewIdempotencyStore(client redis.UniversalClient, prefix string) *Idempoten
 }
 
 // Begin acquires a fenced lease or returns the original in-progress/completed state without executing work twice.
-func (s *IdempotencyStore) Begin(ctx context.Context, scope, key string, ttl time.Duration) (IdempotencyResult, error) {
+func (s *IdempotencyStore) Begin(ctx context.Context, scope, key string, ttl time.Duration, fingerprints ...string) (IdempotencyResult, error) {
 	if s == nil || s.client == nil {
 		return IdempotencyResult{}, ErrUnavailable
 	}
@@ -92,7 +94,11 @@ func (s *IdempotencyStore) Begin(ctx context.Context, scope, key string, ttl tim
 	if ttlMillis < 1 {
 		ttlMillis = 1
 	}
-	raw, err := beginIdempotencyScript.Run(ctx, s.client, []string{s.redisKey(scope, key)}, token, ttlMillis).Result()
+	fingerprint := ""
+	if len(fingerprints) > 0 {
+		fingerprint = fingerprints[0]
+	}
+	raw, err := beginIdempotencyScript.Run(ctx, s.client, []string{s.redisKey(scope, key)}, token, ttlMillis, fingerprint).Result()
 	if err != nil {
 		return IdempotencyResult{}, fmt.Errorf("%w: begin idempotency: %v", ErrUnavailable, err)
 	}

@@ -74,8 +74,10 @@ func readiness(c *gin.Context, services *quack.Services, discord DiscordStatusPr
 	result.Checks["discord"] = readinessCheck{Ready: connected, Latency: latency, Detail: readinessDetail(connected, "gateway disconnected")}
 
 	queueReady := false
+	var opsStatus *quack.OpsStatusResponse
 	if services != nil && services.Ops != nil {
 		if status, err := services.Ops.GlobalStatus(ctx); err == nil {
+			opsStatus = status
 			queueReady = status.Queue.Active
 		}
 	}
@@ -93,19 +95,16 @@ func readiness(c *gin.Context, services *quack.Services, discord DiscordStatusPr
 	}
 	result.Checks["migration"] = migration
 
-	actionsReady := true
-	if services == nil || services.Ops == nil {
-		actionsReady = false
-	} else if status, err := services.Ops.GlobalStatus(ctx); err != nil {
-		actionsReady = false
-	} else {
-		for _, capability := range status.Actions.Capabilities {
+	actionsReady := opsStatus != nil
+	if opsStatus != nil {
+		for _, capability := range opsStatus.Actions.Capabilities {
 			if !capability.Executable {
 				actionsReady = false
 				break
 			}
 		}
 	}
+
 	result.Checks["action_capabilities"] = readinessCheck{Ready: actionsReady, Detail: readinessDetail(actionsReady, "required action unavailable")}
 
 	for _, check := range result.Checks {

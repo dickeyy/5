@@ -3,7 +3,10 @@ package moduleintegration
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/quackdiscord/bot/internal/httpapi/apierror"
 
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/internal/config"
@@ -29,7 +32,7 @@ func (r *Runtime) RegisterHTTP(group *gin.RouterGroup, services *quack.Services,
 	modulesGroup := group.Group("/:discordGuildID/modules")
 	modulesGroup.Use(middleware.RequireGuildContext(services, ""))
 	modulesGroup.Use(moduleRateLimit(primitives, services.Config))
-	modulesGroup.Use(moduleIdempotency(primitives, services.Config))
+	modulesGroup.Use(moduleIdempotency(primitives, services.Config, r.Tickets))
 	// Normalize feature errors before the idempotency layer persists a response;
 	// the global envelope remains the final process-wide safety boundary.
 	modulesGroup.Use(middleware.ErrorEnvelope)
@@ -63,12 +66,30 @@ func moduleRateLimit(primitives httpplatform.Primitives, cfg config.Config) gin.
 
 // moduleIdempotency requires a fenced key for mutation methods while leaving
 // safe reads unaffected.
-func moduleIdempotency(primitives httpplatform.Primitives, cfg config.Config) gin.HandlerFunc {
+func moduleIdempotency(primitives httpplatform.Primitives, cfg config.Config, ticketServices ...*tickets.Service) gin.HandlerFunc {
 	ttl := time.Duration(cfg.RateLimits.IdempotencyTTLHours) * time.Hour
 	protect := primitives.Idempotency.Protect("optional-module-write", ttl, moduleWriteSubject)
 	return func(c *gin.Context) {
 		switch c.Request.Method {
 		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+			guild := middleware.GetGuildContext(c)
+			action := model.PermissionActionGuildSettingsWrite
+			path := c.FullPath()
+			if strings.Contains(path, "/tickets/") && (strings.HasSuffix(path, "/resolve") || strings.HasSuffix(path, "/reopen")) {
+				action = model.PermissionActionTicketResolve
+			}
+			allowed := guild != nil && guild.Can(action)
+			if strings.HasSuffix(path, "/tickets/:ticketID/cancel") && len(ticketServices) > 0 && ticketServices[0] != nil {
+				actor, err := resolveTicketActor(c)
+				if err == nil {
+					ticket, _, err := ticketServices[0].Detail(c.Request.Context(), actor, c.Param("ticketID"))
+					allowed = err == nil && ticket != nil && (actor.CanModerate || ticket.OwnerDiscordUserID == actor.DiscordUserID)
+				}
+			}
+			if !allowed {
+				apierror.Write(c, http.StatusForbidden, apierror.CodeAuthorization, "access denied")
+				return
+			}
 			protect(c)
 		default:
 			c.Next()
@@ -79,7 +100,7 @@ func moduleIdempotency(primitives httpplatform.Primitives, cfg config.Config) gi
 // moduleWriteSubject prevents one idempotency key from replaying a response
 // across distinct module operations while retaining the actor/guild boundary.
 func moduleWriteSubject(c *gin.Context) string {
-	return moduleSubject(c) + ":" + c.Request.Method + ":" + c.FullPath()
+	return moduleSubject(c) + ":" + c.Request.Method + ":" + c.Request.URL.EscapedPath()
 }
 
 // moduleSubject keeps identity material inside the shared hashed key boundary.

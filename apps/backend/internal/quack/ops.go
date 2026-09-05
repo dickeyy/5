@@ -10,7 +10,7 @@ import (
 
 // OpsService assembles queue health and action capability data for operational endpoints.
 type OpsService struct {
-	store     Repository
+	store     OpsRepository
 	scheduler CaseWorkScheduler
 }
 
@@ -61,8 +61,8 @@ type OpsRecentActionFailure struct {
 	UpdatedAt     time.Time                   `json:"updated_at"`
 }
 
-// NewOpsService constructs ops service with required dependencies explicit so callers control lifecycle and substitution.
-func NewOpsService(store Repository, scheduler ...CaseWorkScheduler) *OpsService {
+// NewOpsService binds durable action health to an optional in-process queue snapshot.
+func NewOpsService(store OpsRepository, scheduler ...CaseWorkScheduler) *OpsService {
 	service := &OpsService{store: store}
 	if len(scheduler) > 0 {
 		service.scheduler = scheduler[0]

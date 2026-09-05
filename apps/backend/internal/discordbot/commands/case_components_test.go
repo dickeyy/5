@@ -51,18 +51,20 @@ func TestCaseAddUsesStructuredModalAndKeepsPublicSummaryLimited(t *testing.T) {
 	if err := modalResult.Task(context.Background(), responder); err != nil {
 		t.Fatal(err)
 	}
-	if !responder.deleted || responder.followup.Ephemeral || len(responder.followup.Embeds) != 1 {
-		t.Fatalf("expected public success after private validation, got %+v", responder)
+	if !responder.deleted || responder.followup.Ephemeral || len(responder.followup.Embeds) != 0 || responder.editCount != 1 {
+		t.Fatalf("expected public text after private validation, got %+v", responder)
 	}
-	fields := embedFields(responder.followup.Embeds[0])
-	if fields["Target"] != "<@target-2>" || fields["Template"] != "Abuse" || fields["Level"] != "Default" {
-		t.Fatalf("missing allowed public fields: %+v", fields)
-	}
-	for _, hidden := range []string{"Moderator", "Matching Cases", "Visible context", "Evidence"} {
-		if _, ok := fields[hidden]; ok {
-			t.Fatalf("public result leaked %s: %+v", hidden, fields)
+	for _, want := range []string{"<@target-2>", "Abuse", "Default"} {
+		if !strings.Contains(responder.followup.Content, want) {
+			t.Fatalf("missing %q: %+v", want, responder.followup)
 		}
 	}
+	for _, hidden := range []string{"Moderator", "Matching Cases", "Visible context", "Evidence", "Repeated abusive replies"} {
+		if strings.Contains(responder.followup.Content, hidden) {
+			t.Fatalf("public result leaked %s", hidden)
+		}
+	}
+
 }
 
 func TestMessageContextActionOffersActiveTemplateSelection(t *testing.T) {

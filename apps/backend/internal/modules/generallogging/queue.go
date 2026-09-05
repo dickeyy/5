@@ -3,6 +3,9 @@ package generallogging
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"sync"
 )
 
@@ -32,7 +35,7 @@ func NewDeliveryQueue(ctx context.Context, service *Service, capacity, workers i
 		go func() {
 			defer queue.wg.Done()
 			for event := range queue.events {
-				_ = service.Handle(ctx, event)
+				queue.process(ctx, event)
 			}
 		}()
 	}
@@ -70,12 +73,24 @@ func cloneEvent(event Event) Event {
 // Close drains accepted events and waits for workers without affecting other module lifecycles.
 func (q *DeliveryQueue) Close() {
 	q.mu.Lock()
-	if q.closed {
-		q.mu.Unlock()
-		return
+	if !q.closed {
+		q.closed = true
+		close(q.events)
 	}
-	q.closed = true
-	close(q.events)
 	q.mu.Unlock()
 	q.wg.Wait()
+}
+
+// process contains adapter failures within one job so a bad event cannot stop
+// moderation or take down unrelated workers. Message contents are never logged.
+func (q *DeliveryQueue) process(ctx context.Context, event Event) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			slog.ErrorContext(ctx, "General logging worker panicked", "guild_id", event.GuildID,
+				"panic_type", fmt.Sprintf("%T", recovered), "stack", string(debug.Stack()))
+		}
+	}()
+	if err := q.service.Handle(ctx, event); err != nil {
+		slog.ErrorContext(ctx, "General logging delivery failed", "guild_id", event.GuildID, "error_type", fmt.Sprintf("%T", err))
+	}
 }

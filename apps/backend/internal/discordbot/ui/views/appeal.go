@@ -27,13 +27,13 @@ func AppealStaffMessage(appeal *quack.AppealResponse) ui.Message {
 		}
 		embed.AddField(string(event.Type), actor+": "+event.Body, false)
 	}
-	message := ui.EmbedMessage(embed.Build(), true)
+	message := ui.EmbedMessage(embed.Build(), false)
 	for _, offer := range appeal.ReversalOffers {
 		customID, err := ui.EncodeCustomID(ui.CustomID{Namespace: "appeal", Action: "reverse", Version: "v1", Payload: appeal.ID + "," + offer.OriginalExecutionID + "," + string(offer.ActionType)})
 		if err != nil {
 			continue
 		}
-		message.Components = append(message.Components, ui.Row(ui.Button(customID, "Confirm "+string(offer.ActionType), discordgo.DangerButton, false)))
+		message.Components = append(message.Components, ui.Row(ui.Button(customID, "Confirm "+strings.ToLower(offer.ActionType.Label()), discordgo.DangerButton, false)))
 	}
 	return message
 }

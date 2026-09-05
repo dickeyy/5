@@ -5,11 +5,13 @@ go 1.25.4
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/bwmarrin/discordgo v0.29.0
+	github.com/caarlos0/env/v11 v11.4.1
 	github.com/gin-gonic/gin v1.11.0
+	github.com/go-sql-driver/mysql v1.9.3
 	github.com/joho/godotenv v1.5.1
+	github.com/lmittmann/tint v1.2.0
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/redis/go-redis/v9 v9.17.3
-	github.com/rs/zerolog v1.34.0
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.1
@@ -27,7 +29,6 @@ require (
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.27.0 // indirect
-	github.com/go-sql-driver/mysql v1.9.3 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/goccy/go-yaml v1.18.0 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
@@ -36,7 +37,6 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
-	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-sqlite3 v1.14.22 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180228061459-e0a39a4cb421 // indirect

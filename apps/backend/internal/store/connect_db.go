@@ -1,11 +1,14 @@
 package store
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	mysqlconfig "github.com/go-sql-driver/mysql"
 	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // OpenMySQL opens and verifies my sql so startup fails before serving traffic when the dependency is unavailable.
@@ -14,7 +17,7 @@ func OpenMySQL(dsn string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	db, err := gorm.Open(gormmysql.Open(normalized), &gorm.Config{})
+	db, err := gorm.Open(gormmysql.Open(normalized), &gorm.Config{Logger: databaseLogger{level: logger.Info}})
 	if err != nil {
 		return nil, fmt.Errorf("connect to database: %w", err)
 	}
@@ -22,7 +25,11 @@ func OpenMySQL(dsn string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get sql database: %w", err)
 	}
-	if err := sqlDB.Ping(); err != nil {
+	sqlDB.SetConnMaxLifetime(5 * time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := sqlDB.PingContext(ctx); err != nil {
+		_ = sqlDB.Close()
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
 	return db, nil

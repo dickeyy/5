@@ -3,6 +3,8 @@ package routes
 import (
 	"net/http"
 
+	"github.com/quackdiscord/bot/internal/httpapi/apierror"
+
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/internal/httpapi/middleware"
 	"github.com/quackdiscord/bot/internal/quack"
@@ -20,13 +22,13 @@ import (
 func listUserGuilds(c *gin.Context, services *quack.Services) {
 	session := middleware.GetAuthSession(c)
 	if session == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing auth session"})
+		apierror.Write(c, http.StatusUnauthorized, apierror.CodeAuthentication, "missing auth session")
 		return
 	}
 
 	guilds, err := services.Guilds.ListUserManageableGuilds(c.Request.Context(), session)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to list discord guilds"})
+		apierror.Write(c, http.StatusBadGateway, apierror.CodeDependency, "failed to list discord guilds")
 		return
 	}
 
@@ -46,7 +48,7 @@ func listUserGuilds(c *gin.Context, services *quack.Services) {
 func guildMe(c *gin.Context) {
 	guildContext := middleware.GetGuildContext(c)
 	if guildContext == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "missing guild context"})
+		apierror.Write(c, http.StatusInternalServerError, apierror.CodeInternal, "missing guild context")
 		return
 	}
 

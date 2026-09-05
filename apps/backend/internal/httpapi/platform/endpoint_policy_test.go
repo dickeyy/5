@@ -3,6 +3,7 @@ package platform
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -19,7 +20,7 @@ func TestEndpointPolicyRequiresAndReplaysIdempotentWrites(t *testing.T) {
 	cfg := config.Default()
 	primitives := Primitives{RateLimits: NewRateLimiter(client, "test:route-rate:"), Idempotency: NewIdempotencyStore(client, "test:route-idempotency:")}
 	router := gin.New()
-	router.Use(middleware.RequestContext, middleware.ErrorEnvelope, EndpointPolicy(primitives, cfg))
+	router.Use(middleware.RequestContext, middleware.ErrorEnvelope, EndpointPolicy(primitives, cfg), middleware.ContinueAuthorizedWrite)
 	calls := 0
 	router.PUT("/guilds/:discordGuildID/modules/example/settings", func(c *gin.Context) { calls++; c.JSON(http.StatusOK, gin.H{"saved": true}) })
 
@@ -93,7 +94,7 @@ func TestEndpointPolicyNormalizesEquivalentBearerSubjects(t *testing.T) {
 	cfg := config.Default()
 	primitives := Primitives{RateLimits: NewRateLimiter(client, "test:normalize-rate:"), Idempotency: NewIdempotencyStore(client, "test:normalize-idempotency:")}
 	router := gin.New()
-	router.Use(middleware.RequestContext, middleware.ErrorEnvelope, EndpointPolicy(primitives, cfg))
+	router.Use(middleware.RequestContext, middleware.ErrorEnvelope, EndpointPolicy(primitives, cfg), middleware.ContinueAuthorizedWrite)
 	calls := 0
 	router.POST("/guilds/:discordGuildID/cases", func(c *gin.Context) { calls++; c.JSON(http.StatusCreated, gin.H{"case": "one"}) })
 	for _, authorization := range []string{"bearer   same-session", "Bearer same-session"} {
@@ -108,5 +109,48 @@ func TestEndpointPolicyNormalizesEquivalentBearerSubjects(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("equivalent bearer forms executed %d writes", calls)
+	}
+}
+
+func TestWriteReplayChecksAuthorizationResourceAndPayload(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	cfg := config.Default()
+	primitives := Primitives{RateLimits: NewRateLimiter(client, "rate:"), Idempotency: NewIdempotencyStore(client, "replay:")}
+	router := gin.New()
+	router.Use(EndpointPolicy(primitives, cfg))
+	authorized, calls := true, 0
+	router.POST("/guilds/:discordGuildID/cases/:caseID/void", func(c *gin.Context) {
+		if !authorized {
+			c.AbortWithStatus(http.StatusForbidden)
+			return
+		}
+		middleware.ContinueAuthorizedWrite(c)
+	}, func(c *gin.Context) { calls++; c.JSON(http.StatusOK, gin.H{"private": c.Param("caseID")}) })
+	send := func(path, body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		request.Header.Set("Idempotency-Key", "same-key")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		return response
+	}
+	path := "/guilds/guild/cases/one/void"
+	if got := send(path, `{"reason":"one"}`); got.Code != http.StatusOK {
+		t.Fatal(got.Body.String())
+	}
+	authorized = false
+	if got := send(path, `{"reason":"one"}`); got.Code != http.StatusForbidden || strings.Contains(got.Body.String(), "private") {
+		t.Fatal("replay bypassed current authorization")
+	}
+	authorized = true
+	if got := send(path, `{"reason":"two"}`); got.Code != http.StatusConflict {
+		t.Fatal("changed payload replayed")
+	}
+	if got := send("/guilds/guild/cases/two/void", `{"reason":"one"}`); got.Code != http.StatusOK || !strings.Contains(got.Body.String(), "two") {
+		t.Fatal("resource identity missing from scope")
+	}
+	if calls != 2 {
+		t.Fatalf("write calls=%d", calls)
 	}
 }

@@ -20,15 +20,15 @@ type AppealNotificationAdapter struct {
 }
 
 // SendAppealMemberNotification delivers one member-owned status update through DM.
-func (a *AppealNotificationAdapter) SendAppealMemberNotification(_ context.Context, discordUserID, body string) (string, error) {
+func (a *AppealNotificationAdapter) SendAppealMemberNotification(ctx context.Context, discordUserID, body string) (string, error) {
 	if a == nil || a.Session == nil || strings.TrimSpace(discordUserID) == "" {
 		return "", errors.New("appeal member notification adapter is not configured")
 	}
-	channel, err := a.Session.UserChannelCreate(discordUserID)
+	channel, err := a.Session.UserChannelCreate(discordUserID, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 	if err != nil {
 		return "", err
 	}
-	message, err := a.Session.ChannelMessageSend(channel.ID, body)
+	message, err := a.Session.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{Content: body, AllowedMentions: &discordgo.MessageAllowedMentions{}}, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 	if err != nil {
 		return "", err
 	}
@@ -47,7 +47,7 @@ func (a *AppealNotificationAdapter) SendAppealStaffNotification(ctx context.Cont
 	if strings.TrimSpace(channelID) == "" {
 		return "", errors.New("appeal staff channel is unavailable")
 	}
-	message, err := a.Session.ChannelMessageSend(channelID, body)
+	message, err := a.Session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{Content: body, AllowedMentions: &discordgo.MessageAllowedMentions{}}, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 	if err != nil {
 		return "", err
 	}

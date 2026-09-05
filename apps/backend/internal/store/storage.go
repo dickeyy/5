@@ -23,7 +23,7 @@ type Store struct {
 }
 
 // WithGuildCaseLock runs case creation in one transaction while locking the guild row to serialize numbering and escalation selection.
-func (s *Store) WithGuildCaseLock(ctx context.Context, guildID string, fn func(quack.Repository) error) error {
+func (s *Store) WithGuildCaseLock(ctx context.Context, guildID string, fn func(quack.CaseRepository) error) error {
 	if s == nil || s.db == nil {
 		return errors.New("database not connected")
 	}

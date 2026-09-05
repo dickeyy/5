@@ -495,8 +495,7 @@ func TestTemplateRoutesRejectRetiredProductFields(t *testing.T) {
 func TestGuildSettingsRoutesReadWriteAcknowledgeAndAuditDenied(t *testing.T) {
 	managerRouter, managerSessionID, managerStore := newTemplateRouteHarnessWithStore(t, uint64(discordgo.PermissionManageGuild))
 	patch := httptest.NewRequest(http.MethodPatch, "/guilds/guild-1/settings", bytes.NewBufferString(`{
-		"audit_mirror_channel_discord_id":"100000000000000001",
-		"managed_evidence_channel_discord_id":"100000000000000002",
+		"audit_mirror_channel_discord_id":"",
 		"notification_introduction":"Welcome",
 		"notification_footer":"Footer",
 		"tickets_enabled":true,
@@ -532,7 +531,7 @@ func TestGuildSettingsRoutesReadWriteAcknowledgeAndAuditDenied(t *testing.T) {
 	if err := json.Unmarshal(getResponse.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode settings response: %v", err)
 	}
-	if body.Settings.AuditMirrorChannelDiscordID != "100000000000000001" || !body.Settings.TicketsEnabled || !body.Settings.HoneypotEnabled || !body.Settings.StarterPolicyReviewRequired {
+	if body.Settings.AuditMirrorChannelDiscordID != "" || !body.Settings.TicketsEnabled || !body.Settings.HoneypotEnabled || !body.Settings.StarterPolicyReviewRequired {
 		t.Fatalf("unexpected settings response: %+v", body.Settings)
 	}
 

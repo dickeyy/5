@@ -4,14 +4,30 @@ import (
 	"errors"
 	"net/http"
 
+	"log/slog"
+
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/internal/httpapi/apierror"
 	"github.com/quackdiscord/bot/internal/quack"
 	"github.com/quackdiscord/bot/internal/quack/model"
-	"github.com/rs/zerolog/log"
 )
 
 const ContextGuildKey = "guild_context"
+
+// ContextAuthorizedWriteKey carries the write policy staged by the outer HTTP platform.
+const ContextAuthorizedWriteKey = "authorized_write_policy"
+
+// ContinueAuthorizedWrite runs staged replay only after the route has checked its specific capability.
+func ContinueAuthorizedWrite(c *gin.Context) {
+	if value, ok := c.Get(ContextAuthorizedWriteKey); ok {
+		c.Set(ContextAuthorizedWriteKey, nil)
+		if protect, ok := value.(gin.HandlerFunc); ok {
+			protect(c)
+			return
+		}
+	}
+	c.Next()
+}
 
 // RequireGuildContext is a middleware function that requires a valid guild context
 func RequireGuildContext(services *quack.Services, requiredAction model.PermissionAction) gin.HandlerFunc {
@@ -24,7 +40,7 @@ func RequireGuildContext(services *quack.Services, requiredAction model.Permissi
 
 		guildContext, err := services.Guilds.ResolveStaffContext(c.Request.Context(), session, c.Param("discordGuildID"))
 		if err != nil {
-			log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Str("correlation_id", quack.CorrelationIDFromContext(c.Request.Context())).Str("actor_discord_user_id", session.DiscordUserID).Str("discord_guild_id", c.Param("discordGuildID")).Msg("live guild authorization denied")
+			slog.Warn("live guild authorization denied", "request_id", quack.RequestIDFromContext(c.Request.Context()), "correlation_id", quack.CorrelationIDFromContext(c.Request.Context()), "actor_discord_user_id", session.DiscordUserID, "discord_guild_id", c.Param("discordGuildID"))
 			status := http.StatusForbidden
 			if errors.Is(err, quack.ErrBotNotInGuild) {
 				status = http.StatusNotFound
@@ -38,12 +54,16 @@ func RequireGuildContext(services *quack.Services, requiredAction model.Permissi
 		}
 
 		if err := services.Guilds.Authorize(c.Request.Context(), guildContext, requiredAction, model.AuditSourceAPI); err != nil {
-			log.Warn().Str("request_id", quack.RequestIDFromContext(c.Request.Context())).Str("correlation_id", quack.CorrelationIDFromContext(c.Request.Context())).Str("actor_discord_user_id", session.DiscordUserID).Str("discord_guild_id", c.Param("discordGuildID")).Str("permission_action", string(requiredAction)).Msg("guild permission denied")
+			slog.Warn("guild permission denied", "request_id", quack.RequestIDFromContext(c.Request.Context()), "correlation_id", quack.CorrelationIDFromContext(c.Request.Context()), "actor_discord_user_id", session.DiscordUserID, "discord_guild_id", c.Param("discordGuildID"), "permission_action", string(requiredAction))
 			apierror.Write(c, http.StatusForbidden, apierror.CodeAuthorization, "access denied")
 			return
 		}
 
 		c.Set(ContextGuildKey, guildContext)
+		if requiredAction != "" {
+			ContinueAuthorizedWrite(c)
+			return
+		}
 		c.Next()
 	}
 }

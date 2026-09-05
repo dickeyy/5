@@ -7,8 +7,9 @@ import (
 	"sort"
 	"strings"
 
+	"log/slog"
+
 	"github.com/bwmarrin/discordgo"
-	"github.com/rs/zerolog/log"
 )
 
 // DiscordCommandClient defines the external operations needed by this package, keeping the concrete client at the adapter boundary.
@@ -37,25 +38,25 @@ type sessionCommandClient struct {
 // ListCommands returns commands subject to authorization, ordering, and filtering constraints.
 func (c sessionCommandClient) ListCommands(ctx context.Context, appID, guildID string) ([]*discordgo.ApplicationCommand, error) {
 	_ = ctx
-	return c.session.ApplicationCommands(appID, guildID)
+	return c.session.ApplicationCommands(appID, guildID, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 }
 
 // CreateCommand creates command while preserving validation, authorization, and persistence invariants.
 func (c sessionCommandClient) CreateCommand(ctx context.Context, appID, guildID string, command *discordgo.ApplicationCommand) (*discordgo.ApplicationCommand, error) {
 	_ = ctx
-	return c.session.ApplicationCommandCreate(appID, guildID, command)
+	return c.session.ApplicationCommandCreate(appID, guildID, command, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 }
 
 // EditCommand encapsulates the edit command rule so callers share one consistent package implementation.
 func (c sessionCommandClient) EditCommand(ctx context.Context, appID, guildID, commandID string, command *discordgo.ApplicationCommand) (*discordgo.ApplicationCommand, error) {
 	_ = ctx
-	return c.session.ApplicationCommandEdit(appID, guildID, commandID, command)
+	return c.session.ApplicationCommandEdit(appID, guildID, commandID, command, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 }
 
 // DeleteCommand encapsulates the delete command rule so callers share one consistent package implementation.
 func (c sessionCommandClient) DeleteCommand(ctx context.Context, appID, guildID, commandID string) error {
 	_ = ctx
-	return c.session.ApplicationCommandDelete(appID, guildID, commandID)
+	return c.session.ApplicationCommandDelete(appID, guildID, commandID, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 }
 
 // Sync reconciles local command specifications with Discord, using fingerprints to avoid unnecessary writes.
@@ -77,13 +78,7 @@ func (s CommandSyncer) Sync(ctx context.Context, specs []CommandSpec) error {
 	}
 
 	scope := commandScope(s.GuildID)
-	log.Info().
-		Str("scope", scope).
-		Str("app_id", s.AppID).
-		Int("local_command_count", len(specs)).
-		Int("remote_command_count", len(existing)).
-		Bool("prune_enabled", s.PruneEnabled).
-		Msg("Syncing Discord application commands")
+	slog.Info("Syncing Discord application commands", "scope", scope, "app_id", s.AppID, "local_command_count", len(specs), "remote_command_count", len(existing), "prune_enabled", s.PruneEnabled)
 
 	existingByName := make(map[string]*discordgo.ApplicationCommand, len(existing))
 	for _, command := range existing {
@@ -118,31 +113,18 @@ func (s CommandSyncer) syncOne(ctx context.Context, cache commandHashCache, scop
 
 	cached, err := cache.Get(ctx, scope, commandName)
 	if err != nil {
-		log.Warn().Err(err).Str("command", commandName).Msg("Command cache read failed; falling back to remote comparison")
+		slog.Warn("Command cache read failed; falling back to remote comparison", "error", err, "command", commandName)
 	}
-	log.Debug().
-		Str("command", commandName).
-		Str("scope", scope).
-		Str("local_hash", localHash).
-		Str("cached_command_id", cachedCommandID(cached)).
-		Str("cached_hash", cachedHash(cached)).
-		Bool("remote_exists", remote != nil).
-		Msg("Evaluating Discord application command sync")
+	slog.Debug("Evaluating Discord application command sync", "command", commandName, "scope", scope, "local_hash", localHash, "cached_command_id", cachedCommandID(cached), "cached_hash", cachedHash(cached), "remote_exists", remote != nil)
 
 	if remote == nil {
-		log.Info().
-			Str("command", commandName).
-			Str("scope", scope).
-			Str("local_hash", localHash).
-			Str("cached_command_id", cachedCommandID(cached)).
-			Str("cached_hash", cachedHash(cached)).
-			Msg("Discord application command missing remotely; creating")
+		slog.Info("Discord application command missing remotely; creating", "command", commandName, "scope", scope, "local_hash", localHash, "cached_command_id", cachedCommandID(cached), "cached_hash", cachedHash(cached))
 		created, err := s.Client.CreateCommand(ctx, s.AppID, s.GuildID, command)
 		if err != nil {
 			return fmt.Errorf("create discord application command %s: %w", commandName, err)
 		}
 		s.cacheCommand(ctx, cache, scope, commandName, commandID(created), localHash)
-		log.Info().Str("command", commandName).Msg("Registered Discord application command")
+		slog.Info("Registered Discord application command", "command", commandName)
 		return nil
 	}
 
@@ -151,51 +133,24 @@ func (s CommandSyncer) syncOne(ctx context.Context, cache commandHashCache, scop
 		return fmt.Errorf("hash remote command %s: %w", commandName, err)
 	}
 	if shouldSkipCommandSync(cached, remote.ID, localHash, remoteHash) {
-		log.Info().
-			Str("command", commandName).
-			Str("scope", scope).
-			Str("remote_command_id", remote.ID).
-			Str("local_hash", localHash).
-			Str("remote_hash", remoteHash).
-			Str("cached_hash", cachedHash(cached)).
-			Msg("Discord application command is unchanged; skipping")
+		slog.Info("Discord application command is unchanged; skipping", "command", commandName, "scope", scope, "remote_command_id", remote.ID, "local_hash", localHash, "remote_hash", remoteHash, "cached_hash", cachedHash(cached))
 		return nil
 	}
 	if remoteHash == localHash {
-		log.Info().
-			Str("command", commandName).
-			Str("scope", scope).
-			Str("remote_command_id", remote.ID).
-			Str("local_hash", localHash).
-			Str("remote_hash", remoteHash).
-			Str("cached_command_id", cachedCommandID(cached)).
-			Str("cached_hash", cachedHash(cached)).
-			Msg("Discord application command matches remote definition; refreshing cache only")
+		slog.Info("Discord application command matches remote definition; refreshing cache only", "command", commandName, "scope", scope, "remote_command_id", remote.ID, "local_hash", localHash, "remote_hash", remoteHash, "cached_command_id", cachedCommandID(cached), "cached_hash", cachedHash(cached))
 		s.cacheCommand(ctx, cache, scope, commandName, remote.ID, localHash)
 		return nil
 	}
 
-	log.Info().
-		Str("command", commandName).
-		Str("scope", scope).
-		Str("remote_command_id", remote.ID).
-		Str("local_hash", localHash).
-		Str("remote_hash", remoteHash).
-		Str("cached_command_id", cachedCommandID(cached)).
-		Str("cached_hash", cachedHash(cached)).
-		Msg("Discord application command definition hash changed; updating")
-	log.Debug().
-		Str("command", commandName).
-		Str("local_definition", localDefinition).
-		Str("remote_definition", remoteDefinition).
-		Msg("Discord application command canonical definitions differ")
+	slog.Info("Discord application command definition hash changed; updating", "command", commandName, "scope", scope, "remote_command_id", remote.ID, "local_hash", localHash, "remote_hash", remoteHash, "cached_command_id", cachedCommandID(cached), "cached_hash", cachedHash(cached))
+	slog.Debug("Discord application command canonical definitions differ", "command", commandName, "local_definition", localDefinition, "remote_definition", remoteDefinition)
 
 	updated, err := s.Client.EditCommand(ctx, s.AppID, s.GuildID, remote.ID, command)
 	if err != nil {
 		return fmt.Errorf("update discord application command %s: %w", commandName, err)
 	}
 	s.cacheCommand(ctx, cache, scope, commandName, commandID(updated), localHash)
-	log.Info().Str("command", commandName).Msg("Updated Discord application command")
+	slog.Info("Updated Discord application command", "command", commandName)
 	return nil
 }
 
@@ -217,20 +172,12 @@ func (s CommandSyncer) pruneRemoteOnlyCommands(ctx context.Context, scope string
 
 	remoteOnlyNames := commandNames(remoteOnly)
 	if !s.PruneEnabled {
-		log.Info().
-			Str("scope", scope).
-			Int("remote_only_command_count", len(remoteOnly)).
-			Strs("remote_only_commands", remoteOnlyNames).
-			Msg("Remote Discord application commands are not registered locally; pruning disabled")
+		slog.Info("Remote Discord application commands are not registered locally; pruning disabled", "scope", scope, "remote_only_command_count", len(remoteOnly), "remote_only_commands", remoteOnlyNames)
 		return nil
 	}
 
 	for _, command := range remoteOnly {
-		log.Info().
-			Str("scope", scope).
-			Str("command", command.Name).
-			Str("remote_command_id", command.ID).
-			Msg("Deleting remote Discord application command missing from local registry")
+		slog.Info("Deleting remote Discord application command missing from local registry", "scope", scope, "command", command.Name, "remote_command_id", command.ID)
 		if err := s.Client.DeleteCommand(ctx, s.AppID, s.GuildID, command.ID); err != nil {
 			return fmt.Errorf("delete remote-only discord application command %s: %w", command.Name, err)
 		}
@@ -245,7 +192,7 @@ func (s CommandSyncer) cacheCommand(ctx context.Context, cache commandHashCache,
 		DiscordCommandID: commandID,
 		Hash:             hash,
 	}); err != nil {
-		log.Warn().Err(err).Str("command", commandName).Msg("Command cache write failed")
+		slog.Warn("Command cache write failed", "error", err, "command", commandName)
 	}
 }
 

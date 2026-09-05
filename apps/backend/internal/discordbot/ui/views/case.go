@@ -3,7 +3,6 @@ package views
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/quackdiscord/bot/internal/discordbot/ui"
@@ -19,7 +18,7 @@ type CaseCreated struct {
 
 // CaseCreatedMessage converts case created message into its transport presentation without leaking transport types into the core.
 func CaseCreatedMessage(result CaseCreated) ui.Message {
-	return ui.EmbedMessage(CaseCreatedEmbed(result), false)
+	return ui.Content(ui.TruncateRunes(FormatCaseCreated(result), 2000), false)
 }
 
 // CaseCreatedEmbed converts case created embed into its transport presentation without leaking transport types into the core.
@@ -30,9 +29,7 @@ func CaseCreatedEmbed(result CaseCreated) *discordgo.MessageEmbed {
 
 	created := result.Case
 	embed := ui.NewSuccessEmbed(fmt.Sprintf("Case #%d Created", created.CaseNumber), "").
-		AddField("Target", fmt.Sprintf("<@%s>", created.TargetDiscordUserID), true).
-		SetFooter(fmt.Sprintf("Case ID: %s", created.ID)).
-		SetTimestamp(time.Now())
+		AddField("Target", fmt.Sprintf("<@%s>", created.TargetDiscordUserID), true)
 
 	templateName := caseTemplateDisplayName(result.Template)
 	if templateName != "" {
@@ -59,13 +56,12 @@ func FormatCaseCreated(result CaseCreated) string {
 
 	created := result.Case
 	lines := []string{
-		fmt.Sprintf("Case #%d created", created.CaseNumber),
-		fmt.Sprintf("Target: <@%s>", created.TargetDiscordUserID),
+		fmt.Sprintf("**Case #%d created** · <@%s>", created.CaseNumber, created.TargetDiscordUserID),
 	}
 
 	templateName := caseTemplateDisplayName(result.Template)
 	if templateName != "" {
-		lines = append(lines, "Template: "+templateName)
+		lines = append(lines, "**Template:** "+ui.TruncateRunes(templateName, 256))
 	}
 
 	if created.SelectedLevel != nil {
@@ -73,10 +69,10 @@ func FormatCaseCreated(result CaseCreated) string {
 		if levelName == "" {
 			levelName = fmt.Sprintf("Level %d", created.SelectedLevel.Position)
 		}
-		lines = append(lines, fmt.Sprintf("Level: %s", levelName))
+		lines = append(lines, fmt.Sprintf("**Level:** %s", ui.TruncateRunes(levelName, 256)))
 	}
 
-	lines = append(lines, "Action status: "+publicActionStatus(created.Actions))
+	lines = append(lines, "**Action:** "+publicActionStatus(created.Actions))
 	return strings.Join(lines, "\n")
 }
 
@@ -86,12 +82,12 @@ func publicActionStatus(actions []quack.CaseActionResponse) string {
 	}
 	parts := make([]string, 0, len(actions))
 	for _, action := range actions {
-		parts = append(parts, fmt.Sprintf("%s: %s", action.ActionType, action.Status))
+		parts = append(parts, fmt.Sprintf("%s · %s", action.ActionType.Label(), action.Status.Label()))
 	}
 	return strings.Join(parts, ", ")
 }
 
-// caseTemplateDisplayName encapsulates the case template display name rule so callers share one consistent package implementation.
+// caseTemplateDisplayName prefers the admin-provided rule name, falling back to its slug.
 func caseTemplateDisplayName(template *quack.TemplateResponse) string {
 	if template == nil {
 		return ""
@@ -99,8 +95,6 @@ func caseTemplateDisplayName(template *quack.TemplateResponse) string {
 	name := strings.TrimSpace(template.Name)
 	slug := strings.TrimSpace(template.Slug)
 	switch {
-	case name != "" && slug != "" && !strings.EqualFold(name, slug):
-		return fmt.Sprintf("%s (`%s`)", name, slug)
 	case name != "":
 		return name
 	default:

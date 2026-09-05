@@ -160,6 +160,7 @@ func TestRevokedDiscordGrantReturnsSafeReauthentication(t *testing.T) {
 
 	router := authTestRouter(services)
 	request := httptest.NewRequest(http.MethodGet, "/auth/discord/callback?code=code-secret&state=state-id", nil)
+	request.AddCookie(&http.Cookie{Name: oauthStateCookieName(services.Config), Value: "state-id"})
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
@@ -210,6 +211,7 @@ func TestOAuthJSONCallbackReturnsOnlySafeUserContract(t *testing.T) {
 
 	router := authTestRouter(services)
 	request := httptest.NewRequest(http.MethodGet, "/auth/discord/callback?code=code-secret&state=state-id", nil)
+	request.AddCookie(&http.Cookie{Name: oauthStateCookieName(services.Config), Value: "state-id"})
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -230,7 +232,7 @@ func TestOAuthJSONCallbackReturnsOnlySafeUserContract(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || body.CSRFToken == "" || body.User.ID != "user-1" || body.ExpiresAt.IsZero() {
 		t.Fatalf("unexpected safe callback contract: %+v err=%v", body, err)
 	}
-	if len(response.Result().Cookies()) != 2 {
+	if len(response.Result().Cookies()) != 3 {
 		t.Fatalf("expected session and CSRF cookies, headers=%v", response.Header())
 	}
 }
@@ -242,4 +244,72 @@ func authTestRouter(services *quack.Services) *gin.Engine {
 	router.Use(middleware.RequestContext, middleware.ErrorEnvelope)
 	SetupRoutes(router, services)
 	return router
+}
+
+func TestOAuthCallbackRequiresInitiatingBrowser(t *testing.T) {
+	for _, binding := range []string{"", "different-browser"} {
+		t.Run(binding, func(t *testing.T) {
+			store := testutil.NewSQLiteRedisStore(t)
+			services := quack.New(store)
+			services.Config.Discord.AppID = "app"
+			services.Config.Discord.ClientSecret = "secret"
+			services.Config.Discord.OAuthRedirectURI = "https://api.example/auth/discord/callback"
+			if err := store.SaveOAuthState(context.Background(), "state-id", &model.OAuthState{}, time.Minute); err != nil {
+				t.Fatal(err)
+			}
+			request := httptest.NewRequest(http.MethodGet, "/auth/discord/callback?code=code&state=state-id", nil)
+			if binding != "" {
+				request.AddCookie(&http.Cookie{Name: oauthStateCookieName(services.Config), Value: binding})
+			}
+			response := httptest.NewRecorder()
+			authTestRouter(services).ServeHTTP(response, request)
+			if response.Code != http.StatusUnauthorized {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			state, err := store.ConsumeOAuthState(context.Background(), "state-id")
+			if err != nil || state == nil {
+				t.Fatalf("wrong browser consumed state: %v", err)
+			}
+		})
+	}
+}
+
+func TestRedirectTargetRejectsExternalAndBrowserNormalizedURLs(t *testing.T) {
+	fallback := "https://dashboard.example/cases"
+	for _, target := range []string{"//evil.example", `/\evil.example`, `/%5cevil.example`, "/%2fevil.example", "https://evil.example", "http://dashboard.example", "ftp://dashboard.example", "https://user@dashboard.example"} {
+		if got := sanitizeRedirectTarget(target, fallback); got != fallback {
+			t.Errorf("accepted %q as %q", target, got)
+		}
+	}
+	for _, target := range []string{"/cases?sort=new", "https://dashboard.example/settings"} {
+		if got := sanitizeRedirectTarget(target, fallback); got != target {
+			t.Errorf("rejected safe target %q", target)
+		}
+	}
+	if got := sanitizeRedirectTarget("", "//evil.example"); got != "/" {
+		t.Fatalf("unsafe fallback: %s", got)
+	}
+}
+
+func TestOAuthLoginSetsHostBoundStateCookie(t *testing.T) {
+	services := quack.New(testutil.NewSQLiteRedisStore(t))
+	services.Config.Discord.AppID = "app"
+	services.Config.Discord.ClientSecret = "secret"
+	services.Config.Discord.OAuthRedirectURI = "https://api.example/auth/discord/callback"
+	services.Config.Auth.CookieSecure = true
+	response := httptest.NewRecorder()
+	authTestRouter(services).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/auth/discord/login?mode=json", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != "__Host-quack_oauth_state" || cookies[0].Value != body.State || !cookies[0].HttpOnly || !cookies[0].Secure || cookies[0].Domain != "" || cookies[0].Path != "/" || cookies[0].SameSite != http.SameSiteLaxMode {
+		t.Fatal("OAuth browser binding cookie is missing or insecure")
+	}
 }

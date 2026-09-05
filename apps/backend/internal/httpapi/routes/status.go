@@ -40,10 +40,12 @@ type dbStatus struct {
 // @Success 200 {object} map[string]interface{}
 // @Router /status [get]
 func status(c *gin.Context, services *quack.Services, discord DiscordStatusProvider) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+	defer cancel()
 	c.JSON(http.StatusOK, gin.H{
 		"discord":  getDiscordStatus(discord),
-		"redis":    getRedisStatus(services),
-		"database": getDBStatus(services),
+		"redis":    getRedisStatus(ctx, services),
+		"database": getDBStatus(ctx, services),
 	})
 }
 
@@ -57,13 +59,13 @@ func getDiscordStatus(provider DiscordStatusProvider) discordStatus {
 }
 
 // getRedisStatus retrieves redis status without exposing the underlying adapter implementation.
-func getRedisStatus(services *quack.Services) redisStatus {
+func getRedisStatus(ctx context.Context, services *quack.Services) redisStatus {
 	if services == nil || services.Store == nil {
 		return redisStatus{Connected: false}
 	}
 
 	start := time.Now()
-	err := services.Store.PingRedis(context.Background())
+	err := services.Store.PingRedis(ctx)
 	if err != nil {
 		return redisStatus{
 			Connected: false,
@@ -77,13 +79,13 @@ func getRedisStatus(services *quack.Services) redisStatus {
 }
 
 // getDBStatus retrieves dbstatus without exposing the underlying adapter implementation.
-func getDBStatus(services *quack.Services) dbStatus {
+func getDBStatus(ctx context.Context, services *quack.Services) dbStatus {
 	if services == nil || services.Store == nil {
 		return dbStatus{Connected: false}
 	}
 
 	start := time.Now()
-	err := services.Store.PingDatabase(context.Background())
+	err := services.Store.PingDatabase(ctx)
 	if err != nil {
 		return dbStatus{
 			Connected: false,

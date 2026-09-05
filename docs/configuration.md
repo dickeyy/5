@@ -14,7 +14,13 @@ DB or Redis pings. See `apps/backend/internal/config/config.go`, `apps/backend/i
 
 ## Environment Variables
 
-Configured in `apps/backend/internal/config/config.go`.
+Environment bindings are declared on the structs in `apps/backend/internal/config/types.go`
+and decoded by `github.com/caarlos0/env/v11`. Defaults live in `config.Default()`.
+Empty numeric and boolean values retain their defaults; malformed non-empty values
+fail startup. Validation checks the loaded configuration without rereading the environment.
+
+In development, `.env` fills missing process variables without changing the process
+environment. Explicit process values take precedence.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |

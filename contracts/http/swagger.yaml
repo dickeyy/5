@@ -151,83 +151,20 @@ definitions:
     - AuditResultDenied
   model.AuditSource:
     enum:
-    - import
-    - honeypot
     - api
     - web
     - discord
     - system
+    - import
+    - honeypot
     type: string
     x-enum-varnames:
-    - AuditSourceImport
-    - AuditSourceHoneypot
     - AuditSourceAPI
     - AuditSourceWeb
     - AuditSourceDiscord
     - AuditSourceSystem
-  model.CaseActionExecution:
-    properties:
-      actionType:
-        $ref: '#/definitions/model.ActionType'
-      attemptCount:
-        format: int32
-        type: integer
-      caseID:
-        type: string
-      configSnapshotJSON:
-        type: string
-      correlationID:
-        type: string
-      createdAt:
-        type: string
-      dismissedAt:
-        type: string
-      dismissedByDiscordUserID:
-        type: string
-      finishedAt:
-        type: string
-      id:
-        type: string
-      idempotencyKey:
-        type: string
-      irreversible:
-        type: boolean
-      lastError:
-        type: string
-      lastErrorCode:
-        type: string
-      leaseExpiresAt:
-        type: string
-      leaseToken:
-        type: string
-      maxRetries:
-        format: int32
-        type: integer
-      nextRetryAt:
-        type: string
-      notificationType:
-        type: string
-      notifyUser:
-        type: boolean
-      position:
-        type: integer
-      retryBackoffMS:
-        type: integer
-      reversalAppealID:
-        type: string
-      reversalOfExecutionID:
-        type: string
-      safeForRetry:
-        type: boolean
-      startedAt:
-        type: string
-      status:
-        $ref: '#/definitions/model.ActionExecutionStatus'
-      templateActionID:
-        type: string
-      updatedAt:
-        type: string
-    type: object
+    - AuditSourceImport
+    - AuditSourceHoneypot
   model.CaseSource:
     enum:
     - dashboard
@@ -262,16 +199,6 @@ definitions:
     - ContextFieldBoolean
     - ContextFieldNumber
     - ContextFieldMessageLink
-  model.FailedCaseActionResult:
-    properties:
-      executions:
-        items:
-          $ref: '#/definitions/model.CaseActionExecution'
-        type: array
-      total:
-        format: int64
-        type: integer
-    type: object
   model.StaffStatistics:
     properties:
       action_total:
@@ -938,6 +865,45 @@ definitions:
       template_id:
         type: string
     type: object
+  routes.failedActionEnvelope:
+    properties:
+      action:
+        $ref: '#/definitions/routes.failedActionResponse'
+    type: object
+  routes.failedActionListResponse:
+    properties:
+      executions:
+        items:
+          $ref: '#/definitions/routes.failedActionResponse'
+        type: array
+      total:
+        type: integer
+    type: object
+  routes.failedActionResponse:
+    properties:
+      action_type:
+        $ref: '#/definitions/model.ActionType'
+      attempt_count:
+        type: integer
+      case_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      last_error:
+        type: string
+      last_error_code:
+        type: string
+      max_retries:
+        type: integer
+      safe_for_retry:
+        type: boolean
+      status:
+        $ref: '#/definitions/model.ActionExecutionStatus'
+      updated_at:
+        type: string
+    type: object
   routes.readinessCheck:
     properties:
       detail:
@@ -1154,7 +1120,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/model.FailedCaseActionResult'
+            $ref: '#/definitions/routes.failedActionListResponse'
         "400":
           description: Bad Request
           schema:
@@ -1183,14 +1149,18 @@ paths:
         name: executionID
         required: true
         type: string
+      - description: Retry-safe request key
+        in: header
+        name: Idempotency-Key
+        required: true
+        type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/routes.failedActionEnvelope'
         "403":
           description: Forbidden
           schema:
@@ -1219,14 +1189,18 @@ paths:
         name: executionID
         required: true
         type: string
+      - description: Retry-safe request key
+        in: header
+        name: Idempotency-Key
+        required: true
+        type: string
       produces:
       - application/json
       responses:
         "202":
           description: Accepted
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/routes.failedActionEnvelope'
         "403":
           description: Forbidden
           schema:
@@ -1822,6 +1796,7 @@ paths:
       - description: Retry-safe request key
         in: header
         name: Idempotency-Key
+        required: true
         type: string
       - description: Case definition
         in: body
@@ -1908,6 +1883,11 @@ paths:
         name: caseRef
         required: true
         type: string
+      - description: Retry-safe request key
+        in: header
+        name: Idempotency-Key
+        required: true
+        type: string
       - description: Confirmed reversal
         in: body
         name: request
@@ -1955,6 +1935,11 @@ paths:
       - description: Case ID or number
         in: path
         name: caseRef
+        required: true
+        type: string
+      - description: Retry-safe request key
+        in: header
+        name: Idempotency-Key
         required: true
         type: string
       - description: Void reason and replacement
@@ -2103,6 +2088,11 @@ paths:
         name: discordGuildID
         required: true
         type: string
+      - description: Retry-safe request key
+        in: header
+        name: Idempotency-Key
+        required: true
+        type: string
       - description: Partial guild settings
         in: body
         name: settings
@@ -2143,6 +2133,11 @@ paths:
       - description: Discord guild ID
         in: path
         name: discordGuildID
+        required: true
+        type: string
+      - description: Retry-safe request key
+        in: header
+        name: Idempotency-Key
         required: true
         type: string
       produces:
@@ -2246,6 +2241,11 @@ paths:
         name: discordGuildID
         required: true
         type: string
+      - description: Retry-safe request key
+        in: header
+        name: Idempotency-Key
+        required: true
+        type: string
       - description: Template definition
         in: body
         name: template
@@ -2286,6 +2286,11 @@ paths:
       - description: Template ID
         in: path
         name: templateID
+        required: true
+        type: string
+      - description: Retry-safe request key
+        in: header
+        name: Idempotency-Key
         required: true
         type: string
       produces:
@@ -2358,6 +2363,11 @@ paths:
       - description: Template ID
         in: path
         name: templateID
+        required: true
+        type: string
+      - description: Retry-safe request key
+        in: header
+        name: Idempotency-Key
         required: true
         type: string
       - description: Template definition
@@ -2448,6 +2458,11 @@ paths:
         name: templateID
         required: true
         type: string
+      - description: Retry-safe request key
+        in: header
+        name: Idempotency-Key
+        required: true
+        type: string
       produces:
       - application/json
       responses:
@@ -2479,6 +2494,11 @@ paths:
       - description: Discord guild ID
         in: path
         name: discordGuildID
+        required: true
+        type: string
+      - description: Retry-safe request key
+        in: header
+        name: Idempotency-Key
         required: true
         type: string
       - description: Confirmed policy import

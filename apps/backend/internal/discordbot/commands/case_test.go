@@ -102,22 +102,12 @@ func TestHandleCaseInteractionCreatesCase(t *testing.T) {
 	if err := result.Task(ctx, responder); err != nil {
 		t.Fatalf("run deferred task: %v", err)
 	}
-	if !responder.deleted || len(responder.followup.Embeds) != 1 || responder.followup.Ephemeral {
-		t.Fatalf("expected public followup and deleted private acknowledgement, got followup=%+v deleted=%v", responder.followup, responder.deleted)
+	if !responder.deleted || len(responder.followup.Embeds) != 0 || responder.followup.Ephemeral || responder.editCount != 1 {
+		t.Fatalf("expected permanent text after completing private acknowledgement: %+v", responder)
 	}
-	embed := responder.followup.Embeds[0]
-	if embed.Title != "Case #1 Created" {
-		t.Fatalf("unexpected embed title: %q", embed.Title)
-	}
-	fields := embedFields(embed)
-	for name, want := range map[string]string{
-		"Target":        "<@target-1>",
-		"Template":      "Spam",
-		"Level":         "Default",
-		"Action Status": "No Discord action configured",
-	} {
-		if !strings.Contains(fields[name], want) {
-			t.Fatalf("expected embed field %q to contain %q, got %q", name, want, fields[name])
+	for _, want := range []string{"**Case #1 created**", "<@target-1>", "Spam", "Default", "No Discord action configured"} {
+		if !strings.Contains(responder.followup.Content, want) {
+			t.Fatalf("missing %q in %q", want, responder.followup.Content)
 		}
 	}
 
@@ -276,6 +266,9 @@ func (f *fakeResponder) EditOriginal(edit ui.Edit) (*discordgo.Message, error) {
 }
 
 func (f *fakeResponder) Followup(message ui.Message) (*discordgo.Message, error) {
+	if f.editCount == 0 {
+		message.Ephemeral = true
+	}
 	f.followup = message
 	return &discordgo.Message{ID: "followup-1"}, nil
 }

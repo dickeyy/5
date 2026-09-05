@@ -1,16 +1,16 @@
+import { TanStackDevtools } from "@tanstack/react-devtools";
+import type { QueryClient } from "@tanstack/react-query";
 import {
-    HeadContent,
-    Scripts,
     createRootRouteWithContext,
+    HeadContent,
+    Outlet,
+    Scripts,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
-import { TanStackDevtools } from "@tanstack/react-devtools";
-
+import { RootError } from "#/components/dashboard/root-error";
+import { AuthGate } from "#/features/auth/auth-gate";
 import TanStackQueryDevtools from "../integrations/tanstack-query/devtools";
-
 import appCss from "../styles.css?url";
-
-import type { QueryClient } from "@tanstack/react-query";
 
 interface MyRouterContext {
     queryClient: QueryClient;
@@ -27,7 +27,11 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
                 content: "width=device-width, initial-scale=1",
             },
             {
-                title: "TanStack Start Starter",
+                title: "Quack Dashboard",
+            },
+            {
+                name: "description",
+                content: "Manage Quack moderation for your Discord servers.",
             },
         ],
         links: [
@@ -37,8 +41,18 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
             },
         ],
     }),
+    component: AppRoot,
+    errorComponent: RootError,
     shellComponent: RootDocument,
 });
+
+function AppRoot() {
+    return (
+        <AuthGate>
+            <Outlet />
+        </AuthGate>
+    );
+}
 
 function RootDocument({ children }: { children: React.ReactNode }) {
     return (
@@ -46,7 +60,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
             <head>
                 <HeadContent />
             </head>
-            <body>
+            <body className="isolate">
                 {children}
                 <TanStackDevtools
                     config={{

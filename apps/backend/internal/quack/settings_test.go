@@ -22,23 +22,31 @@ func TestGuildSettingsServiceAuthorizationAuditAndNotice(t *testing.T) {
 	}
 	manager := templateGuildContext(t, repositories, "settings-guild", "manager-1", uint64(discordgo.PermissionManageGuild))
 	moderator := templateGuildContext(t, repositories, "settings-guild", "moderator-1", uint64(discordgo.PermissionModerateMembers))
-	service := quack.NewGuildSettingsService(repositories)
+	service := quack.NewGuildSettingsService(repositories).WithStaffChannelValidator(allowStaffChannel{})
 
-	auditChannel, evidenceChannel := "100000000000000001", "100000000000000002"
+	auditChannel := "100000000000000001"
 	intro, footer := "Welcome to this guild", "Review case details in Quack"
 	tickets, logging, honeypot := true, true, false
 	updated, err := service.Update(ctx, manager, quack.GuildSettingsInput{
-		AuditMirrorChannelDiscordID: &auditChannel, ManagedEvidenceChannelDiscordID: &evidenceChannel,
-		NotificationIntroduction: &intro, NotificationFooter: &footer,
+		AuditMirrorChannelDiscordID: &auditChannel,
+		NotificationIntroduction:    &intro, NotificationFooter: &footer,
 		TicketsEnabled: &tickets, GeneralLoggingEnabled: &logging, HoneypotEnabled: &honeypot,
 	})
 	if err != nil {
 		t.Fatalf("update guild settings: %v", err)
 	}
-	if updated.AuditMirrorChannelDiscordID != auditChannel || updated.ManagedEvidenceChannelDiscordID != evidenceChannel || !updated.TicketsEnabled || !updated.GeneralLoggingEnabled || updated.HoneypotEnabled {
+	if updated.AuditMirrorChannelDiscordID != auditChannel || updated.ManagedEvidenceChannelDiscordID != "" || !updated.TicketsEnabled || !updated.GeneralLoggingEnabled || updated.HoneypotEnabled {
 		t.Fatalf("unexpected settings response: %+v", updated)
 	}
 
+	evidenceChannel := "100000000000000002"
+	if _, err := service.Update(ctx, manager, quack.GuildSettingsInput{ManagedEvidenceChannelDiscordID: &evidenceChannel}); !errors.Is(err, quack.ErrGuildSettingsValidation) {
+		t.Fatalf("manual evidence destination accepted: %v", err)
+	}
+	unvalidated := quack.NewGuildSettingsService(repositories)
+	if _, err := unvalidated.Update(ctx, manager, quack.GuildSettingsInput{AuditMirrorChannelDiscordID: &auditChannel}); !errors.Is(err, quack.ErrGuildSettingsValidation) {
+		t.Fatalf("unvalidated audit destination accepted: %v", err)
+	}
 	deniedValue := "forbidden"
 	if _, err := service.Update(ctx, moderator, quack.GuildSettingsInput{NotificationFooter: &deniedValue}); !errors.Is(err, quack.ErrGuildSettingsPermissionDenied) {
 		t.Fatalf("expected denied moderator write, got %v", err)
@@ -84,3 +92,8 @@ func TestGuildSettingsServiceAuthorizationAuditAndNotice(t *testing.T) {
 		t.Fatalf("read did not expose acknowledged setup state: read=%+v err=%v", read, err)
 	}
 }
+
+// allowStaffChannel isolates settings persistence tests from the live Discord adapter.
+type allowStaffChannel struct{}
+
+func (allowStaffChannel) ValidateStaffChannel(context.Context, string, string) error { return nil }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -88,9 +89,9 @@ func ResultFromError(err error) Result {
 		return result
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return RetryableError("context_cancelled", err.Error())
+		return Result{ErrorCode: "context_cancelled", Error: "Discord request was interrupted", OutcomeUncertain: true}
 	}
-	return RetryableError("discord_error", err.Error())
+	return Result{ErrorCode: "discord_error", Error: "Discord request failed", OutcomeUncertain: true}
 }
 
 // PermanentError encapsulates the permanent error rule so callers share one consistent package implementation.
@@ -131,6 +132,10 @@ func ConfigInt(config map[string]any, key string) int {
 	}
 	switch typed := value.(type) {
 	case float64:
+		bound := math.Ldexp(1, strconv.IntSize-1)
+		if math.IsNaN(typed) || math.IsInf(typed, 0) || math.Trunc(typed) != typed || typed < -bound || typed >= bound {
+			return 0
+		}
 		return int(typed)
 	case int:
 		return typed

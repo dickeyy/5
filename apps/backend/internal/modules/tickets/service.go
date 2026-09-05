@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -325,6 +326,12 @@ func validateSettings(settings Settings, enabled bool) error {
 }
 
 func (s *Service) audit(ctx context.Context, actor Actor, action, resourceID, result string, operationErr error) {
+	level := slog.LevelInfo
+	if result != "success" {
+		level = slog.LevelWarn
+	}
+	slog.Log(ctx, level, "Module operation completed", "module", "tickets", "guild_id", actor.GuildID, "action", action, "result", result)
+
 	if s == nil || s.auditor == nil {
 		return
 	}
@@ -332,5 +339,7 @@ func (s *Service) audit(ctx context.Context, actor Actor, action, resourceID, re
 	if operationErr != nil {
 		reason = operationErr.Error()
 	}
-	_ = s.auditor.RecordModuleAudit(ctx, modules.AuditEvent{GuildID: actor.GuildID, ActorDiscordUserID: actor.DiscordUserID, Action: action, ResourceType: "ticket", ResourceID: resourceID, Result: result, FailureReason: reason, MetadataJSON: "{}"})
+	if auditErr := s.auditor.RecordModuleAudit(ctx, modules.AuditEvent{GuildID: actor.GuildID, ActorDiscordUserID: actor.DiscordUserID, Action: action, ResourceType: "ticket", ResourceID: resourceID, Result: result, FailureReason: reason, MetadataJSON: "{}"}); auditErr != nil {
+		slog.ErrorContext(ctx, "Module audit could not be recorded", "module", "tickets", "guild_id", actor.GuildID, "action", action)
+	}
 }

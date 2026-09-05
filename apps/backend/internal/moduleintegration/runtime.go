@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"log/slog"
+
 	"github.com/bwmarrin/discordgo"
 	discordadapter "github.com/quackdiscord/bot/internal/discordbot"
 	"github.com/quackdiscord/bot/internal/modules"
@@ -17,7 +19,6 @@ import (
 	"github.com/quackdiscord/bot/internal/quack"
 	"github.com/quackdiscord/bot/internal/quack/model"
 	"github.com/quackdiscord/bot/internal/store"
-	"github.com/rs/zerolog/log"
 	"gorm.io/gorm"
 )
 
@@ -44,22 +45,25 @@ type Runtime struct {
 	Appeals          *quack.AppealService
 	AppealDispatcher *quack.AppealNotificationDispatcher
 
-	db         *gorm.DB
-	registry   *modules.Registry
-	session    *discordgo.Session
-	resolver   guildResolver
-	repository quack.Repository
-	services   *quack.Services
-	cancel     context.CancelFunc
-	bulk       chan bulkDeleteEvent
-	bulkMu     sync.RWMutex
-	bulkWG     sync.WaitGroup
-	sweepWG    sync.WaitGroup
-	mirrorWG   sync.WaitGroup
-	appealWG   sync.WaitGroup
-	closed     bool
-	closeOnce  sync.Once
-	closeDone  chan struct{}
+	db                  *gorm.DB
+	registry            *modules.Registry
+	session             *discordgo.Session
+	resolver            guildResolver
+	repository          quack.Repository
+	services            *quack.Services
+	cancel              context.CancelFunc
+	bulk                chan bulkDeleteEvent
+	bulkMu              sync.RWMutex
+	bulkWG              sync.WaitGroup
+	sweepWG             sync.WaitGroup
+	mirrorWG            sync.WaitGroup
+	appealWG            sync.WaitGroup
+	ticketRepairMu      sync.Mutex
+	ticketRepairPending map[string]struct{}
+	ticketRepairRunning bool
+	closed              bool
+	closeOnce           sync.Once
+	closeDone           chan struct{}
 }
 
 // bulkDeleteEvent carries one bounded cache-aware bulk deletion job.
@@ -101,7 +105,7 @@ func New(ctx context.Context, repositories *store.Store, session *discordgo.Sess
 	honeypotService := honeypot.NewService(registry, honeypot.NewStore(repositories.DB()), auditor, honeypotChannels, honeypotTemplates, honeypotCaseApplier{cases: services.Cases})
 	honeypotDiscord := honeypot.NewDiscordAdapter(honeypotService)
 	appeals := quack.NewAppealService(repositories)
-	appealAdapter := &discordadapter.AppealNotificationAdapter{Session: session, Resolver: appealStaffChannelResolver{repository: repositories}}
+	appealAdapter := &discordadapter.AppealNotificationAdapter{Session: session, Resolver: appealStaffChannelResolver{repository: repositories, validator: &discordadapter.Bot{Session: session}}}
 	appealDispatcher := quack.NewAppealNotificationDispatcher(repositories, appealAdapter)
 	workerCtx, cancel := context.WithCancel(ctx)
 	var auditMirror *quack.AuditMirrorWorker
@@ -212,7 +216,7 @@ func (r *Runtime) runAppealNotifications(ctx context.Context) {
 	defer ticker.Stop()
 	for {
 		if err := r.AppealDispatcher.DispatchPending(ctx, appealDispatchBatch); err != nil && !errors.Is(err, context.Canceled) {
-			log.Error().Err(err).Msg("Failed to dispatch appeal notifications")
+			slog.Error("Failed to dispatch appeal notifications", "error", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -224,7 +228,12 @@ func (r *Runtime) runAppealNotifications(ctx context.Context) {
 
 // appealStaffChannelResolver reuses the configured staff-only audit channel as
 // the appeal queue notification destination.
-type appealStaffChannelResolver struct{ repository quack.Repository }
+type appealStaffChannelResolver struct {
+	repository quack.Repository
+	validator  interface {
+		ValidateStaffChannel(context.Context, string, string) error
+	}
+}
 
 // AppealStaffChannel resolves the current staff-only destination for a guild.
 func (r appealStaffChannelResolver) AppealStaffChannel(ctx context.Context, guildID string) (string, error) {
@@ -233,6 +242,16 @@ func (r appealStaffChannelResolver) AppealStaffChannel(ctx context.Context, guil
 	}
 	settings, err := r.repository.GetGuildSettings(ctx, guildID)
 	if err != nil || settings == nil {
+		return "", err
+	}
+	if r.validator == nil {
+		return "", errors.New("appeal staff channel validator is unavailable")
+	}
+	guild, err := r.repository.GetGuildByID(ctx, guildID)
+	if err != nil || guild == nil {
+		return "", errors.New("appeal guild is unavailable")
+	}
+	if err := r.validator.ValidateStaffChannel(ctx, guild.DiscordGuildID, settings.AuditMirrorChannelDiscordID); err != nil {
 		return "", err
 	}
 	return settings.AuditMirrorChannelDiscordID, nil
@@ -280,7 +299,7 @@ func (r *Runtime) runTranscriptSweep(ctx context.Context) {
 // unrelated moderation or logging workers.
 func (r *Runtime) purgeTranscripts(ctx context.Context) {
 	if _, err := r.Tickets.PurgeExpiredTranscripts(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		log.Error().Err(err).Msg("Failed to purge expired ticket transcripts")
+		slog.Error("Failed to purge expired ticket transcripts", "error", err)
 	}
 }
 

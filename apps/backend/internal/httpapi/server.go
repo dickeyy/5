@@ -2,7 +2,10 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -11,7 +14,6 @@ import (
 	"github.com/quackdiscord/bot/internal/httpapi/routes"
 	"github.com/quackdiscord/bot/internal/moduleintegration"
 	"github.com/quackdiscord/bot/internal/quack"
-	"github.com/rs/zerolog/log"
 )
 
 // Run serves the configured HTTP API until the context is canceled, then performs a bounded graceful shutdown.
@@ -34,28 +36,45 @@ func Run(ctx context.Context, cfg config.Config, services *quack.Services, modul
 		return fmt.Errorf("register HTTP routes: %w", err)
 	}
 
-	log.Info().Msg("Starting API on port " + cfg.API.Port)
 	server := newHTTPServer(cfg, r)
+	return serve(ctx, server, time.Duration(cfg.API.ShutdownTimeoutSeconds)*time.Second)
+}
+
+// serve owns the listener and joins shutdown before dependencies are closed.
+// A bind failure creates no shutdown goroutine; a drain timeout force-closes
+// connections so handlers cannot keep using storage after Run returns.
+func serve(ctx context.Context, server *http.Server, shutdownTimeout time.Duration) error {
+	listener, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		return fmt.Errorf("listen for HTTP: %w", err)
+	}
+	defer listener.Close()
+	slog.InfoContext(ctx, "HTTP API listening", "address", listener.Addr().String())
+	serveDone := make(chan struct{})
 	shutdownResult := make(chan error, 1)
 	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.API.ShutdownTimeoutSeconds)*time.Second)
+		select {
+		case <-serveDone:
+			shutdownResult <- nil
+			return
+		case <-ctx.Done():
+		}
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		err := server.Shutdown(shutdownCtx)
 		if err != nil {
-			log.Error().Err(err).Msg("Failed to gracefully shut down API")
+			slog.Error("Failed to gracefully shut down API", "error", err)
+			err = errors.Join(err, server.Close())
 		}
 		shutdownResult <- err
 	}()
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		return err
+	serveErr := server.Serve(listener)
+	close(serveDone)
+	shutdownErr := <-shutdownResult
+	if errors.Is(serveErr, http.ErrServerClosed) {
+		serveErr = nil
 	}
-	if ctx.Err() != nil {
-		if err := <-shutdownResult; err != nil {
-			return fmt.Errorf("shutdown HTTP server: %w", err)
-		}
-	}
-	return nil
+	return errors.Join(serveErr, shutdownErr)
 }
 
 // newHTTPServer constructs the bounded standard-library server used by Run.

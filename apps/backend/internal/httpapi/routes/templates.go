@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/quackdiscord/bot/internal/httpapi/apierror"
+
 	"github.com/gin-gonic/gin"
 	"github.com/quackdiscord/bot/internal/httpapi/middleware"
 	"github.com/quackdiscord/bot/internal/quack"
@@ -32,7 +34,7 @@ func listTemplates(c *gin.Context, services *quack.Services) {
 	guildContext := middleware.GetGuildContext(c)
 	templates, err := services.Templates.List(c.Request.Context(), guildContext)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list templates"})
+		apierror.Write(c, http.StatusInternalServerError, apierror.CodeInternal, "failed to list templates")
 		return
 	}
 
@@ -45,6 +47,7 @@ func listTemplates(c *gin.Context, services *quack.Services) {
 // @Accept json
 // @Produce json
 // @Param discordGuildID path string true "Discord guild ID"
+// @Param Idempotency-Key header string true "Retry-safe request key"
 // @Param template body quack.TemplateInput true "Template definition"
 // @Security CookieAuth
 // @Success 201 {object} map[string]interface{}
@@ -54,7 +57,7 @@ func listTemplates(c *gin.Context, services *quack.Services) {
 func createTemplate(c *gin.Context, services *quack.Services) {
 	var input quack.TemplateInput
 	if err := bindTemplateInput(c, &input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid template payload"})
+		apierror.Write(c, http.StatusBadRequest, apierror.CodeValidation, "invalid template payload")
 		return
 	}
 
@@ -95,6 +98,7 @@ func getTemplate(c *gin.Context, services *quack.Services) {
 // @Produce json
 // @Param discordGuildID path string true "Discord guild ID"
 // @Param templateID path string true "Template ID"
+// @Param Idempotency-Key header string true "Retry-safe request key"
 // @Param template body quack.TemplateInput true "Template definition"
 // @Security CookieAuth
 // @Success 200 {object} map[string]interface{}
@@ -106,7 +110,7 @@ func getTemplate(c *gin.Context, services *quack.Services) {
 func updateTemplate(c *gin.Context, services *quack.Services, changes templateChangeHandler) {
 	var input quack.TemplateInput
 	if err := bindTemplateInput(c, &input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid template payload"})
+		apierror.Write(c, http.StatusBadRequest, apierror.CodeValidation, "invalid template payload")
 		return
 	}
 
@@ -147,6 +151,7 @@ func bindTemplateInput(c *gin.Context, input *quack.TemplateInput) error {
 // @Produce json
 // @Param discordGuildID path string true "Discord guild ID"
 // @Param templateID path string true "Template ID"
+// @Param Idempotency-Key header string true "Retry-safe request key"
 // @Security CookieAuth
 // @Success 200 {object} map[string]interface{}
 // @Failure 403 {object} map[string]interface{}
@@ -174,6 +179,7 @@ func archiveTemplate(c *gin.Context, services *quack.Services, changes templateC
 // @Produce json
 // @Param discordGuildID path string true "Discord guild ID"
 // @Param templateID path string true "Template ID"
+// @Param Idempotency-Key header string true "Retry-safe request key"
 // @Security CookieAuth
 // @Success 200 {object} map[string]interface{}
 // @Failure 403 {object} map[string]interface{}
@@ -214,6 +220,7 @@ func exportTemplate(c *gin.Context, services *quack.Services) {
 // @Accept json
 // @Produce json
 // @Param discordGuildID path string true "Discord guild ID"
+// @Param Idempotency-Key header string true "Retry-safe request key"
 // @Param template body quack.TemplateImportInput true "Confirmed policy import"
 // @Security CookieAuth
 // @Success 201 {object} map[string]interface{}
@@ -223,7 +230,7 @@ func exportTemplate(c *gin.Context, services *quack.Services) {
 func importTemplate(c *gin.Context, services *quack.Services) {
 	var input quack.TemplateImportInput
 	if err := decodeStrictJSON(c, &input); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid import payload"})
+		apierror.Write(c, http.StatusBadRequest, apierror.CodeValidation, "invalid import payload")
 		return
 	}
 	template, err := services.Templates.Import(c.Request.Context(), middleware.GetGuildContext(c), input)
@@ -237,10 +244,12 @@ func importTemplate(c *gin.Context, services *quack.Services) {
 // writeTemplateError maps template error into the preserved HTTP error response contract.
 func writeTemplateError(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, quack.ErrTemplatePermissionDenied):
+		apierror.Write(c, http.StatusForbidden, apierror.CodeAuthorization, "template access denied")
 	case errors.Is(err, quack.ErrTemplateValidation):
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		apierror.Write(c, http.StatusBadRequest, apierror.CodeValidation, err.Error())
 	case errors.Is(err, quack.ErrTemplateNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		apierror.Write(c, http.StatusNotFound, apierror.CodeNotFound, err.Error())
 	case errors.Is(err, quack.ErrTemplateCompatibilityReviewRequired):
 		var compatibilityError *quack.TemplateCompatibilityReviewError
 		if errors.As(err, &compatibilityError) {
@@ -251,8 +260,8 @@ func writeTemplateError(c *gin.Context, err error) {
 			})
 			return
 		}
-		c.JSON(http.StatusConflict, gin.H{"error": quack.ErrTemplateCompatibilityReviewRequired.Error()})
+		apierror.Write(c, http.StatusConflict, apierror.CodeConflict, quack.ErrTemplateCompatibilityReviewRequired.Error())
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "template operation failed"})
+		apierror.Write(c, http.StatusInternalServerError, apierror.CodeInternal, "template operation failed")
 	}
 }

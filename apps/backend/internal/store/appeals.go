@@ -8,47 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/quackdiscord/bot/internal/quack/idutil"
 	"github.com/quackdiscord/bot/internal/quack/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
-
-// appealV5Record is the logical 0200 live persistence shape layered over the preserved placeholder table.
-type appealV5Record struct {
-	ULIDModelRecord
-	GuildID                 string             `gorm:"type:char(26);not null;index:idx_appeal_guild_status,priority:1;index:idx_appeal_guild_user,priority:1"`
-	CaseID                  *string            `gorm:"type:char(26);uniqueIndex"`
-	TargetDiscordUserID     string             `gorm:"size:32;not null;index:idx_appeal_guild_user,priority:2"`
-	Status                  model.AppealStatus `gorm:"size:32;not null;default:'pending';index:idx_appeal_guild_status,priority:2"`
-	Content                 string             `gorm:"type:text;not null"`
-	QuestionSnapshotJSON    string             `gorm:"type:json;not null"`
-	AnswersJSON             string             `gorm:"type:json;not null"`
-	Version                 uint64             `gorm:"type:bigint unsigned;not null;default:1"`
-	DecisionReason          string             `gorm:"type:text"`
-	ReviewedByDiscordUserID string             `gorm:"size:32"`
-	ReviewedAt              *time.Time         `gorm:"index"`
-	ReviewMessageDiscordID  string             `gorm:"size:32"`
-	MetadataJSON            string             `gorm:"type:json;not null"`
-}
-
-// TableName preserves the appeal table while logical migration 0200 extends it.
-func (appealV5Record) TableName() string { return "appeals" }
-
-// appealEventV5Record is the logical 0200 immutable timeline shape.
-type appealEventV5Record struct {
-	ULIDModelRecord
-	AppealID           string `gorm:"type:char(26);not null;index"`
-	GuildID            string `gorm:"type:char(26);not null;index"`
-	EventType          string `gorm:"size:64;not null;index"`
-	ActorDiscordUserID string `gorm:"size:32;index"`
-	ActorType          string `gorm:"size:32;not null"`
-	Body               string `gorm:"type:text;not null"`
-	MetadataJSON       string `gorm:"type:json;not null"`
-}
-
-// TableName preserves the appeal event table while logical migration 0200 extends it.
-func (appealEventV5Record) TableName() string { return "appeal_events" }
 
 // GetGuildAppealSettings returns a guild's configured future appeal form, or nil to select the product default.
 func (s *Store) GetGuildAppealSettings(ctx context.Context, guildID string) (*model.GuildAppealSettings, error) {
@@ -396,73 +359,6 @@ func (s *Store) TransitionAppeal(ctx context.Context, params model.TransitionApp
 	return appealModel(updated), nil
 }
 
-// ClaimPendingAppealNotifications atomically leases bounded outbox work so concurrent dispatchers cannot deliver one event twice.
-func (s *Store) ClaimPendingAppealNotifications(ctx context.Context, limit int) ([]model.AppealNotification, error) {
-	if s == nil || s.db == nil {
-		return nil, errors.New("database not connected")
-	}
-	if limit < 1 || limit > 100 {
-		return nil, errors.New("appeal notification claim limit is invalid")
-	}
-	now := time.Now().UTC()
-	token, err := idutil.NewULID()
-	if err != nil {
-		return nil, fmt.Errorf("create appeal notification lease token: %w", err)
-	}
-	expiresAt := now.Add(2 * time.Minute)
-	var records []AppealNotificationRecord
-	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("status = ? OR (status = ? AND lease_expires_at <= ?)", model.AppealNotificationPending, model.AppealNotificationClaimed, now).
-			Order("created_at ASC").Limit(limit).Find(&records)
-		if result.Error != nil || len(records) == 0 {
-			return result.Error
-		}
-		ids := make([]string, 0, len(records))
-		for index := range records {
-			ids = append(ids, records[index].ID)
-			records[index].Status = model.AppealNotificationClaimed
-			records[index].LeaseToken = token
-			records[index].LeaseExpiresAt = &expiresAt
-			records[index].UpdatedAt = now
-		}
-		result = tx.Model(&AppealNotificationRecord{}).Where("id IN ?", ids).Updates(map[string]any{"status": model.AppealNotificationClaimed, "lease_token": token, "lease_expires_at": expiresAt, "updated_at": now})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != int64(len(records)) {
-			return model.ErrAppealStateConflict
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	items := make([]model.AppealNotification, 0, len(records))
-	for _, record := range records {
-		items = append(items, appealNotificationModel(record))
-	}
-	return items, nil
-}
-
-// CompleteAppealNotification records delivery without changing the underlying appeal timeline.
-func (s *Store) CompleteAppealNotification(ctx context.Context, params model.CompleteAppealNotificationParams) error {
-	if s == nil || s.db == nil {
-		return errors.New("database not connected")
-	}
-	if params.Status != model.AppealNotificationSent && params.Status != model.AppealNotificationFailed {
-		return errors.New("appeal notification completion status is invalid")
-	}
-	result := s.db.WithContext(ctx).Model(&AppealNotificationRecord{}).Where("id = ? AND status = ? AND lease_token = ?", params.NotificationID, model.AppealNotificationClaimed, params.LeaseToken).Updates(map[string]any{"status": params.Status, "delivery_message_id": params.DeliveryMessageID, "last_error_code": params.ErrorCode, "lease_token": "", "lease_expires_at": nil, "updated_at": time.Now().UTC()})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected != 1 {
-		return model.ErrAppealStateConflict
-	}
-	return nil
-}
-
 func snapshotAppealable(body string) bool {
 	var snapshot struct {
 		Template struct {
@@ -484,36 +380,4 @@ func appealStatusIn(status model.AppealStatus, allowed []model.AppealStatus) boo
 func isDuplicateError(err error) bool {
 	text := strings.ToLower(err.Error())
 	return strings.Contains(text, "duplicate") || strings.Contains(text, "unique constraint")
-}
-
-func appealRecord(item model.Appeal) *appealV5Record {
-	return &appealV5Record{ULIDModelRecord: ULIDModelRecord{ID: item.ID, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}, GuildID: item.GuildID, CaseID: item.CaseID, TargetDiscordUserID: item.TargetDiscordUserID, Status: item.Status, Content: item.Content, QuestionSnapshotJSON: item.QuestionSnapshotJSON, AnswersJSON: item.AnswersJSON, Version: item.Version, DecisionReason: item.DecisionReason, ReviewedByDiscordUserID: item.ReviewedByDiscordUserID, ReviewedAt: item.ReviewedAt, ReviewMessageDiscordID: item.ReviewMessageDiscordID, MetadataJSON: item.MetadataJSON}
-}
-
-func appealModel(record appealV5Record) *model.Appeal {
-	return &model.Appeal{ULIDModel: model.ULIDModel{ID: record.ID, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt}, GuildID: record.GuildID, CaseID: record.CaseID, TargetDiscordUserID: record.TargetDiscordUserID, Status: record.Status, Content: record.Content, QuestionSnapshotJSON: record.QuestionSnapshotJSON, AnswersJSON: record.AnswersJSON, Version: record.Version, DecisionReason: record.DecisionReason, ReviewedByDiscordUserID: record.ReviewedByDiscordUserID, ReviewedAt: record.ReviewedAt, ReviewMessageDiscordID: record.ReviewMessageDiscordID, MetadataJSON: record.MetadataJSON}
-}
-
-func appealEventRecord(item model.AppealEvent) *appealEventV5Record {
-	return &appealEventV5Record{ULIDModelRecord: ULIDModelRecord{ID: item.ID, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}, AppealID: item.AppealID, GuildID: item.GuildID, EventType: item.EventType, ActorDiscordUserID: item.ActorDiscordUserID, ActorType: item.ActorType, Body: item.Body, MetadataJSON: item.MetadataJSON}
-}
-
-func appealEventModel(record appealEventV5Record) model.AppealEvent {
-	return model.AppealEvent{ULIDModel: model.ULIDModel{ID: record.ID, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt}, AppealID: record.AppealID, GuildID: record.GuildID, EventType: record.EventType, ActorDiscordUserID: record.ActorDiscordUserID, ActorType: record.ActorType, Body: record.Body, MetadataJSON: record.MetadataJSON}
-}
-
-func guildAppealSettingsRecord(item model.GuildAppealSettings) GuildAppealSettingsRecord {
-	return GuildAppealSettingsRecord{ULIDModelRecord: ULIDModelRecord{ID: item.ID, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}, GuildID: item.GuildID, QuestionsJSON: item.QuestionsJSON, UpdatedByDiscordUserID: item.UpdatedByDiscordUserID}
-}
-
-func guildAppealSettingsModel(record GuildAppealSettingsRecord) *model.GuildAppealSettings {
-	return &model.GuildAppealSettings{ULIDModel: model.ULIDModel{ID: record.ID, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt}, GuildID: record.GuildID, QuestionsJSON: record.QuestionsJSON, UpdatedByDiscordUserID: record.UpdatedByDiscordUserID}
-}
-
-func appealNotificationRecord(item model.AppealNotification) *AppealNotificationRecord {
-	return &AppealNotificationRecord{ULIDModelRecord: ULIDModelRecord{ID: item.ID, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}, AppealID: item.AppealID, EventID: item.EventID, GuildID: item.GuildID, TargetDiscordUserID: item.TargetDiscordUserID, Audience: item.Audience, Status: item.Status, Body: item.Body, DeliveryMessageID: item.DeliveryMessageID, LastErrorCode: item.LastErrorCode, LeaseToken: item.LeaseToken, LeaseExpiresAt: item.LeaseExpiresAt}
-}
-
-func appealNotificationModel(record AppealNotificationRecord) model.AppealNotification {
-	return model.AppealNotification{ULIDModel: model.ULIDModel{ID: record.ID, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt}, AppealID: record.AppealID, EventID: record.EventID, GuildID: record.GuildID, TargetDiscordUserID: record.TargetDiscordUserID, Audience: record.Audience, Status: record.Status, Body: record.Body, DeliveryMessageID: record.DeliveryMessageID, LastErrorCode: record.LastErrorCode, LeaseToken: record.LeaseToken, LeaseExpiresAt: record.LeaseExpiresAt}
 }

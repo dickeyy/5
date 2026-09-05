@@ -2,8 +2,11 @@ package platform
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -116,8 +119,15 @@ func (s *IdempotencyStore) Protect(class string, ttl time.Duration, subject Subj
 			apierror.Write(c, http.StatusBadRequest, apierror.CodeValidation, "a valid Idempotency-Key header is required")
 			return
 		}
-		scope := class + ":" + subject(c)
-		result, err := s.Begin(c.Request.Context(), scope, key, ttl)
+		scope := class + ":" + subject(c) + ":" + c.Request.Method + ":" + c.Request.URL.EscapedPath()
+		body, err := io.ReadAll(io.LimitReader(c.Request.Body, (4<<20)+1))
+		if err != nil || len(body) > 4<<20 {
+			apierror.Write(c, http.StatusBadRequest, apierror.CodeValidation, "request body is unavailable or too large")
+			return
+		}
+		c.Request.Body = io.NopCloser(bytes.NewReader(body))
+		digest := sha256.Sum256(append([]byte(c.Request.URL.RawQuery+"\x00"+c.ContentType()+"\x00"), body...))
+		result, err := s.Begin(c.Request.Context(), scope, key, ttl, hex.EncodeToString(digest[:]))
 		if err != nil {
 			if errors.Is(err, ErrUnavailable) {
 				apierror.Write(c, http.StatusServiceUnavailable, apierror.CodeDependency, "idempotency service unavailable")
@@ -127,6 +137,9 @@ func (s *IdempotencyStore) Protect(class string, ttl time.Duration, subject Subj
 			return
 		}
 		switch result.State {
+		case IdempotencyConflict:
+			apierror.Write(c, http.StatusConflict, apierror.CodeConflict, "Idempotency-Key was already used with a different request")
+			return
 		case IdempotencyInProgress:
 			c.Header("Retry-After", "1")
 			apierror.Write(c, http.StatusConflict, apierror.CodeConflict, "an identical request is still in progress")
@@ -134,6 +147,7 @@ func (s *IdempotencyStore) Protect(class string, ttl time.Duration, subject Subj
 		case IdempotencyComplete:
 			c.Abort()
 			c.Header("Idempotency-Replayed", "true")
+			c.Header("Content-Type", "application/json; charset=utf-8")
 			c.Status(result.StatusCode)
 			_, _ = c.Writer.Write(result.Body)
 			return
@@ -147,6 +161,7 @@ func (s *IdempotencyStore) Protect(class string, ttl time.Duration, subject Subj
 		original := c.Writer
 		captured := &captureWriter{ResponseWriter: original}
 		c.Writer = captured
+		defer func() { c.Writer = original }()
 		c.Next()
 		c.Writer = original
 		if err := s.Complete(c.Request.Context(), scope, key, result.LeaseToken, captured.Status(), captured.body.Bytes(), ttl); err != nil {
